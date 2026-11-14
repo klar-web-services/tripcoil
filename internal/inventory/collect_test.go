@@ -85,6 +85,18 @@ func TestCollectWithoutPackageTool(t *testing.T) {
 	}
 }
 
+func TestCollectKernelPackageToolFailure(t *testing.T) {
+	d := collectDeps(t)
+	d.Tool = failingInstalled{d.Tool.(fakeTool)}
+	inv, err := Collect(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Errors) != 1 || inv.Errors[0].Code != problem.PackageToolFailed || inv.Status() != "partial" {
+		t.Fatalf("errors %+v, status %s", inv.Errors, inv.Status())
+	}
+}
+
 func TestCollectCannotListProcesses(t *testing.T) {
 	d := collectDeps(t)
 	d.Proc = failingSource{}

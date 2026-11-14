@@ -46,7 +46,10 @@ func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 		}
 	}
 
-	kernel, kernelOrigin := kernelCollector{root: d.Root, release: d.Release, resolver: resolver, distro: distro}.collect(ctx)
+	// Without a resolver the kernel collector asks no package tool, so a failed Check is not
+	// recorded twice.
+	kernel, kernelOrigin, kernelProblems := kernelCollector{root: d.Root, release: d.Release, resolver: resolver, distro: distro}.collect(ctx)
+	problems = append(problems, kernelProblems...)
 	pc := &processCollector{src: d.Proc, root: d.Root, resolver: resolver, distro: distro, cacheDir: d.CacheDir}
 	procs, err := pc.collect(ctx)
 	if err != nil {

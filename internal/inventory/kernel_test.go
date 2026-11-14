@@ -2,12 +2,14 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/osrel"
 	"github.com/klar-web-services/tripcoil/internal/pkgtool"
+	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
 const debianProcVersion = "Linux version 6.1.0-28-amd64 (debian-kernel@lists.debian.org) (gcc-12 (Debian 12.2.0-14) 12.2.0, " +
@@ -292,9 +294,12 @@ func TestKernel(t *testing.T) {
 			if tc.tool != nil {
 				k.resolver = &pkgtool.Resolver{Tool: *tc.tool}
 			}
-			it, o := k.collect(context.Background())
+			it, o, problems := k.collect(context.Background())
 			if it.ID != KernelItemID || it.Kind != KindKernel || it.RunningVersion != tc.running || it.UpstreamVersion != tc.upstream {
 				t.Fatalf("item %+v", it)
+			}
+			if len(problems) != 0 {
+				t.Fatalf("problems %+v", problems)
 			}
 			if !slices.Equal(it.Modules, []string{"nf_tables", "wireguard"}) {
 				t.Fatalf("modules %v", it.Modules)
@@ -338,5 +343,95 @@ func TestDistroKernel(t *testing.T) {
 		if distroKernel(deb(name, "1"), false) {
 			t.Errorf("%s without the distribution's build marker must not count", name)
 		}
+	}
+}
+
+type failingInstalled struct{ fakeTool }
+
+func (failingInstalled) Installed(context.Context, string) ([]pkgtool.Package, error) {
+	return nil, errors.New("dpkg-query: error: cannot read status file")
+}
+
+type failingCompare struct{ fakeTool }
+
+func (failingCompare) Compare(context.Context, string, string) (int, error) {
+	return 0, errors.New("signal: killed")
+}
+
+func TestKernelPackageToolFailures(t *testing.T) {
+	debianRel := osrel.Release{ID: "debian", VersionID: "12"}
+	debianImage := deb("linux-image-6.1.0-28-amd64", "6.1.119-1")
+	debianRoot := func(t *testing.T) string {
+		return kernelRoot(t, "6.1.0-28-amd64", debianProcVersion, "", "usr/lib/modules/6.1.0-28-amd64")
+	}
+	rockyRel := osrel.Release{ID: "rocky", VersionID: "9.4", IDLike: []string{"rhel", "centos", "fedora"}}
+	rockyCore := func(v string) pkgtool.Package {
+		return pkgtool.Package{Name: "kernel-core", Version: v, Arch: "x86_64", Type: "rpm"}
+	}
+	rockyRoot := func(t *testing.T) string {
+		return kernelRoot(t, "5.14.0-427.13.1.el9_4.x86_64", "Linux version 5.14.0-427.13.1.el9_4.x86_64", "",
+			"usr/lib/modules/5.14.0-427.13.1.el9_4.x86_64")
+	}
+	rockyBuiltin := "/usr/lib/modules/5.14.0-427.13.1.el9_4.x86_64/modules.builtin"
+	cases := []struct {
+		name    string
+		release osrel.Release
+		root    func(t *testing.T) string
+		tool    pkgtool.Tool
+		origin  string // expected origin ID; "unresolved" checks the kind and reason
+		message string // part of the PACKAGE_TOOL_FAILED error's message
+	}{
+		{
+			name: "rocky ownership", release: rockyRel, root: rockyRoot,
+			tool:   fakeTool{typ: "rpm", ownersErr: errors.New("error: cannot open Packages database")},
+			origin: "unresolved", message: "kernel's package",
+		},
+		{
+			name: "debian ownership", release: debianRel, root: debianRoot,
+			tool:   fakeTool{typ: "deb", ownersErr: errors.New("dpkg-query: error: cannot read status file")},
+			origin: "unresolved", message: "kernel's package",
+		},
+		{
+			name: "cachyos ownership", release: osrel.Release{ID: "cachyos", IDLike: []string{"arch"}},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "7.3.3-1-cachyos", "Linux version 7.3.3-1-cachyos", "", "usr/lib/modules/7.3.3-1-cachyos")
+			},
+			tool:   fakeTool{typ: "alpm", ownersErr: errors.New("error: could not open database")},
+			origin: KernelUpstreamOriginID("7.3.3"), message: "kernel's package", // matched by upstream version anyway
+		},
+		{
+			name: "debian installed kernels", release: debianRel, root: debianRoot,
+			tool:   failingInstalled{fakeTool{typ: "deb", owners: map[string]pkgtool.Package{"/usr/lib/modules/6.1.0-28-amd64/modules.builtin": debianImage}}},
+			origin: PackageOriginID(Distro{ID: "debian", VersionID: "12"}, debianImage), message: "list the installed kernels",
+		},
+		{
+			name: "rocky version comparison", release: rockyRel, root: rockyRoot,
+			tool: failingCompare{fakeTool{typ: "rpm", owners: map[string]pkgtool.Package{rockyBuiltin: rockyCore("5.14.0-427.13.1.el9_4")},
+				installed: map[string][]pkgtool.Package{"kernel-core": {
+					rockyCore("5.14.0-427.13.1.el9_4"), rockyCore("5.14.0-503.11.1.el9_5"), rockyCore("5.14.0-503.14.1.el9_5"),
+				}}}},
+			origin: PackageOriginID(Distro{ID: "rocky", VersionID: "9.4"}, rockyCore("5.14.0-427.13.1.el9_4")), message: "compare kernel versions",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			k := kernelCollector{root: tc.root(t), release: tc.release, resolver: &pkgtool.Resolver{Tool: tc.tool},
+				distro: Distro{ID: tc.release.ID, VersionID: tc.release.VersionID, Family: string(tc.release.Family())}}
+			it, o, problems := k.collect(context.Background())
+			if len(problems) != 1 || problems[0].Code != problem.PackageToolFailed || problems[0].Kind != problem.Error ||
+				problems[0].Stage != "inventory" || !strings.Contains(problems[0].Message, tc.message) {
+				t.Fatalf("problems %+v, want one PACKAGE_TOOL_FAILED error about %q", problems, tc.message)
+			}
+			if it.RebootPending || len(it.RebootReasons) > 0 {
+				t.Fatalf("unexpected reboot reasons %v", it.RebootReasons)
+			}
+			if tc.origin == "unresolved" {
+				if o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "package ownership") {
+					t.Fatalf("origin %+v", o)
+				}
+			} else if o.ID != tc.origin {
+				t.Fatalf("origin %q, want %q", o.ID, tc.origin)
+			}
+		})
 	}
 }

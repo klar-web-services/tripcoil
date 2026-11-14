@@ -12,6 +12,7 @@ import (
 
 	"github.com/klar-web-services/tripcoil/internal/osrel"
 	"github.com/klar-web-services/tripcoil/internal/pkgtool"
+	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
 type kernelCollector struct {
@@ -47,39 +48,48 @@ var (
 	debKernelFlavor = regexp.MustCompile(`^(.+?)-(\d+\.\d+\.\d+[^-]*(?:-\d+(?:\.[^-]+)?)?)-(.+)$`)
 )
 
-func (k kernelCollector) collect(ctx context.Context) (Item, Origin) {
+func (k kernelCollector) collect(ctx context.Context) (Item, Origin, []problem.Problem) {
 	it := Item{ID: KernelItemID, Kind: KindKernel, Name: "kernel"}
 	rel := readTrimmed(k.root, "proc/sys/kernel/osrelease")
 	it.Release = rel
 	it.Modules = readModules(k.root)
 	family := k.release.Family()
 	modDir, modDirExists := modulesDir(k.root, rel)
-	pkg := k.kernelPackage(ctx, modDir, modDirExists)
+	var problems []problem.Problem
+	pkg, err := k.kernelPackage(ctx, modDir, modDirExists)
+	if err != nil {
+		problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
+			"the package tool failed, so the running kernel's package is unknown: %v", err))
+		// As without a package tool: a kernel matched through its package is unresolved.
+		k.resolver = nil
+	}
 	var distroBuild bool
 	it.RunningVersion, it.UpstreamVersion, distroBuild = runningVersions(family, rel,
 		readTrimmed(k.root, "proc/version"), readTrimmed(k.root, "proc/version_signature"), pkg)
-	it.RebootReasons = k.rebootReasons(ctx, family, modDir, modDirExists, pkg, it.RunningVersion)
+	var rebootProblems []problem.Problem
+	it.RebootReasons, rebootProblems = k.rebootReasons(ctx, family, modDir, modDirExists, pkg, it.RunningVersion)
+	problems = append(problems, rebootProblems...)
 	it.RebootPending = len(it.RebootReasons) > 0
 	o := k.origin(family, pkg, distroBuild, rel, it.UpstreamVersion)
 	it.Origins = []string{o.ID}
-	return it, o
+	return it, o, problems
 }
 
 // kernelPackage is the package that owns modules.builtin in the running release's modules
 // directory: one file, so one package even where several own parts of the directory.
-func (k kernelCollector) kernelPackage(ctx context.Context, modDir string, exists bool) *pkgtool.Package {
+func (k kernelCollector) kernelPackage(ctx context.Context, modDir string, exists bool) (*pkgtool.Package, error) {
 	if k.resolver == nil || !exists {
-		return nil
+		return nil, nil
 	}
 	builtin := modDir + "/modules.builtin"
 	owners, err := k.resolver.Owners(ctx, []string{builtin})
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if p, ok := owners[builtin]; ok {
-		return &p
+		return &p, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // runningVersions also reports whether the running kernel carries the build marker of Debian's
@@ -140,13 +150,18 @@ func kernelFlavor(rel string) string {
 	return ""
 }
 
-func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family, modDir string, modDirExists bool, pkg *pkgtool.Package, running string) []string {
+func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family, modDir string, modDirExists bool, pkg *pkgtool.Package, running string) ([]string, []problem.Problem) {
 	var reasons []string
 	if !modDirExists {
 		reasons = append(reasons, fmt.Sprintf("the running kernel's modules directory %s is gone, so a newer kernel was installed", modDir))
 	}
 	if pkg == nil || k.resolver == nil {
-		return reasons
+		return reasons, nil
+	}
+	var problems []problem.Problem
+	toolFailed := func(what string, err error) {
+		problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
+			"the package tool could not %s, so whether a newer installed kernel needs a reboot is unknown: %v", what, err))
 	}
 	tool := k.resolver.Tool
 	if (family == osrel.Debian || family == osrel.Ubuntu) && pkg.Version != running {
@@ -161,6 +176,7 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 		}
 		all, err := tool.Installed(ctx, m[1]+"-*")
 		if err != nil {
+			toolFailed("list the installed kernels", err)
 			break
 		}
 		for _, s := range all {
@@ -171,6 +187,7 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 	case "rpm":
 		all, err := tool.Installed(ctx, pkg.Name)
 		if err != nil {
+			toolFailed("list the installed kernels", err)
 			break
 		}
 		for _, s := range all {
@@ -179,12 +196,19 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 			}
 		}
 	}
+	var compareErr error
 	for _, s := range siblings {
-		if c, err := tool.Compare(ctx, s.Version, running); err == nil && c > 0 {
+		c, err := tool.Compare(ctx, s.Version, running)
+		if err != nil {
+			compareErr = err
+		} else if c > 0 {
 			reasons = append(reasons, fmt.Sprintf("a newer kernel package is installed: %s %s", s.Name, s.Version))
 		}
 	}
-	return reasons
+	if compareErr != nil {
+		toolFailed("compare kernel versions", compareErr)
+	}
+	return reasons, problems
 }
 
 func (k kernelCollector) origin(family osrel.Family, pkg *pkgtool.Package, distroBuild bool, rel, upstream string) Origin {
