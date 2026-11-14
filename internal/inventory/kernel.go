@@ -69,7 +69,8 @@ func (k kernelCollector) collect(ctx context.Context) (Item, Origin, []problem.P
 	var rebootProblems []problem.Problem
 	it.RebootReasons, rebootProblems = k.rebootReasons(ctx, family, modDir, modDirExists, pkg, it.RunningVersion)
 	problems = append(problems, rebootProblems...)
-	it.RebootPending = len(it.RebootReasons) > 0
+	pending := len(it.RebootReasons) > 0
+	it.RebootPending = &pending
 	o := k.origin(family, pkg, distroBuild, rel, it.UpstreamVersion)
 	it.Origins = []string{o.ID}
 	return it, o, problems

@@ -28,7 +28,7 @@ type Deps struct {
 // recorded in the Inventory's problems.
 func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 	family := d.Release.Family()
-	distro := Distro{ID: d.Release.ID, VersionID: d.Release.VersionID, IDLike: d.Release.IDLike, Family: string(family)}
+	distro := Distro{ID: d.Release.ID, VersionID: d.Release.VersionID, IDLike: append([]string{}, d.Release.IDLike...), Family: string(family)}
 	inv := &Inventory{SchemaVersion: "1", Host: Host{Hostname: d.Hostname, Distro: distro, Arch: d.Arch, Init: detectInit(d.Root)}}
 	var problems []problem.Problem
 

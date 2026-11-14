@@ -39,7 +39,7 @@ type Host struct {
 type Distro struct {
 	ID        string   `json:"id"`
 	VersionID string   `json:"versionId,omitempty"`
-	IDLike    []string `json:"idLike,omitempty"`
+	IDLike    []string `json:"idLike"` // never nil
 	Family    string   `json:"family"`
 }
 
@@ -60,7 +60,7 @@ type Item struct {
 	Release         string   `json:"release,omitempty"`
 	RunningVersion  string   `json:"runningVersion,omitempty"`
 	UpstreamVersion string   `json:"upstreamVersion,omitempty"`
-	RebootPending   bool     `json:"rebootPending,omitempty"`
+	RebootPending   *bool    `json:"rebootPending,omitempty"` // set on the kernel item only
 	RebootReasons   []string `json:"rebootReasons,omitempty"`
 	Modules         []string `json:"modules,omitempty"`
 

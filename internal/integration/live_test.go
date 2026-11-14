@@ -64,5 +64,5 @@ func TestLiveHost(t *testing.T) {
 	}
 	t.Logf("%s (%s): %d items, %d origins, %d process items with packages, %d unresolved origins, notices %+v",
 		rel.ID, inv.Host.Distro.Family, len(inv.Items), len(inv.Origins), packaged, unresolved, inv.Notices)
-	t.Logf("kernel %s running %s upstream %s reboot %v %v", kernel.Release, kernel.RunningVersion, kernel.UpstreamVersion, kernel.RebootPending, kernel.RebootReasons)
+	t.Logf("kernel %s running %s upstream %s reboot %v %v", kernel.Release, kernel.RunningVersion, kernel.UpstreamVersion, *kernel.RebootPending, kernel.RebootReasons)
 }

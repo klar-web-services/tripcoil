@@ -339,10 +339,10 @@ func TestKernel(t *testing.T) {
 				t.Fatalf("modules %v", it.Modules)
 			}
 			if tc.pendingContains == "" {
-				if it.RebootPending || len(it.RebootReasons) > 0 {
+				if *it.RebootPending || len(it.RebootReasons) > 0 {
 					t.Fatalf("unexpected reboot reasons %v", it.RebootReasons)
 				}
-			} else if !it.RebootPending || !strings.Contains(strings.Join(it.RebootReasons, "; "), tc.pendingContains) {
+			} else if !*it.RebootPending || !strings.Contains(strings.Join(it.RebootReasons, "; "), tc.pendingContains) {
 				t.Fatalf("reboot reasons %v, want one containing %q", it.RebootReasons, tc.pendingContains)
 			}
 			for _, other := range []string{"cloud", "lowlatency", "rpi-2712"} {
@@ -456,7 +456,7 @@ func TestKernelPackageToolFailures(t *testing.T) {
 				problems[0].Stage != "inventory" || !strings.Contains(problems[0].Message, tc.message) {
 				t.Fatalf("problems %+v, want one PACKAGE_TOOL_FAILED error about %q", problems, tc.message)
 			}
-			if it.RebootPending || len(it.RebootReasons) > 0 {
+			if *it.RebootPending || len(it.RebootReasons) > 0 {
 				t.Fatalf("unexpected reboot reasons %v", it.RebootReasons)
 			}
 			if tc.origin == "unresolved" {

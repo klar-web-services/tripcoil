@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -42,7 +43,7 @@ func TestCollect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inv.SchemaVersion != "1" || !reflect.DeepEqual(inv.Host, Host{Hostname: "web-1", Distro: Distro{ID: "debian", VersionID: "12", Family: "debian"}, Arch: "amd64", Init: "systemd"}) {
+	if inv.SchemaVersion != "1" || !reflect.DeepEqual(inv.Host, Host{Hostname: "web-1", Distro: Distro{ID: "debian", VersionID: "12", IDLike: []string{}, Family: "debian"}, Arch: "amd64", Init: "systemd"}) {
 		t.Fatalf("host %+v", inv.Host)
 	}
 	if len(inv.Items) != 2 || inv.Items[0].Kind != KindKernel || inv.Items[1].Name != "nginx" {
@@ -133,5 +134,41 @@ func TestCollectContainersOfARunningDockerd(t *testing.T) {
 	}
 	if it := inv.Items[len(inv.Items)-1]; it.Kind != KindContainer || it.Name != "shop-web-1" || len(inv.Errors) != 0 || len(inv.Notices) != 0 {
 		t.Fatalf("items %+v errors %+v notices %+v", inv.Items, inv.Errors, inv.Notices)
+	}
+}
+
+func TestCollectJSONLikeTheSpec(t *testing.T) {
+	inv, err := Collect(context.Background(), collectDeps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Host struct {
+			Distro map[string]json.RawMessage `json:"distro"`
+		} `json:"host"`
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(out.Host.Distro["idLike"]); got != "[]" {
+		t.Fatalf("idLike %q, want []", got)
+	}
+	for _, it := range out.Items {
+		got, ok := it["rebootPending"]
+		switch kind := string(it["kind"]); kind {
+		case `"kernel"`:
+			if string(got) != "false" {
+				t.Fatalf("kernel rebootPending %s (present: %v), want false", got, ok)
+			}
+		default:
+			if ok {
+				t.Fatalf("%s item has rebootPending %q", kind, got)
+			}
+		}
 	}
 }
