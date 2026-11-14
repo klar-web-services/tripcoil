@@ -107,6 +107,11 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	inv, err := d.collect(ctx, filepath.Join(d.stateDir, "cache"))
 	if ctx.Err() != nil {
 		rec.Interrupt(d.now(), "inventory")
+		if inv != nil {
+			if err := run.WriteJSON(filepath.Join(dir, "inventory.json"), inv, 0o640); err != nil {
+				fmt.Fprintf(stderr, "%s: cannot write inventory.json: %v\n", problem.RunFolderUnwritable, err)
+			}
+		}
 		if err := run.WriteJSON(filepath.Join(dir, "run.json"), rec, 0o640); err != nil {
 			fmt.Fprintf(stderr, "%s: %v\n", problem.RunFolderUnwritable, err)
 			return 2

@@ -51,6 +51,9 @@ func TestRunInterrupted(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(d.stateDir, "runs", "latest")); !os.IsNotExist(err) {
 		t.Fatal("latest must keep pointing at the last finished run")
 	}
+	if _, err := os.Stat(filepath.Join(d.stateDir, "runs", runID, "inventory.json")); err != nil {
+		t.Fatalf("what was collected must be written: %v", err)
+	}
 }
 
 func sampleInventory(errs ...problem.Problem) *inventory.Inventory {
