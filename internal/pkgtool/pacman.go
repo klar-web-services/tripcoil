@@ -8,7 +8,12 @@ import (
 	"strings"
 )
 
-var pacmanOwned = regexp.MustCompile(`^(/.+) is owned by (\S+) (\S+)$`)
+var (
+	pacmanOwned   = regexp.MustCompile(`^(/.+) is owned by (\S+) (\S+)$`)
+	pacmanUnowned = regexp.MustCompile(`^error: (No package owns /.*|failed to read file '/.*': No such file or directory)$`)
+	// Printed on every run where the sync databases were never downloaded.
+	pacmanNoSyncDB = regexp.MustCompile(`^warning: database file for '[^']+' does not exist \(use '[^']+' to download\)$`)
+)
 
 type pacman struct {
 	run Runner
@@ -35,6 +40,11 @@ func (p pacman) Owners(ctx context.Context, paths []string) (map[string]Package,
 		res, err := p.run(ctx, "pacman", append([]string{"-Qo"}, chunk...)...)
 		if err != nil {
 			return nil, fmt.Errorf("cannot run pacman: %w", err)
+		}
+		if res.ExitCode != 0 {
+			if ok, line := onlyUnowned(res.Stderr, pacmanUnowned, pacmanNoSyncDB); !ok {
+				return nil, fmt.Errorf("pacman -Qo failed (exit %d): %s", res.ExitCode, line)
+			}
 		}
 		for _, line := range lines(res.Stdout) {
 			if m := pacmanOwned.FindStringSubmatch(line); m != nil {

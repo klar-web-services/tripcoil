@@ -230,6 +230,61 @@ func TestPacman(t *testing.T) {
 	}
 }
 
+func TestToolFailures(t *testing.T) {
+	rpmdb := "error: rpmdb: BDB0113 Thread/process 2207/140061577549888 failed: BDB1507 Thread died in Berkeley DB library\n" +
+		"error: db5 error(-30973) from dbenv->failchk: BDB0087 DB_RUNRECOVERY: Fatal error, run database recovery\n"
+	for _, tc := range []struct {
+		name, typ, cmd string
+		res            Result
+		installed      string // when set, Installed(installed) is called instead of Owners
+	}{
+		{"dpkg -S killed", "deb", "dpkg-query -S /usr/sbin/sshd", Result{ExitCode: -1}, ""},
+		{"dpkg -W killed", "deb", "dpkg-query -W -f " + dpkgFormat + " linux-image-*", Result{ExitCode: -1}, "linux-image-*"},
+		{"rpm db error", "rpm", "rpm -qf --qf " + rpmFormat + " /usr/sbin/sshd", Result{Stderr: []byte(rpmdb), ExitCode: 1}, ""},
+		{"rpm db error and not owned", "rpm", "rpm -qf --qf " + rpmFormat + " /usr/sbin/sshd",
+			Result{Stdout: []byte("file /usr/sbin/sshd is not owned by any package\n"), Stderr: []byte(rpmdb), ExitCode: 1}, ""},
+		{"rpm -q db error", "rpm", "rpm -q --qf " + rpmFormat + " kernel-core", Result{Stderr: []byte(rpmdb), ExitCode: 1}, "kernel-core"},
+		{"apk db error", "apk", "apk info --who-owns /usr/sbin/sshd",
+			Result{Stderr: []byte("ERROR: Failed to open apk database: Permission denied\n"), ExitCode: 1}, ""},
+		{"apk killed", "apk", "apk info --who-owns /usr/sbin/sshd", Result{ExitCode: -1}, ""},
+		{"pacman unreadable files list", "alpm", "pacman -Qo /usr/sbin/sshd", Result{Stderr: []byte(
+			"error: could not open file /var/lib/pacman/local/openssh-9.9p2-1/files: No such file or directory\n" +
+				"error: No package owns /usr/sbin/sshd\n"), ExitCode: 1}, ""},
+		{"pacman killed", "alpm", "pacman -Qo /usr/sbin/sshd", Result{ExitCode: -1}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeRunner{t: t, resp: map[string]Result{tc.cmd: tc.res}}
+			tool := New(tc.typ, f.run)
+			var err error
+			if tc.installed != "" {
+				_, err = tool.Installed(ctx, tc.installed)
+			} else {
+				_, err = tool.Owners(ctx, []string{"/usr/sbin/sshd"})
+			}
+			if err == nil {
+				t.Fatal("a tool failure must be an error")
+			}
+		})
+	}
+}
+
+func TestMissingFileIsUnowned(t *testing.T) {
+	for _, tc := range []struct {
+		typ, path, cmd string
+		res            Result
+	}{
+		{"rpm", "/usr/lib64/libgone.so.1", "rpm -qf --qf " + rpmFormat + " /usr/lib64/libgone.so.1",
+			Result{Stderr: []byte("error: file /usr/lib64/libgone.so.1: No such file or directory\n"), ExitCode: 1}},
+		{"alpm", "/usr/lib/libgone.so.1", "pacman -Qo /usr/lib/libgone.so.1",
+			Result{Stderr: []byte("error: failed to read file '/usr/lib/libgone.so.1': No such file or directory\n"), ExitCode: 1}},
+	} {
+		f := &fakeRunner{t: t, resp: map[string]Result{tc.cmd: tc.res}}
+		if got, err := New(tc.typ, f.run).Owners(ctx, []string{tc.path}); err != nil || len(got) != 0 {
+			t.Errorf("%s: %+v %v", tc.typ, got, err)
+		}
+	}
+}
+
 func TestNew(t *testing.T) {
 	for _, pt := range []string{"deb", "rpm", "apk", "alpm"} {
 		if tool := New(pt, Exec); tool == nil || tool.Type() != pt {

@@ -10,6 +10,7 @@ import (
 var (
 	apkOwned       = regexp.MustCompile(`^(/.+) is owned by (\S+)$`)
 	apkNameVersion = regexp.MustCompile(`^(.+)-([^-]+-r\d+)$`)
+	apkUnowned     = regexp.MustCompile(`^ERROR: /.*: Could not find owner package$`)
 )
 
 type apk struct{ run Runner }
@@ -33,6 +34,11 @@ func (a apk) Owners(ctx context.Context, paths []string) (map[string]Package, er
 		res, err := a.run(ctx, "apk", append([]string{"info", "--who-owns"}, chunk...)...)
 		if err != nil {
 			return nil, fmt.Errorf("cannot run apk: %w", err)
+		}
+		if res.ExitCode != 0 {
+			if ok, line := onlyUnowned(res.Stderr, apkUnowned, nil); !ok {
+				return nil, fmt.Errorf("apk info --who-owns failed (exit %d): %s", res.ExitCode, line)
+			}
 		}
 		for _, line := range lines(res.Stdout) {
 			m := apkOwned.FindStringSubmatch(line)

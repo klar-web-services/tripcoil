@@ -80,6 +80,23 @@ func firstLine(b []byte) string {
 	return ""
 }
 
+// onlyUnowned reports whether a failed ownership query's stderr is explained by unowned paths: at
+// least one line matches unowned and every other line matches harmless (which may be nil).
+// Otherwise it also returns the first unexplained line.
+func onlyUnowned(stderr []byte, unowned, harmless *regexp.Regexp) (bool, string) {
+	explained := false
+	for _, l := range lines(stderr) {
+		switch {
+		case unowned.MatchString(l):
+			explained = true
+		case harmless != nil && harmless.MatchString(l):
+		default:
+			return false, l
+		}
+	}
+	return explained, ""
+}
+
 func chunks(paths []string, n int) [][]string {
 	var out [][]string
 	for len(paths) > n {

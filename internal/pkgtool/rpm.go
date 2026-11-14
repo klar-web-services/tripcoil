@@ -35,13 +35,29 @@ func (r rpm) Owners(ctx context.Context, paths []string) (map[string]Package, er
 			return nil, fmt.Errorf("cannot run rpm: %w", err)
 		}
 		if res.ExitCode != 0 {
-			continue // not owned, or the file is gone
+			if !rpmUnowned(p, res) {
+				return nil, fmt.Errorf("rpm -qf %s failed (exit %d): %s", p, res.ExitCode, firstLine(res.Stderr))
+			}
+			continue
 		}
 		if pkgs := parseRPM(res.Stdout); len(pkgs) > 0 {
 			out[p] = pkgs[0]
 		}
 	}
 	return out, nil
+}
+
+// rpmUnowned reports whether a failed rpm -qf said only that p is not owned or does not exist.
+func rpmUnowned(p string, res Result) bool {
+	missing := false
+	for _, l := range lines(res.Stderr) {
+		if l != "error: file "+p+": No such file or directory" {
+			return false
+		}
+		missing = true
+	}
+	stdout := lines(res.Stdout)
+	return len(stdout) == 1 && stdout[0] == "file "+p+" is not owned by any package" || len(stdout) == 0 && missing
 }
 
 func parseRPM(b []byte) []Package {
@@ -66,7 +82,10 @@ func (r rpm) Installed(ctx context.Context, name string) ([]Package, error) {
 		return nil, fmt.Errorf("cannot run rpm: %w", err)
 	}
 	if res.ExitCode != 0 {
-		return nil, nil // not installed
+		if ls := lines(res.Stdout); len(ls) == 1 && ls[0] == "package "+name+" is not installed" && len(lines(res.Stderr)) == 0 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("rpm -q %s failed (exit %d): %s", name, res.ExitCode, firstLine(res.Stderr))
 	}
 	return parseRPM(res.Stdout), nil
 }

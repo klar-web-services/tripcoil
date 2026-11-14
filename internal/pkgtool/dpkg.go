@@ -31,7 +31,7 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 		if err != nil {
 			return nil, fmt.Errorf("cannot run dpkg-query: %w", err)
 		}
-		if res.ExitCode > 1 {
+		if res.ExitCode != 0 && res.ExitCode != 1 {
 			return nil, fmt.Errorf("dpkg-query -S failed (exit %d): %s", res.ExitCode, firstLine(res.Stderr))
 		}
 		want := make(map[string]bool, len(chunk))
@@ -102,7 +102,7 @@ func (d dpkg) list(ctx context.Context, patterns ...string) ([]dpkgEntry, error)
 	if err != nil {
 		return nil, fmt.Errorf("cannot run dpkg-query: %w", err)
 	}
-	if res.ExitCode > 1 {
+	if res.ExitCode != 0 && res.ExitCode != 1 {
 		return nil, fmt.Errorf("dpkg-query -W failed (exit %d): %s", res.ExitCode, firstLine(res.Stderr))
 	}
 	var out []dpkgEntry
