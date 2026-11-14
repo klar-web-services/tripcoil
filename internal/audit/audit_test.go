@@ -172,7 +172,7 @@ func TestAudit(t *testing.T) {
 		t.Fatalf("findings %v, want %v (packages that do not run, and the installed kernel, are left out)", ids, want)
 	}
 	if k := f["CVE-2026-2000"]; k.Origin != kernelO || k.Package.Version != "6.1.119-1" || k.Risk != RiskCritical ||
-		k.Remediation != "Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot." || !slices.Equal(k.Items, []string{"kernel"}) {
+		k.Remediation != "Upgrade the kernel to 6.1.123-1 or later (apt-get update && apt-get dist-upgrade), then reboot." || !slices.Equal(k.Items, []string{"kernel"}) {
 		t.Errorf("kernel finding %+v: it must be for the running version", k)
 	}
 	if s := f["CVE-2026-1234"]; s.Origin != libsslO || s.Risk != RiskHigh || !slices.Equal(s.Items, []string{"proc:nginx", "proc:api"}) ||

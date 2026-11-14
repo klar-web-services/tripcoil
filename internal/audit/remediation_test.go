@@ -47,17 +47,18 @@ func TestRemediation(t *testing.T) {
 		want string
 	}{
 		{"package, with its units, and a running older copy", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "fixed", "3.0.16-1~deb12u1"),
-			"Upgrade libssl3 to 3.0.16-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, php8.2-fpm.service, shop.service, api. The running copy is older than the installed package, so a restart may already clear it."},
+			"Upgrade libssl3 to 3.0.16-1~deb12u1 (apt-get update && apt-get install --only-upgrade libssl3), then restart nginx.service, php8.2-fpm.service, shop.service, api. Some of its processes still run an older copy from before the last upgrade; restart them either way."},
 		{"no fix known", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "not-fixed"), "No fix is known for libssl3 3.0.15-1~deb12u1 yet."},
 		{"fixed without a version is no fix", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "fixed"), "No fix is known for libssl3 3.0.15-1~deb12u1 yet."},
 		{"wont-fix", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "wont-fix"), "No fix will be released for libssl3 3.0.15-1~deb12u1 (wont-fix)."},
 		{"kernel package", f(kernelID, "linux-image-6.1.0-28-amd64", "6.1.119-1", "fixed", "6.1.123-1"),
-			"Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot."},
+			"Upgrade the kernel to 6.1.123-1 or later (apt-get update && apt-get dist-upgrade), then reboot."},
 		{"kernel without a fix", f(kernelID, "linux-image-6.1.0-28-amd64", "6.1.119-1", "not-fixed"), "No fixed kernel version is known yet."},
+		{"kernel, wont-fix", f(kernelID, "linux-image-6.1.0-28-amd64", "6.1.119-1", "wont-fix"), "No fix will be released for this kernel (wont-fix)."},
 		{"binary", f(apiID, "golang.org/x/net", "v0.1.0", "fixed", "v0.17.0"), "Replace or rebuild /opt/api/api with golang.org/x/net v0.17.0 or later, then restart api."},
 		{"app directory, several fix versions", f("appdir:/srv/shop", "minimist", "1.2.5", "fixed", "0.2.4", "1.2.6"), "Upgrade minimist in /srv/shop to 0.2.4 or 1.2.6, then restart shop.service."},
 		{"image, with and without Compose", f(imageID, "libssl3", "3.0.11-1~deb12u2", "fixed", "3.0.16-1~deb12u1"),
-			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the container cache, shop-web-1 (docker compose -p shop --project-directory /srv/shop up -d --force-recreate --no-deps web)."},
+			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the containers cache, shop-web-1 (docker compose -p shop --project-directory /srv/shop up -d --force-recreate --no-deps web)."},
 	}
 	for _, c := range cases {
 		if got := r.line(c.f); got != c.want {
@@ -72,7 +73,7 @@ func TestRemediation(t *testing.T) {
 func TestRemediationKernelUpstreamAndArch(t *testing.T) {
 	up := inventory.KernelUpstreamOriginID("7.3.3")
 	inv := &inventory.Inventory{
-		Items:   []inventory.Item{{ID: "kernel", Kind: inventory.KindKernel, RunningVersion: "7.3.3-1", Origins: []string{up}}, {ID: "proc:sshd", Kind: inventory.KindProcess, Name: "sshd", Units: []string{"sshd.service"}, Origins: []string{"pkg:alpm/cachyos/openssl@3.6.0-1?arch=x86_64&distro=cachyos"}}},
+		Items:   []inventory.Item{{ID: "kernel", Kind: inventory.KindKernel, Release: "7.3.3-1-cachyos", RunningVersion: "7.3.3-1", Origins: []string{up}}, {ID: "proc:sshd", Kind: inventory.KindProcess, Name: "sshd", Units: []string{"sshd.service"}, Origins: []string{"pkg:alpm/cachyos/openssl@3.6.0-1?arch=x86_64&distro=cachyos"}}},
 		Origins: []inventory.Origin{{ID: up, Kind: inventory.OriginKernelUpstream, UpstreamVersion: "7.3.3"}, {ID: "pkg:alpm/cachyos/openssl@3.6.0-1?arch=x86_64&distro=cachyos", Kind: inventory.OriginPackage, Name: "openssl"}},
 	}
 	r := newRemediation(osrel.Arch, inv)
@@ -82,8 +83,9 @@ func TestRemediationKernelUpstreamAndArch(t *testing.T) {
 	if got, want := r.line(Finding{Origin: "pkg:alpm/cachyos/openssl@3.6.0-1?arch=x86_64&distro=cachyos", Package: Package{Name: "openssl"}, Fix: Fix{State: "fixed", Versions: []string{"3.6.1-1"}}}), "Upgrade openssl to 3.6.1-1 (pacman -Syu), then restart sshd.service."; got != want {
 		t.Errorf("got %s\nwant %s", got, want)
 	}
-	// A custom kernel without a package is not upgraded with the package tool.
-	inv.Items[0].RunningVersion = ""
+	// A custom kernel without a package is not upgraded with the package tool. Its running version
+	// is the release itself.
+	inv.Items[0].RunningVersion = inv.Items[0].Release
 	r = newRemediation(osrel.Arch, inv)
 	if got, want := r.line(Finding{Origin: up, Fix: Fix{State: "fixed", Versions: []string{"7.3.5"}}}), "Upgrade the kernel to Linux 7.3.5 or later, then reboot."; got != want {
 		t.Errorf("got %s\nwant %s", got, want)
@@ -131,7 +133,53 @@ func TestRemediationNamesAtMostFive(t *testing.T) {
 		inv.Items = append(inv.Items, inventory.Item{ID: "proc:" + u, Kind: inventory.KindProcess, Name: u, Units: []string{u + ".service"}, Origins: []string{libsslID}})
 	}
 	got := newRemediation(osrel.Debian, inv).line(Finding{Origin: libsslID, Package: Package{Name: "libssl3"}, Fix: Fix{State: "fixed", Versions: []string{"2"}}})
-	if want := "Upgrade libssl3 to 2 (apt-get install --only-upgrade libssl3), then restart a.service, b.service, c.service, d.service, e.service and 2 more."; got != want {
+	if want := "Upgrade libssl3 to 2 (apt-get update && apt-get install --only-upgrade libssl3), then restart a.service, b.service, c.service, d.service, e.service and 2 more."; got != want {
+		t.Errorf("got %s\nwant %s", got, want)
+	}
+}
+
+func TestRemediationCommands(t *testing.T) {
+	cases := []struct {
+		family          osrel.Family
+		version         string
+		upgrade, system string
+	}{
+		{osrel.Debian, "12", "apt-get update && apt-get install --only-upgrade openssl", "apt-get update && apt-get dist-upgrade"},
+		{osrel.Ubuntu, "24.04", "apt-get update && apt-get install --only-upgrade openssl", "apt-get update && apt-get dist-upgrade"},
+		{osrel.RHEL, "9.5", "yum update openssl", "yum update"},
+		{osrel.Fedora, "41", "dnf upgrade openssl", "dnf upgrade"},
+		{osrel.Amazon, "2", "yum update openssl", "yum update"},
+		{osrel.Amazon, "2023", "dnf upgrade --releasever=latest openssl", "dnf upgrade --releasever=latest"},
+		{osrel.SUSE, "15.6", "zypper update openssl", "zypper update"},
+		{osrel.Alpine, "3.20.3", "apk upgrade -U openssl", "apk upgrade -U"},
+		{osrel.Arch, "", "pacman -Syu", "pacman -Syu"},
+	}
+	for _, c := range cases {
+		inv := &inventory.Inventory{
+			Host:    inventory.Host{Distro: inventory.Distro{VersionID: c.version}},
+			Items:   []inventory.Item{{ID: "kernel", Kind: inventory.KindKernel, Origins: []string{kernelID}}},
+			Origins: []inventory.Origin{{ID: libsslID, Kind: inventory.OriginPackage}, {ID: kernelID, Kind: inventory.OriginPackage}},
+		}
+		r := newRemediation(c.family, inv)
+		if got, want := r.line(Finding{Origin: libsslID, Package: Package{Name: "openssl"}, Fix: Fix{State: "fixed", Versions: []string{"2"}}}), "Upgrade openssl to 2 ("+c.upgrade+")."; got != want {
+			t.Errorf("%s %s:\n got %s\nwant %s", c.family, c.version, got, want)
+		}
+		if got, want := r.line(Finding{Origin: kernelID, Fix: Fix{State: "fixed", Versions: []string{"6.1.123-1"}}}), "Upgrade the kernel to 6.1.123-1 or later ("+c.system+"), then reboot."; got != want {
+			t.Errorf("%s %s:\n got %s\nwant %s", c.family, c.version, got, want)
+		}
+	}
+}
+
+func TestRemediationRestartsSystemd(t *testing.T) {
+	inv := &inventory.Inventory{
+		Items: []inventory.Item{
+			{ID: "proc:systemd", Kind: inventory.KindProcess, Name: "systemd", Processes: []inventory.Process{{PID: 1}, {PID: 1201}}, Origins: []string{libsslID}},
+			{ID: "proc:cron", Kind: inventory.KindProcess, Name: "cron", Processes: []inventory.Process{{PID: 610}}, Origins: []string{libsslID}},
+		},
+		Origins: []inventory.Origin{{ID: libsslID, Kind: inventory.OriginPackage}},
+	}
+	got := newRemediation(osrel.Fedora, inv).line(Finding{Origin: libsslID, Package: Package{Name: "systemd-libs"}, Fix: Fix{State: "fixed", Versions: []string{"256.11-1.fc41"}}})
+	if want := "Upgrade systemd-libs to 256.11-1.fc41 (dnf upgrade systemd-libs), then restart cron, systemd (systemctl daemon-reexec)."; got != want {
 		t.Errorf("got %s\nwant %s", got, want)
 	}
 }

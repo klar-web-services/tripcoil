@@ -17,13 +17,14 @@ const maxNamed = 5
 // invents versions or replacement packages: every version comes from the vulnerability data.
 type remediation struct {
 	family  osrel.Family
+	version string // the distribution's VERSION_ID
 	origins map[string]inventory.Origin
 	users   map[string][]inventory.Item // the items of each origin
 	kernel  map[string]bool             // the kernel item's origins
 }
 
 func newRemediation(family osrel.Family, inv *inventory.Inventory) remediation {
-	r := remediation{family: family, origins: map[string]inventory.Origin{}, users: map[string][]inventory.Item{}, kernel: map[string]bool{}}
+	r := remediation{family: family, version: inv.Host.Distro.VersionID, origins: map[string]inventory.Origin{}, users: map[string][]inventory.Item{}, kernel: map[string]bool{}}
 	for _, o := range inv.Origins {
 		r.origins[o.ID] = o
 	}
@@ -53,11 +54,14 @@ func (r remediation) line(f Finding) string {
 	to := strings.Join(f.Fix.Versions, " or ")
 	switch {
 	case r.kernel[f.Origin]:
+		if f.Fix.State == "wont-fix" {
+			return "No fix will be released for this kernel (wont-fix)."
+		}
 		if !fixed {
 			return "No fixed kernel version is known yet."
 		}
 		cmd := ""
-		if c := systemUpgrade(r.family); c != "" && (o.Kind == inventory.OriginPackage || r.kernelPackaged()) {
+		if c := r.systemUpgrade(); c != "" && (o.Kind == inventory.OriginPackage || r.kernelPackaged()) {
 			cmd = " (" + c + ")"
 		}
 		if o.Kind == inventory.OriginKernelUpstream {
@@ -70,12 +74,12 @@ func (r remediation) line(f Finding) string {
 	switch o.Kind {
 	case inventory.OriginPackage:
 		line := fmt.Sprintf("Upgrade %s to %s", f.Package.Name, to)
-		if c := packageUpgrade(r.family, f.Package.Name); c != "" {
+		if c := r.packageUpgrade(f.Package.Name); c != "" {
 			line += " (" + c + ")"
 		}
 		line += r.restart(f.Origin) + "."
 		if o.RunningOlderCopy {
-			line += " The running copy is older than the installed package, so a restart may already clear it."
+			line += " Some of its processes still run an older copy from before the last upgrade; restart them either way."
 		}
 		return line
 	case inventory.OriginBinary:
@@ -95,12 +99,13 @@ func noFix(f Finding) string {
 	return fmt.Sprintf("No fix is known for %s %s yet.", f.Package.Name, f.Package.Version)
 }
 
-// kernelPackaged reports whether the running kernel came from a package (its running version is
-// the package's), so the distribution's tool upgrades it.
+// kernelPackaged reports whether the running kernel came from a package, so the distribution's
+// tool upgrades it. The Inventory sets the running version to the release itself when no package
+// owns the kernel, so a running version that differs from the release is a package's.
 func (r remediation) kernelPackaged() bool {
 	for id := range r.kernel {
 		for _, it := range r.users[id] {
-			if it.Kind == inventory.KindKernel && it.RunningVersion != "" {
+			if it.Kind == inventory.KindKernel && it.RunningVersion != it.Release {
 				return true
 			}
 		}
@@ -110,7 +115,7 @@ func (r remediation) kernelPackaged() bool {
 
 // restart names the systemd units of an origin's processes, or the processes without a unit. A
 // user's own manager (user@1000.service) is never named: restarting it ends the user's session,
-// so a process below it is named instead.
+// so a process below it is named instead. PID 1 is systemd, which re-executes itself instead.
 func (r remediation) restart(origin string) string {
 	var units, names []string
 	for _, it := range r.users[origin] {
@@ -118,9 +123,11 @@ func (r remediation) restart(origin string) string {
 			continue
 		}
 		own := slices.DeleteFunc(slices.Clone(it.Units), func(u string) bool { return strings.HasPrefix(u, "user@") })
-		if len(own) > 0 {
-			units = append(units, own...)
-		} else {
+		units = append(units, own...)
+		switch {
+		case slices.ContainsFunc(it.Processes, func(p inventory.Process) bool { return p.PID == 1 }):
+			names = append(names, "systemd (systemctl daemon-reexec)")
+		case len(own) == 0:
 			names = append(names, it.Name)
 		}
 	}
@@ -147,10 +154,13 @@ func (r remediation) recreate(origin string) string {
 		}
 	}
 	slices.Sort(how)
-	if len(how) == 0 {
+	switch len(how) {
+	case 0:
 		return "its containers"
+	case 1:
+		return "the container " + how[0]
 	}
-	return "the container " + list(how)
+	return "the containers " + list(how)
 }
 
 // Compose's own name rules, and a directory without shell syntax.
@@ -198,20 +208,28 @@ func imageName(o inventory.Origin) string {
 	return o.ImageID
 }
 
-// packageUpgrade is the command that upgrades one package. Arch does not support partial
-// upgrades, so there it is a whole-system upgrade.
-func packageUpgrade(f osrel.Family, pkg string) string {
-	switch f {
+// packageUpgrade is the command that upgrades one package. apt and apk do not refresh their package
+// lists by themselves, so the command does (dnf, yum and zypper refresh expired metadata). On the
+// RHEL family yum works from 7 to 10 (it is dnf from 8 on). Amazon Linux 2023 locks its release,
+// so fixes from a newer one need --releasever=latest. Arch does not support partial upgrades, so
+// there it is a whole-system upgrade.
+func (r remediation) packageUpgrade(pkg string) string {
+	switch r.family {
 	case osrel.Debian, osrel.Ubuntu:
-		return "apt-get install --only-upgrade " + pkg
-	case osrel.RHEL, osrel.Fedora:
+		return "apt-get update && apt-get install --only-upgrade " + pkg
+	case osrel.RHEL:
+		return "yum update " + pkg
+	case osrel.Fedora:
 		return "dnf upgrade " + pkg
 	case osrel.Amazon:
+		if r.version == "2023" {
+			return "dnf upgrade --releasever=latest " + pkg
+		}
 		return "yum update " + pkg
 	case osrel.SUSE:
 		return "zypper update " + pkg
 	case osrel.Alpine:
-		return "apk upgrade " + pkg
+		return "apk upgrade -U " + pkg
 	case osrel.Arch:
 		return "pacman -Syu"
 	}
@@ -219,18 +237,23 @@ func packageUpgrade(f osrel.Family, pkg string) string {
 }
 
 // systemUpgrade is the command that upgrades the whole system, which brings a new kernel.
-func systemUpgrade(f osrel.Family) string {
-	switch f {
+func (r remediation) systemUpgrade() string {
+	switch r.family {
 	case osrel.Debian, osrel.Ubuntu:
-		return "apt-get dist-upgrade"
-	case osrel.RHEL, osrel.Fedora:
+		return "apt-get update && apt-get dist-upgrade"
+	case osrel.RHEL:
+		return "yum update"
+	case osrel.Fedora:
 		return "dnf upgrade"
 	case osrel.Amazon:
+		if r.version == "2023" {
+			return "dnf upgrade --releasever=latest"
+		}
 		return "yum update"
 	case osrel.SUSE:
 		return "zypper update"
 	case osrel.Alpine:
-		return "apk upgrade"
+		return "apk upgrade -U"
 	case osrel.Arch:
 		return "pacman -Syu"
 	}
