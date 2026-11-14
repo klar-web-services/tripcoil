@@ -380,17 +380,17 @@ func TestRunLatestUpdateFailed(t *testing.T) {
 }
 
 func TestRunPrintsErrorsOnOneLine(t *testing.T) {
-	d := testDeps(t, nil, errors.New("bad\x1b[2J path\nsecond\rline\x07"))
+	d := testDeps(t, nil, errors.New("bad\x1b[2J path\nsecond\rline\x07 \u202egnp.exe\u200b/x"))
 	var out, errb bytes.Buffer
 	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
 		t.Fatalf("exit %d", code)
 	}
 	for _, r := range strings.ReplaceAll(out.String(), "\n", "") {
-		if unicode.IsControl(r) {
-			t.Fatalf("control character %q in %q", r, out.String())
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			t.Fatalf("control or format character %q in %q", r, out.String())
 		}
 	}
-	if !strings.Contains(out.String(), "bad [2J path second line ") {
+	if !strings.Contains(out.String(), "bad [2J path second line   gnp.exe /x") {
 		t.Fatalf("stdout %q", out.String())
 	}
 	if n := strings.Count(out.String(), "\n"); n != 4 {

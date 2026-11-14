@@ -270,10 +270,11 @@ func printRun(stdout io.Writer, rec *run.Record, dir string, asJSON bool) int {
 	return rec.ExitCode
 }
 
-// oneLine replaces control characters, which text from the host may carry, with spaces.
+// oneLine replaces control and Unicode format characters (bidi controls, zero-width characters),
+// which text from the host may carry, with spaces.
 func oneLine(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return ' '
 		}
 		return r
