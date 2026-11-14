@@ -115,12 +115,26 @@ var maxTreeEntries = 200_000 // lowered by tests
 // be: every app directory is cataloged at least daily. Without a lockfile there is no key, and the
 // directory is cataloged every run; so too when one of the files is not a regular file of a real
 // file system (Grype skips those) or is too large, or when the tree cannot be fingerprinted.
-func appDirKey(ctx context.Context, dir, day string) (string, []string, error) {
+//
+// Users control app directories and can swap any part of them while the key is computed, so the
+// directory is opened once, never through a link, and everything is read relative to it: the
+// lockfiles, and the tree. Neither has a key: a link to a directory, a directory with a mount
+// below it (see mountBelow, which is given the opened directory's path).
+func appDirKey(ctx context.Context, dir, day string, mountBelow func(string) bool) (string, []string, error) {
+	d, err := openDir(dir)
+	if err != nil {
+		return "", nil, nil
+	}
+	defer d.Close()
+	real, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(int(d.Fd())))
+	if err != nil || mountBelow(real) {
+		return "", nil, nil
+	}
 	parts := []string{dir, day}
 	var files []string
 	locked := false
 	for _, name := range append(append([]string{}, appLockfiles...), appManifests...) {
-		data, err := readSmall(filepath.Join(dir, name), maxLockfile)
+		data, err := readSmallAt(d, name, maxLockfile)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			continue
@@ -135,11 +149,70 @@ func appDirKey(ctx context.Context, dir, day string) (string, []string, error) {
 	if !locked {
 		return "", nil, nil
 	}
-	tree, err := treeFingerprint(ctx, dir)
+	tree, err := treeFingerprint(ctx, d)
 	if err != nil {
 		return "", nil, nil
 	}
 	return keyOf("appdir", append(parts, tree)...), files, nil
+}
+
+// oPath is O_PATH, which package syscall defines only on some architectures.
+const oPath = 0x200000
+
+// openDir opens a directory, but not a link to one. O_DIRECTORY fails at once on anything else,
+// such as a FIFO that a user swapped in, whose open would wait for a writer forever.
+func openDir(path string) (*os.File, error) {
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+	}
+	return os.NewFile(uintptr(fd), path), nil
+}
+
+// openDirAt opens the directory name in d as openDir does, and only when it is still the entry
+// that st describes: otherwise the tree changed since.
+func openDirAt(d *os.File, name string, st *syscall.Stat_t) (*os.File, error) {
+	path := filepath.Join(d.Name(), name)
+	fd, err := syscall.Openat(int(d.Fd()), name, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), path)
+	var now syscall.Stat_t
+	if err := syscall.Fstat(fd, &now); err != nil {
+		f.Close()
+		return nil, &fs.PathError{Op: "fstat", Path: path, Err: err}
+	}
+	if now.Dev != st.Dev || now.Ino != st.Ino {
+		f.Close()
+		return nil, fmt.Errorf("%s changed while the tree was read", path)
+	}
+	return f, nil
+}
+
+// lstatAt is lstat(2) of name in d. Package syscall has no fstatat(2) on amd64, and an O_PATH open
+// only names the file: it never opens a FIFO or a device, nor follows a link.
+func lstatAt(d *os.File, name string) (syscall.Stat_t, error) {
+	var st syscall.Stat_t
+	fd, err := syscall.Openat(int(d.Fd()), name, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return st, &fs.PathError{Op: "lstat", Path: filepath.Join(d.Name(), name), Err: err}
+	}
+	defer syscall.Close(fd)
+	if err := syscall.Fstat(fd, &st); err != nil {
+		return st, &fs.PathError{Op: "lstat", Path: filepath.Join(d.Name(), name), Err: err}
+	}
+	return st, nil
+}
+
+// readSmallAt reads the file name in d as readSmall reads a path, but never through a link.
+func readSmallAt(d *os.File, name string, limit int64) ([]byte, error) {
+	fd, err := syscall.Openat(int(d.Fd()), name, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &fs.PathError{Op: "open", Path: filepath.Join(d.Name(), name), Err: err}
+	}
+	defer syscall.Close(fd)
+	return readSmall("/proc/self/fd/"+strconv.Itoa(fd), limit)
 }
 
 // mountInfo lists the mount points of Tripcoil's mount namespace.
@@ -148,20 +221,19 @@ var mountInfo = "/proc/self/mountinfo" // replaced by tests
 // mountBelow reports whether a mount point lies strictly below dir, which then has no key: the tree
 // walk must never lstat a mount point, which may hang, such as an NFS mount whose server is gone.
 // The mount points are read once per Audit; the walk's device check covers a mount made since.
-// dir is compared with its symbolic links resolved, as mountinfo spells mount points. When either
-// cannot be read, dir counts as having a mount below it.
+// dir is the path of the opened app directory, without links, as mountinfo spells mount points
+// (see appDirKey). When mountinfo cannot be read, dir counts as having a mount below it.
 func (au *auditor) mountBelow(dir string) bool {
 	if !au.mountsRead {
 		au.mounts, au.mountsErr = readMountPoints(mountInfo)
 		au.mountsRead = true
 	}
-	real, err := filepath.EvalSymlinks(dir)
-	if au.mountsErr != nil || err != nil {
+	if au.mountsErr != nil {
 		return true
 	}
-	prefix := strings.TrimSuffix(real, "/") + "/"
+	prefix := strings.TrimSuffix(dir, "/") + "/"
 	for _, m := range au.mounts {
-		if m != real && strings.HasPrefix(m, prefix) {
+		if m != dir && strings.HasPrefix(m, prefix) {
 			return true
 		}
 	}
@@ -198,27 +270,21 @@ func readMountPoints(path string) ([]string, error) {
 	return out, nil
 }
 
-// treeFingerprint hashes the path, type, size, inode and ctime of every entry below dir, without
-// following symbolic links: Grype does not follow them out of the directory either. Unlike mtime,
-// ctime changes on every write or rename, and users cannot set it: npm writes package files with
-// a fixed mtime. A directory of more than maxTreeEntries entries has no fingerprint. Directories
-// are read in chunks, so the walk stops at the cap without reading a huge one whole. Nor has a
-// directory with an entry on another file system: the walk does not go into a mount, which may
-// hang, such as an NFS mount whose server is gone.
-func treeFingerprint(ctx context.Context, dir string) (string, error) {
-	fi, err := os.Lstat(dir)
-	switch {
-	case err != nil:
-		return "", err
-	case !fi.IsDir():
-		return "", fmt.Errorf("%s is not a directory", dir) // such as a link to one
-	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "", fmt.Errorf("%s has no inode", dir)
+// treeFingerprint hashes the path, type, size, inode and ctime of every entry below the directory
+// d, without following symbolic links: Grype does not follow them out of the directory either.
+// Unlike mtime, ctime changes on every write or rename, and users cannot set it: npm writes package
+// files with a fixed mtime. A directory of more than maxTreeEntries entries has no fingerprint.
+// Directories are read in chunks, so the walk stops at the cap without reading a huge one whole.
+// Nor has a directory with an entry on another file system: the walk does not go into a mount,
+// which may hang, such as an NFS mount whose server is gone. Every directory is opened relative to
+// its parent's descriptor, and only when it is still the directory the walk saw.
+func treeFingerprint(ctx context.Context, d *os.File) (string, error) {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(int(d.Fd()), &st); err != nil {
+		return "", &fs.PathError{Op: "fstat", Path: d.Name(), Err: err}
 	}
 	w := treeWalk{ctx: ctx, dev: st.Dev, h: sha256.New(), n: 1}
-	if err := w.walk(dir, ".", fi); err != nil {
+	if err := w.walk(d, ".", &st); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(w.h.Sum(nil)), nil
@@ -232,59 +298,88 @@ type treeWalk struct {
 	n   int // the entries read so far
 }
 
-// walk hashes an entry, then the entries below it, in name order.
-func (w *treeWalk) walk(path, rel string, fi fs.FileInfo) error {
+// walk hashes the directory d, whose entry st is, then the entries below it, in name order.
+func (w *treeWalk) walk(d *os.File, rel string, st *syscall.Stat_t) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	switch {
-	case !ok:
-		return fmt.Errorf("%s has no inode", path)
-	case st.Dev != w.dev:
-		return fmt.Errorf("%s is on another file system", path)
-	}
-	fmt.Fprintf(w.h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, fi.Mode().Type(), fi.Size(), st.Ino, st.Ctim.Nano())
-	if !fi.IsDir() {
-		return nil
-	}
-	entries, err := w.readDir(path)
+	w.hash(rel, st)
+	names, err := w.readDir(d)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		fi, err := e.Info() // of the entry itself, as lstat
+	for _, name := range names {
+		if err := w.ctx.Err(); err != nil {
+			return err
+		}
+		// As deep as a path can name: the descriptors of a directory's parents stay open.
+		path := filepath.Join(d.Name(), name)
+		if len(path) >= syscall.PathMax {
+			return fmt.Errorf("%s is too long a path", path)
+		}
+		st, err := lstatAt(d, name)
+		switch {
+		case err != nil:
+			return err
+		case st.Dev != w.dev:
+			return fmt.Errorf("%s is on another file system", path)
+		case st.Mode&syscall.S_IFMT != syscall.S_IFDIR:
+			w.hash(filepath.Join(rel, name), &st)
+			continue
+		}
+		sub, err := openDirAt(d, name, &st)
 		if err != nil {
 			return err
 		}
-		if err := w.walk(filepath.Join(path, e.Name()), filepath.Join(rel, e.Name()), fi); err != nil {
+		err = w.walk(sub, filepath.Join(rel, name), &st)
+		sub.Close()
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// readDir reads a directory's entries, sorted by name, and fails as soon as the walk has read more
-// than maxTreeEntries.
-func (w *treeWalk) readDir(path string) ([]fs.DirEntry, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+// hash adds an entry to the fingerprint.
+func (w *treeWalk) hash(rel string, st *syscall.Stat_t) {
+	fmt.Fprintf(w.h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, modeType(st.Mode), st.Size, st.Ino, st.Ctim.Nano())
+}
+
+// modeType is the type of a file mode, as fs.FileMode.Type gives it for os.Lstat.
+func modeType(mode uint32) fs.FileMode {
+	switch mode & syscall.S_IFMT {
+	case syscall.S_IFBLK:
+		return fs.ModeDevice
+	case syscall.S_IFCHR:
+		return fs.ModeDevice | fs.ModeCharDevice
+	case syscall.S_IFDIR:
+		return fs.ModeDir
+	case syscall.S_IFIFO:
+		return fs.ModeNamedPipe
+	case syscall.S_IFLNK:
+		return fs.ModeSymlink
+	case syscall.S_IFSOCK:
+		return fs.ModeSocket
 	}
-	defer f.Close()
-	var out []fs.DirEntry
+	return 0
+}
+
+// readDir reads a directory's names, sorted, and fails as soon as the walk has read more than
+// maxTreeEntries.
+func (w *treeWalk) readDir(d *os.File) ([]string, error) {
+	var out []string
 	for {
 		if err := w.ctx.Err(); err != nil {
 			return nil, err
 		}
-		chunk, err := f.ReadDir(4096)
+		chunk, err := d.Readdirnames(4096)
 		if w.n += len(chunk); w.n > maxTreeEntries {
 			return nil, fmt.Errorf("the tree has more than %d entries", maxTreeEntries)
 		}
 		out = append(out, chunk...)
 		switch {
 		case errors.Is(err, io.EOF):
-			slices.SortFunc(out, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+			slices.Sort(out)
 			return out, nil
 		case err != nil:
 			return nil, err

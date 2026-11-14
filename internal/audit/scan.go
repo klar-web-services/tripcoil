@@ -287,11 +287,7 @@ func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []
 		if o.Jar {
 			return keyOf("jar", o.SHA256, fileName(o)), nil, nil
 		}
-		dir := filepath.Join(au.d.Root, o.Path)
-		if au.mountBelow(dir) {
-			return "", nil, nil
-		}
-		return appDirKey(ctx, dir, au.d.Now().UTC().Format("2006-01-02"))
+		return appDirKey(ctx, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"), au.mountBelow)
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
