@@ -18,8 +18,8 @@
 
 ## High risk (1)
 
-- [CVE-2026-1234](https://security-tracker.debian.org/tracker/CVE-2026-1234) in libssl3 3.0.15-1~deb12u1 (nginx, node, python3.11): severity High, EPSS 41.0%.
-  Upgrade libssl3 to 3.0.16-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.
+- [CVE-2026-1234](https://security-tracker.debian.org/tracker/CVE-2026-1234) in libssl3 3.0.15-1\~deb12u1 (nginx, node, python3.11): severity High, EPSS 41.0%.
+  Upgrade libssl3 to 3.0.16-1\~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.
 
 ## Medium risk (1)
 

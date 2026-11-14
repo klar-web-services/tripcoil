@@ -154,14 +154,58 @@ func TestRenderEscapesUntrustedText(t *testing.T) {
 	aud.Findings[0].Package.Name = "evil|*pkg*\x1b[31m<script>"
 	aud.Findings[0].Remediation = "Upgrade [x](javascript:alert(1))"
 	aud.Findings[0].Vulnerability.URLs = []string{"https://example.com/a)b"}
+	aud.Findings[1].Vulnerability.ID = "# CVE-1"
+	aud.Findings[1].Vulnerability.URLs = nil
+	aud.Findings[2].Vulnerability.ID = "1. GHSA"
+	aud.Findings[2].Vulnerability.URLs = []string{"http://insecure.example"}
+	aud.Findings[3].Package.Name = "a~b~c"
+	aud.Findings[3].Package.Version = "ev\u202eil\u200bx"
 	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
-	for _, bad := range []string{"\x1b", "<script>", "|*pkg*", "[x](javascript", "](https://example.com/a)b)"} {
+	for _, bad := range []string{"\x1b", "<script>", "|*pkg*", "[x](javascript", "](https://example.com/a)b)", "- # CVE-1", "- 1. GHSA", "a~b~c", "\u202e", "\u200b"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("report contains %q", bad)
 		}
 	}
-	if !strings.Contains(got, `evil\|\*pkg\*`) {
-		t.Errorf("escaped name missing:\n%s", got)
+	for _, want := range []string{`evil\|\*pkg\*`, `- \# CVE-1`, `- 1\. GHSA`, `a\~b\~c`, "ev il x"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q missing:\n%s", want, got)
+		}
+	}
+}
+
+func TestRestartsNeverNameUserManagerUnits(t *testing.T) {
+	inv := hostInventory()
+	inv.Items = []inventory.Item{
+		{ID: "a", Kind: inventory.KindProcess, Name: "systemd", Units: []string{"user@1000.service"}, RestartNeeded: []string{"/lib/x"}},
+		{ID: "b", Kind: inventory.KindProcess, Name: "systemd", Units: []string{"user@1000.service"}, RestartNeeded: []string{"/lib/x"}},
+		{ID: "c", Kind: inventory.KindProcess, Name: "sshd", Units: []string{"user@1000.service", "ssh.service"}, RestartNeeded: []string{"/lib/y"}},
+	}
+	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK}), Inventory: inv, NoReview: "x"})
+	if strings.Contains(got, "user@") {
+		t.Fatalf("a user's manager unit is named:\n%s", got)
+	}
+	if n := strings.Count(got, "- Restart systemd:"); n != 1 {
+		t.Fatalf("%d lines for systemd, want 1:\n%s", n, got)
+	}
+	if !strings.Contains(got, "- Restart ssh.service:") {
+		t.Fatalf("system unit missing:\n%s", got)
+	}
+}
+
+func TestDescribeNamesAtMostFiveItems(t *testing.T) {
+	o := inventory.Origin{Kind: inventory.OriginAppDir, Path: "/srv/x"}
+	got := describe(o, []string{"a", "b", "c", "d", "e", "f", "g"})
+	if got != "a, b, c, d, e, and 2 more: /srv/x" {
+		t.Fatal(got)
+	}
+}
+
+func TestEPSSBelowRoundingPrintsAsLessThan(t *testing.T) {
+	for epss, want := range map[float64]string{0.0002: "EPSS <0.1%", 0.002: "EPSS 0.2%", 0: ""} {
+		got := signals(audit.Finding{Vulnerability: audit.Vulnerability{Severity: "High", EPSS: epss}})
+		if strings.Contains(got, "EPSS") != (want != "") || (want != "" && !strings.Contains(got, want)) {
+			t.Errorf("EPSS %v: %q, want %q", epss, got, want)
+		}
 	}
 }
 

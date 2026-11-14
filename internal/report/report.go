@@ -223,8 +223,11 @@ func signals(f audit.Finding) string {
 	if f.Vulnerability.KnownExploited {
 		s = append(s, "known exploited (CISA KEV)")
 	}
-	if f.Vulnerability.EPSS > 0 {
-		s = append(s, fmt.Sprintf("EPSS %.1f%%", f.Vulnerability.EPSS*100))
+	switch e := f.Vulnerability.EPSS; {
+	case e > 0 && e < 0.0005: // would round to 0.0%
+		s = append(s, "EPSS <0.1%")
+	case e > 0:
+		s = append(s, fmt.Sprintf("EPSS %.1f%%", e*100))
 	}
 	if f.Source == "kernel-cna" {
 		s = append(s, "matched by upstream kernel version")
@@ -243,16 +246,24 @@ func writeRestarts(b *strings.Builder, inv *inventory.Inventory) {
 			lines = append(lines, fmt.Sprintf("- Reboot: the running kernel %s is not the newest installed (%s).", md(it.Release), md(strings.Join(it.RebootReasons, "; "))))
 		case len(it.RestartNeeded) > 0:
 			who := md(it.Name)
-			if len(it.Units) > 0 {
-				who = md(strings.Join(it.Units, ", "))
+			if units := systemUnits(it.Units); len(units) > 0 {
+				who = md(strings.Join(units, ", "))
 			}
-			lines = append(lines, fmt.Sprintf("- Restart %s: it still runs replaced files: %s.", who, md(strings.Join(it.RestartNeeded, ", "))))
+			line := fmt.Sprintf("- Restart %s: it still runs replaced files: %s.", who, md(strings.Join(it.RestartNeeded, ", ")))
+			if !slices.Contains(lines, line) {
+				lines = append(lines, line)
+			}
 		}
 	}
 	if len(lines) == 0 {
 		return
 	}
 	b.WriteString("## Restart or reboot needed\n\n" + strings.Join(lines, "\n") + "\n\n")
+}
+
+// systemUnits drops a user's own manager unit (user@1000.service), which is not restarted for a replaced file.
+func systemUnits(units []string) []string {
+	return slices.DeleteFunc(slices.Clone(units), func(u string) bool { return strings.HasPrefix(u, "user@") })
 }
 
 func writeGaps(b *strings.Builder, gaps []Gap, aud *audit.Audit, inv *inventory.Inventory) {
@@ -315,6 +326,9 @@ func describe(o inventory.Origin, items []string) string {
 	if len(items) == 0 {
 		return cmp.Or(what, o.ID)
 	}
+	if len(items) > maxItems {
+		items = append(items[:maxItems:maxItems], fmt.Sprintf("and %d more", len(items)-maxItems))
+	}
 	if what == "" {
 		return strings.Join(items, ", ")
 	}
@@ -376,24 +390,43 @@ func vulnLink(v audit.Vulnerability) string {
 			return "[" + id + "](" + u + ")"
 		}
 	}
-	return id
+	return escapeBlockStart(id)
+}
+
+// escapeBlockStart keeps text printed at the start of a list item from opening a Markdown block.
+func escapeBlockStart(s string) string {
+	if s == "" {
+		return s
+	}
+	if strings.ContainsRune("#+-=>", rune(s[0])) {
+		return `\` + s
+	}
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i > 0 && i < len(s) && (s[i] == '.' || s[i] == ')') {
+		return s[:i] + `\` + s[i:]
+	}
+	return s
 }
 
 func unsafeURLRune(r rune) bool {
 	return r <= ' ' || r >= 0x7f || strings.ContainsRune("()<>\"'|\\`[]", r)
 }
 
-// clean replaces control characters so untrusted text cannot drive the terminal.
+// clean replaces control and Unicode format characters (bidi controls, zero-width characters), so
+// untrusted text can neither drive the terminal nor spoof a name.
 func clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return ' '
 		}
 		return r
 	}, s)
 }
 
-var mdEscaper = strings.NewReplacer(`\`, `\\`, "|", `\|`, "*", `\*`, "_", `\_`, "`", "\\`", "[", `\[`, "]", `\]`, "<", "&lt;", ">", "&gt;")
+var mdEscaper = strings.NewReplacer(`\`, `\\`, "|", `\|`, "*", `\*`, "_", `\_`, "`", "\\`", "~", `\~`, "[", `\[`, "]", `\]`, "<", "&lt;", ">", "&gt;")
 
 // md escapes untrusted text for Markdown.
 func md(s string) string { return mdEscaper.Replace(clean(s)) }
