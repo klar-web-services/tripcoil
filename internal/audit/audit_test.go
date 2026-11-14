@@ -383,11 +383,22 @@ func TestAuditUnknownDistribution(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
 	g.distro = "" // Grype did not recognise the os-release
+	image := "docker:sha256:1111"
+	g.sboms[image] = append(g.sboms[image], grype.Component{Name: "lodash", Version: "4.17.20", PURL: "pkg:npm/lodash@4.17.20"})
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
 	for _, o := range a.Origins {
-		if o.Kind == inventory.OriginPackage && (o.Status != Unidentified || !strings.Contains(o.Reason, "did not recognise the distribution")) {
+		if (o.Kind == inventory.OriginPackage || o.ID == imageO) && (o.Status != Unidentified || !strings.Contains(o.Reason, "did not recognise the distribution")) {
 			t.Errorf("origin %+v: a scan without a distribution is a gap, never clean", o)
 		}
+	}
+	if o := a.Origins[slices.IndexFunc(a.Origins, func(o OriginResult) bool { return o.ID == imageO })]; o.Packages != 2 || !strings.Contains(o.Reason, "its 1 operating system packages") {
+		t.Errorf("image %+v", o)
+	}
+	if !slices.ContainsFunc(a.Findings, func(f Finding) bool { return f.Origin == imageO && f.Package.Name == "lodash" }) {
+		t.Error("the image's language packages are matched all the same")
+	}
+	if st := statuses(a); st[jarO] != Scanned || st[apiO] != Scanned || a.Status != Complete {
+		t.Errorf("audit %s, statuses %v: origins without operating system packages are scanned", a.Status, st)
 	}
 }
 

@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,7 @@ import (
 // origin scans a binary, app directory, jar or image (spec section 6.2).
 func (au *auditor) origin(ctx context.Context, o inventory.Origin) {
 	res := OriginResult{ID: o.ID, Kind: o.Kind, Status: Scanned, Raw: rawFiles(o.ID)}
-	rep, packages, err := au.scanOrigin(ctx, o, res.Raw)
+	rep, n, err := au.scanOrigin(ctx, o, res.Raw)
 	if err != nil {
 		au.removeRaw(res.Raw)
 		if ctx.Err() == nil {
@@ -25,9 +26,14 @@ func (au *auditor) origin(ctx context.Context, o inventory.Origin) {
 		}
 		return
 	}
-	res.Packages = packages
-	if packages == 0 {
+	res.Packages = n.packages
+	switch {
+	case n.packages == 0:
 		res.Status = Unidentified
+	case rep.Distro == "" && n.os > 0:
+		// As for the package database, never clean: no distribution data applies to its packages.
+		// Its other packages are matched all the same.
+		res.Status, res.Reason = Unidentified, fmt.Sprintf("Grype did not recognise the distribution, so its vulnerability data does not apply to its %d operating system packages", n.os)
 	}
 	au.a.Origins = append(au.a.Origins, res)
 	au.addFindings(rep.Matches, res.Raw.Grype, func(grype.Match) (string, bool) { return o.ID, true })
@@ -54,17 +60,17 @@ func (au *auditor) scanDir() string { return filepath.Join(au.d.CacheDir, "scan"
 // match like the origin itself (Go modules, an operating system without a version) is scanned
 // directly every run instead. A cached SBOM that cannot be read or matched is dropped and the
 // origin scanned again.
-func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, int, error) {
+func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, counts, error) {
 	if o.Kind == inventory.OriginAppDir && o.Jar {
 		sha, err := hashFile(ctx, filepath.Join(au.d.Root, o.Path))
 		if err != nil {
-			return nil, 0, err
+			return nil, counts{}, err
 		}
 		o.SHA256 = sha // a jar is keyed and copied like a binary
 	}
 	key, files, err := au.cacheKey(o)
 	if err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	if key != "" {
 		if sbom, ok := au.cache.get(key); ok {
@@ -77,52 +83,86 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	}
 	source, cleanup, err := au.source(ctx, o)
 	if err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	defer cleanup()
 	if err := os.MkdirAll(au.scanDir(), 0o700); err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	tmp := filepath.Join(au.scanDir(), rawName(o.ID, ".cdx.json"))
 	defer os.Remove(tmp)
 	rawPath := filepath.Join(au.d.RunDir, raw.Grype)
 	rep, err := au.d.Grype.Scan(ctx, source, rawPath, tmp)
 	if err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	if err := run.Share(rawPath, 0o640); err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	data, err := os.ReadFile(tmp)
 	if err == nil {
 		data, err = grype.StripSBOM(data)
 	}
-	var pkgs []grype.Component
+	var n counts
 	if err == nil {
-		pkgs, err = grype.SBOMPackages(data)
+		n, err = countPackages(data)
 	}
 	if err == nil {
 		err = run.WriteFile(filepath.Join(au.d.RunDir, raw.SBOM), data, 0o640)
 	}
 	if err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	au.cacheIfMatchable(key, files, data)
-	return rep, len(pkgs), nil
+	return rep, n, nil
+}
+
+// counts is how many packages an SBOM holds, and how many of them Syft read from a distribution's
+// package database: only that distribution's vulnerability data matches those.
+type counts struct{ packages, os int }
+
+// osPackageTypes are Syft's types of the packages in a distribution's package database.
+var osPackageTypes = []string{"deb", "rpm", "apk", "alpm"}
+
+func countPackages(data []byte) (counts, error) {
+	pkgs, err := grype.SBOMPackages(data)
+	if err != nil {
+		return counts{}, err
+	}
+	var doc struct {
+		Components []struct {
+			Properties []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"properties"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return counts{}, err
+	}
+	n := counts{packages: len(pkgs)}
+	for _, c := range doc.Components {
+		for _, p := range c.Properties {
+			if p.Name == "syft:package:type" && slices.Contains(osPackageTypes, p.Value) {
+				n.os++
+			}
+		}
+	}
+	return n, nil
 }
 
 // matchCached matches a cached SBOM.
-func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw) (*grype.Report, int, error) {
+func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw) (*grype.Report, counts, error) {
 	data, err := os.ReadFile(sbom)
 	if err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
-	pkgs, err := grype.SBOMPackages(data)
+	n, err := countPackages(data)
 	if err != nil {
-		return nil, 0, err
+		return nil, counts{}, err
 	}
 	rep, err := au.matchSBOM(ctx, sbom, data, raw)
-	return rep, len(pkgs), err
+	return rep, n, err
 }
 
 // cacheIfMatchable caches a stripped SBOM under key, unless there is no key or matching the SBOM

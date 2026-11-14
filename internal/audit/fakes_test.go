@@ -88,8 +88,11 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 	}{"CycloneDX", source, []comp{{Type: "operating-system", Name: "debian", Version: f.osVersion}, {Type: "file", Name: "/etc/os-release"}}, []any{"x"}}
 	for _, c := range comps {
 		cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL}
+		if typ, _, ok := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/"); ok { // Syft's type is the purl's for deb, rpm, apk and alpm
+			cc.Properties = append(cc.Properties, prop{"syft:package:type", typ})
+		}
 		if l, ok := f.locations[c.Name]; ok {
-			cc.Properties = []prop{{"syft:location:0:path", l}}
+			cc.Properties = append(cc.Properties, prop{"syft:location:0:path", l})
 		}
 		doc.Components = append(doc.Components, cc)
 	}
