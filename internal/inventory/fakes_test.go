@@ -39,6 +39,9 @@ type fakeProc struct {
 	read      int                      // bytes read from running files
 	reused    bool                     // the PID belongs to another process after the first read
 	started   int                      // StartTime calls
+	ticked    int                      // StartTicks calls
+	// clockStepped moves the wall clock, and so the start time, after the first read.
+	clockStepped bool
 }
 
 type fakeSource map[int]*fakeProc
@@ -79,10 +82,18 @@ func (s fakeSource) Cwd(pid int) (string, error)       { return s[pid].cwd, nil 
 func (s fakeSource) UID(pid int) (int, error)          { return s[pid].uid, nil }
 func (s fakeSource) StartTime(pid int) (time.Time, error) {
 	t := time.Unix(1700000000+int64(pid), 0).UTC()
-	if s[pid].reused && s[pid].started > 0 {
+	if s[pid].clockStepped && s[pid].started > 0 {
 		t = t.Add(time.Hour)
 	}
 	s[pid].started++
+	return t, nil
+}
+func (s fakeSource) StartTicks(pid int) (uint64, error) {
+	t := uint64(1000 + pid)
+	if s[pid].reused && s[pid].ticked > 0 {
+		t += 360000
+	}
+	s[pid].ticked++
 	return t, nil
 }
 func (s fakeSource) Cgroup(pid int) (string, error) {

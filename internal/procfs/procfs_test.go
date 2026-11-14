@@ -118,6 +118,27 @@ func TestStartTime(t *testing.T) {
 	}
 }
 
+func TestStartTicks(t *testing.T) {
+	f, root := fixture(t)
+	if got, err := f.StartTicks(42); err != nil || got != 12345 {
+		t.Fatalf("%d %v", got, err)
+	}
+	if got, err := f.StartTicks(43); err != nil || got != 200 {
+		t.Fatalf("comm with parentheses: %d %v", got, err)
+	}
+	// They count from boot: a stepped wall clock, which moves btime, does not change them.
+	if err := os.WriteFile(filepath.Join(root, "proc/stat"), []byte("btime 1700003600\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.StartTicks(42); err != nil || got != 12345 {
+		t.Fatalf("after a clock step: %d %v", got, err)
+	}
+	proc(t, root, 44, map[string]string{"stat": "44 (short) S 1\n"}, nil)
+	if _, err := f.StartTicks(44); err == nil {
+		t.Fatal("a short stat line must be an error")
+	}
+}
+
 func TestCgroupAndMaps(t *testing.T) {
 	f, _ := fixture(t)
 	if cg, err := f.Cgroup(42); err != nil || cg != "0::/system.slice/nginx.service\n" {

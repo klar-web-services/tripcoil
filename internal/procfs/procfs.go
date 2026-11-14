@@ -97,22 +97,28 @@ func (f FS) UID(pid int) (int, error) {
 	return 0, fmt.Errorf("no Uid line in %s", f.proc(pid, "status"))
 }
 
-// StartTime returns when the process started.
-func (f FS) StartTime(pid int) (time.Time, error) {
+// StartTicks returns when the process started, in clock ticks since boot (field 22 of
+// /proc/<pid>/stat). Unlike StartTime, it does not move when the wall clock is stepped.
+func (f FS) StartTicks(pid int) (uint64, error) {
 	data, err := os.ReadFile(f.proc(pid, "stat"))
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
 	// The command name (field 2) is in parentheses and may itself contain spaces and parentheses.
 	i := bytes.LastIndexByte(data, ')')
 	if i < 0 {
-		return time.Time{}, fmt.Errorf("unexpected format of %s", f.proc(pid, "stat"))
+		return 0, fmt.Errorf("unexpected format of %s", f.proc(pid, "stat"))
 	}
 	fields := strings.Fields(string(data[i+1:])) // fields[0] is field 3; starttime is field 22
 	if len(fields) < 20 {
-		return time.Time{}, fmt.Errorf("unexpected format of %s", f.proc(pid, "stat"))
+		return 0, fmt.Errorf("unexpected format of %s", f.proc(pid, "stat"))
 	}
-	ticks, err := strconv.ParseInt(fields[19], 10, 64)
+	return strconv.ParseUint(fields[19], 10, 64)
+}
+
+// StartTime returns when the process started.
+func (f FS) StartTime(pid int) (time.Time, error) {
+	ticks, err := f.StartTicks(pid)
 	if err != nil {
 		return time.Time{}, err
 	}

@@ -858,3 +858,16 @@ func TestProcessCollectorSnapsOnArchAndFedora(t *testing.T) {
 		t.Fatalf("lxd %+v, origin %+v", it, o)
 	}
 }
+
+func TestProcessCollectorClockStep(t *testing.T) {
+	// NTP stepped the wall clock between the reads: btime, and with it every start time, moved.
+	src := fakeSource{30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeData: "go binary v1", clockStepped: true}}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := byName(res.items, "api").Origins; !slices.Equal(got, []string{BinaryOriginID(sum("go binary v1"))}) {
+		t.Fatalf("api origins %v: the process did not end", got)
+	}
+}

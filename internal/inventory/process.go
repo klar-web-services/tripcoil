@@ -29,6 +29,7 @@ type Source interface {
 	Cwd(pid int) (string, error)
 	UID(pid int) (int, error)
 	StartTime(pid int) (time.Time, error)
+	StartTicks(pid int) (uint64, error)
 	Cgroup(pid int) (string, error)
 	Maps(pid int) ([]procfs.Mapping, error)
 	SameRootAsInit(pid int) (bool, error)
@@ -78,6 +79,7 @@ type rawProcess struct {
 	cwd        string
 	user       string
 	started    time.Time
+	startTicks uint64 // tells a reused PID apart; 0 when unknown
 	unit       string
 	libs       []procfs.Mapping
 	otherRoot  bool     // its root directory is not the host's
@@ -152,6 +154,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 		p.user = c.userName(uid)
 	}
 	p.started, _ = c.src.StartTime(pid)
+	p.startTicks, _ = c.src.StartTicks(pid)
 	switch {
 	case exeErr != nil:
 		p.unresolved = fmt.Sprintf("its executable cannot be read (%s)", errReason(exeErr))
@@ -371,7 +374,7 @@ func (c *processCollector) opener(p *rawProcess, gone error, open func() (io.Rea
 		if err != nil {
 			return nil, err
 		}
-		if t, err := c.src.StartTime(p.pid); err != nil || !t.Equal(p.started) {
+		if t, err := c.src.StartTicks(p.pid); err != nil || t != p.startTicks {
 			r.Close()
 			return nil, errProcessEnded
 		}
