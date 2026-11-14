@@ -308,15 +308,15 @@ func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
 
-// fileName is the name of a binary's or jar's copy: a jar's own name, and of a binary, the name of
-// its first path whose file root owns, or else of its first path, made a name that Syft never
-// unpacks (see copyName). Syft's classifiers go by the name, and a user who runs a renamed copy of
-// root's file, such as ~/x of /opt/app/bin/python3.12, shares its origin with a path that may sort
-// first.
+// fileName is the name of a binary's or jar's copy, made a name that Syft never unpacks as other
+// than it is (see copyName and jarName): a jar's own name, and of a binary, the name of its first
+// path whose file root owns, or else of its first path. Syft's classifiers go by the name, and a
+// user who runs a renamed copy of root's file, such as ~/x of /opt/app/bin/python3.12, shares its
+// origin with a path that may sort first.
 func (au *auditor) fileName(o inventory.Origin) string {
 	switch {
 	case o.Kind == inventory.OriginAppDir:
-		return filepath.Base(o.Path)
+		return jarName(filepath.Base(o.Path))
 	case len(o.Paths) > 0:
 		name := o.Paths[0]
 		for _, p := range o.Paths {
@@ -345,7 +345,13 @@ func rootOwned(path string) bool {
 // ends in .tgz, .tbz2, .txz, .tzst or .tlz, and its Java cataloger the Java archives below, .zip
 // and .rar among them. Appending a suffix would not do: the file source matches .tar, .zip, .7z
 // and .rar anywhere in the name.
-var archiveName = regexp.MustCompile(`(?i)\.(tar|zip|7z|rar)|\.(tgz|tbz2|txz|tzst|tlz|jar|war|ear|par|sar|nar|kar|hpi|jpi|far|zap|lpkg)$`)
+var archiveName = regexp.MustCompile(`(?i)\.(tar|zip|7z|rar)|\.(tgz|tbz2|txz|tzst|tlz|` + javaArchives + `)$`)
+
+// javaArchives are the extensions of the Java archives that Syft's Java cataloger reads, other
+// than .zip and .rar.
+const javaArchives = `jar|war|ear|par|sar|nar|kar|hpi|jpi|far|zap|lpkg`
+
+var javaExtension = regexp.MustCompile(`(?i)\.(` + javaArchives + `)$`)
 
 // copyName is the name of a binary's copy: its file name, with the dot of each archive extension
 // made an underscore, so that Syft reads the copy as the binary it is (libx.so.1.tar.gz becomes
@@ -353,6 +359,18 @@ var archiveName = regexp.MustCompile(`(?i)\.(tar|zip|7z|rar)|\.(tgz|tbz2|txz|tzs
 // its dots, so the binary classifiers' globs, such as libpython*.so*, still match it.
 func copyName(name string) string {
 	return archiveName.ReplaceAllStringFunc(name, func(ext string) string { return "_" + ext[1:] })
+}
+
+// jarName is the name of a jar's copy: the copy name of its file name as a binary's, but with its
+// Java archive extension kept, or .jar added when it has none, so that Syft reads it as the Java
+// archive it is and nothing else. java -jar runs a Java archive of any name, such as ~/app.tar.gz,
+// which Syft would unpack as a tar (app_tar.gz.jar).
+func jarName(name string) string {
+	ext := javaExtension.FindString(name)
+	if ext == "" {
+		return copyName(name) + ".jar"
+	}
+	return copyName(strings.TrimSuffix(name, ext)) + ext
 }
 
 // source is what Grype scans for an origin: a verified copy of a binary or jar, an app directory,

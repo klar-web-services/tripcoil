@@ -153,7 +153,7 @@ func TestCopyNamesAreNeverArchives(t *testing.T) {
 			t.Errorf("copy of %s named %s, want %s", name, got, want)
 		}
 	}
-	// The copy Grype scans and the cache key both take the name; a jar keeps its own.
+	// The copy Grype scans and the cache key both take the name; app.jar keeps its own.
 	root, cache, inv := host(t)
 	write(t, filepath.Join(root, "home/u/libx.so.1.tar.gz"), "go binary v1")
 	o := &inv.Origins[2] // apiO
@@ -171,6 +171,45 @@ func TestCopyNamesAreNeverArchives(t *testing.T) {
 	}
 	if k, _, _ := au.cacheKey(context.Background(), inv.Origins[7]); k != keyOf("jar", "", "app.jar") {
 		t.Errorf("jar cache key %s", k)
+	}
+}
+
+// A jar's copy never has a name that makes Syft unpack it as other than a Java archive: java -jar
+// runs a Java archive of any name, and a user's ~/app.tar.gz, a gzip tar of 97 KB, unpacked to
+// 95 MB. The copy keeps its Java archive extension, or gets .jar.
+func TestJarCopyNamesAreNeverOtherArchives(t *testing.T) {
+	for name, want := range map[string]string{
+		"app.tar.gz": "app_tar.gz.jar",
+		"x.zip.jar":  "x_zip.jar",
+		"x.7z.jar":   "x_7z.jar",
+		"x.RAR.war":  "x_RAR.war",
+		"x.tgz":      "x_tgz.jar",
+		"x.tar.ear":  "x_tar.ear",
+		"x.jar.tzst": "x.jar_tzst.jar",
+		"x.jar.jar":  "x_jar.jar",
+		"x.zip":      "x_zip.jar",
+		"app":        "app.jar",
+		// What Syft reads as the Java archive it is keeps its name.
+		"log4j-core-2.14.1.jar": "log4j-core-2.14.1.jar", "app.war": "app.war", "App.JAR": "App.JAR", "jenkins.hpi": "jenkins.hpi",
+	} {
+		if got := jarName(name); got != want {
+			t.Errorf("copy of jar %s named %s, want %s", name, got, want)
+		}
+	}
+	root, cache, inv := host(t)
+	write(t, filepath.Join(root, "home/u/app.tar.gz"), "jar v1")
+	o := &inv.Origins[7] // jarO
+	o.Path = "/home/u/app.tar.gz"
+	g := hostScanner(root, cache)
+	copied := "local-file:" + filepath.Join(cache, "scan", sumOf("jar v1"), "app_tar.gz.jar")
+	g.sboms[copied] = g.sboms["local-file:"+filepath.Join(cache, "scan", sumOf("jar v1"), "app.jar")]
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if !slices.Contains(g.catalogs, copied) {
+		t.Fatalf("cataloged %q", g.catalogs)
+	}
+	au := &auditor{d: Deps{Root: root, Now: time.Now}, reads: budget()}
+	if k, _, _ := au.cacheKey(context.Background(), *o); k != keyOf("jar", "", "app_tar.gz.jar") {
+		t.Errorf("cache key %s", k)
 	}
 }
 
