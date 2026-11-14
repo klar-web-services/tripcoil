@@ -20,6 +20,11 @@ func TestFindingID(t *testing.T) {
 	if FindingID("a", "bc", Package{}) == FindingID("ab", "c", Package{}) {
 		t.Fatal("parts run together")
 	}
+	// The example of spec section 6.4: the formula must never change, or every finding gets a new ID.
+	p = Package{Name: "libssl3", Version: "3.0.15-1~deb12u1", Type: "deb", Location: "/var/lib/dpkg/status"}
+	if id := FindingID("pkg:deb/debian/libssl3@3.0.15-1~deb12u1?distro=debian-12", "CVE-2026-1234", p); id != "f:2fbbc5f665b4ae55" {
+		t.Fatalf("id %q, want f:2fbbc5f665b4ae55", id)
+	}
 }
 
 func TestRisk(t *testing.T) {
@@ -37,6 +42,10 @@ func TestRisk(t *testing.T) {
 		{"fixed Critical", Vulnerability{Severity: "Critical"}, fixed, RiskMedium},
 		{"fixed Unknown counts as High", Vulnerability{Severity: "Unknown"}, fixed, RiskMedium},
 		{"fixed Medium", Vulnerability{Severity: "Medium"}, fixed, RiskLow},
+		{"fixed, spelled in lower case", Vulnerability{Severity: "high"}, fixed, RiskMedium},
+		{"fixed, an unexpected spelling counts as High", Vulnerability{Severity: "Important"}, fixed, RiskMedium},
+		{"fixed, no severity counts as High", Vulnerability{}, fixed, RiskMedium},
+		{"fixed none", Vulnerability{Severity: "none"}, fixed, RiskLow},
 		{"unfixed Critical", Vulnerability{Severity: "Critical"}, Fix{State: "wont-fix"}, RiskLow},
 	}
 	for _, c := range cases {
@@ -47,7 +56,7 @@ func TestRisk(t *testing.T) {
 }
 
 func TestSeverity(t *testing.T) {
-	for in, want := range map[string]string{"High": "High", "critical": "Critical", " MEDIUM ": "Medium", "Negligible": "Negligible", "": "Unknown", "Important": "Unknown"} {
+	for in, want := range map[string]string{"High": "High", "critical": "Critical", " MEDIUM ": "Medium", "Negligible": "Negligible", "none": "Negligible", "None": "Negligible", "": "Unknown", "Important": "Unknown"} {
 		if got := Severity(in); got != want {
 			t.Errorf("Severity(%q) = %q, want %q", in, got, want)
 		}

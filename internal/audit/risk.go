@@ -14,20 +14,23 @@ func FindingID(origin, vulnerability string, p Package) string {
 }
 
 // Risk is the risk tier of a finding: the first rule of spec section 6.5 that applies. KEV and
-// EPSS already include the related vulnerabilities.
+// EPSS already include the related vulnerabilities. The severity is normalised first, so a
+// spelling Risk does not know is Unknown, which counts as High.
 func Risk(v Vulnerability, fix Fix) string {
+	s := Severity(v.Severity)
 	switch {
 	case v.KnownExploited:
 		return RiskCritical
 	case v.EPSS >= 0.10:
 		return RiskHigh
-	case fix.State == "fixed" && (v.Severity == "Critical" || v.Severity == "High" || v.Severity == "Unknown"):
+	case fix.State == "fixed" && (s == "Critical" || s == "High" || s == "Unknown"):
 		return RiskMedium
 	}
 	return RiskLow
 }
 
-// Severity spells a severity the one way audit.json uses; anything unrecognised is Unknown.
+// Severity spells a severity the one way audit.json uses; CVSS's None is Negligible, and anything
+// unrecognised is Unknown.
 func Severity(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "critical":
@@ -38,7 +41,7 @@ func Severity(s string) string {
 		return "Medium"
 	case "low":
 		return "Low"
-	case "negligible":
+	case "negligible", "none":
 		return "Negligible"
 	}
 	return "Unknown"
