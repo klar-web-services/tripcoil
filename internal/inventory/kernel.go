@@ -34,10 +34,16 @@ var (
 	// kernel-kvmsmall, kernel-64kb. Third-party ones such as ELRepo's kernel-ml do not match. A
 	// distribution flavor missing here is matched by upstream version: noisier, never silent.
 	rpmKernelName = regexp.MustCompile(`^kernel(\d+\.\d+)?(-(core|modules|modules-core|debug|debug-core|debug-modules|debug-modules-core|rt|rt-core|rt_debug|uki-virt|default|default-base|azure|kvmsmall|64kb|64k|64k-core|uek|uek-core))?$`)
-	// debKernelName splits <prefix>-<abi>-<flavor>. ABIs: 6.1.0-28 (Debian 12), 6.12.117+deb13
-	// (Debian 13), 6.12.95+deb12 and 6.1.0-0.deb11.17 (backports), 5.15.0-91 (Ubuntu, where
-	// linux-modules-* owns modules.builtin). Metapackages such as linux-image-amd64 do not match.
+	// debKernelName matches Debian's and Ubuntu's own kernel packages, <prefix>-<abi>-<flavor>.
+	// ABIs: 6.1.0-28 (Debian 12), 6.12.117+deb13 (Debian 13), 6.12.95+deb12 and 6.1.0-0.deb11.17
+	// (backports), 5.15.0-91 (Ubuntu, where linux-modules-* owns modules.builtin). Metapackages
+	// such as linux-image-amd64 do not match.
 	debKernelName = regexp.MustCompile(`^(linux-(?:image-unsigned|image|modules))-(\d+\.\d+\.\d+(?:-\d+(?:\.deb\d+\.\d+)?|\+deb\d+|\+bpo))-(.+)$`)
+	// debKernelFlavor splits any deb kernel package into <prefix>-<abi>-<flavor> to find installed
+	// kernels of the same flavor: the distributions' own and also pve-kernel-5.15.131-2-pve,
+	// proxmox-kernel-6.8.12-4-pve-signed, linux-image-6.6.51+rpt-rpi-v8 (Raspberry Pi) and Kali's
+	// linux-image-6.11.2-amd64. Metapackages (linux-image-amd64, proxmox-kernel-6.8) do not match.
+	debKernelFlavor = regexp.MustCompile(`^(.+?)-(\d+\.\d+\.\d+[^-]*(?:-\d+(?:\.[^-]+)?)?)-(.+)$`)
 )
 
 func (k kernelCollector) collect(ctx context.Context) (Item, Origin) {
@@ -141,7 +147,7 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 	var siblings []pkgtool.Package
 	switch tool.Type() {
 	case "deb":
-		m := debKernelName.FindStringSubmatch(pkg.Name)
+		m := debKernelFlavor.FindStringSubmatch(pkg.Name)
 		if m == nil {
 			break
 		}
@@ -150,7 +156,7 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 			break
 		}
 		for _, s := range all {
-			if sm := debKernelName.FindStringSubmatch(s.Name); sm != nil && sm[1] == m[1] && sm[3] == m[3] && s.Name != pkg.Name {
+			if sm := debKernelFlavor.FindStringSubmatch(s.Name); sm != nil && sm[1] == m[1] && sm[3] == m[3] && s.Name != pkg.Name {
 				siblings = append(siblings, s)
 			}
 		}

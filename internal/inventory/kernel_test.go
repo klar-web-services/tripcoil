@@ -194,6 +194,20 @@ func TestKernel(t *testing.T) {
 			origin: KernelUpstreamOriginID("6.8.12"), // Debian's advisories do not cover Proxmox kernels
 		},
 		{
+			name: "proxmox kernel with a newer one installed", release: debianRel,
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.8.12-4-pve", "Linux version 6.8.12-4-pve (build@proxmox) (gcc (Debian 12.2.0-14) 12.2.0, "+
+					"GNU ld (GNU Binutils for Debian) 2.40) #1 SMP PREEMPT_DYNAMIC PMX 6.8.12-4 (2024-11-06T15:04Z)", "", "usr/lib/modules/6.8.12-4-pve")
+			},
+			tool: &fakeTool{typ: "deb",
+				owners: map[string]pkgtool.Package{"/usr/lib/modules/6.8.12-4-pve/modules.builtin": deb("proxmox-kernel-6.8.12-4-pve-signed", "6.8.12-4")},
+				installed: map[string][]pkgtool.Package{"proxmox-kernel-*": {
+					deb("proxmox-kernel-6.8.12-4-pve-signed", "6.8.12-4"), deb("proxmox-kernel-6.8.12-5-pve-signed", "6.8.12-5"), deb("proxmox-kernel-6.8", "6.8.12-5"),
+				}}},
+			running: "6.8.12-4", upstream: "6.8.12", pendingContains: "proxmox-kernel-6.8.12-5-pve-signed 6.8.12-5",
+			origin: KernelUpstreamOriginID("6.8.12"),
+		},
+		{
 			name: "raspberry pi kernel with an epoch", release: debianRel,
 			root: func(t *testing.T) string {
 				return kernelRoot(t, "6.6.51+rpt-rpi-v8", "Linux version 6.6.51+rpt-rpi-v8 (serge@raspberrypi.com) (aarch64-linux-gnu-gcc-12 (Debian 12.2.0-14) 12.2.0, "+
@@ -202,6 +216,21 @@ func TestKernel(t *testing.T) {
 			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
 				"/usr/lib/modules/6.6.51+rpt-rpi-v8/modules.builtin": deb("linux-image-6.6.51+rpt-rpi-v8", "1:6.6.51-1+rpt3")}},
 			running: "1:6.6.51-1+rpt3", upstream: "6.6.51",
+			origin: KernelUpstreamOriginID("6.6.51"),
+		},
+		{
+			name: "raspberry pi kernel with a newer one installed", release: debianRel,
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.6.51+rpt-rpi-v8", "Linux version 6.6.51+rpt-rpi-v8 (serge@raspberrypi.com) (aarch64-linux-gnu-gcc-12 (Debian 12.2.0-14) 12.2.0, "+
+					"GNU ld (GNU Binutils for Debian) 2.40) #1 SMP PREEMPT Debian 1:6.6.51-1+rpt3 (2024-10-08)", "", "usr/lib/modules/6.6.51+rpt-rpi-v8")
+			},
+			tool: &fakeTool{typ: "deb",
+				owners: map[string]pkgtool.Package{"/usr/lib/modules/6.6.51+rpt-rpi-v8/modules.builtin": deb("linux-image-6.6.51+rpt-rpi-v8", "1:6.6.51-1+rpt3")},
+				installed: map[string][]pkgtool.Package{"linux-image-*": {
+					deb("linux-image-6.6.51+rpt-rpi-v8", "1:6.6.51-1+rpt3"), deb("linux-image-6.6.62+rpt-rpi-v8", "1:6.6.62-1+rpt1"),
+					deb("linux-image-6.6.62+rpt-rpi-2712", "1:6.6.62-1+rpt1"), deb("linux-image-rpi-v8", "1:6.6.62-1+rpt1"),
+				}}},
+			running: "1:6.6.51-1+rpt3", upstream: "6.6.51", pendingContains: "linux-image-6.6.62+rpt-rpi-v8 1:6.6.62-1+rpt1",
 			origin: KernelUpstreamOriginID("6.6.51"),
 		},
 		{
@@ -244,8 +273,10 @@ func TestKernel(t *testing.T) {
 			} else if !it.RebootPending || !strings.Contains(strings.Join(it.RebootReasons, "; "), tc.pendingContains) {
 				t.Fatalf("reboot reasons %v, want one containing %q", it.RebootReasons, tc.pendingContains)
 			}
-			if strings.Contains(strings.Join(it.RebootReasons, "; "), "cloud") {
-				t.Fatal("another flavor must not count")
+			for _, other := range []string{"cloud", "rpi-2712"} {
+				if strings.Contains(strings.Join(it.RebootReasons, "; "), other) {
+					t.Fatal("another flavor must not count")
+				}
 			}
 			if tc.origin == "unresolved" {
 				if o.Kind != OriginUnresolved {
