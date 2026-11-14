@@ -1,4 +1,4 @@
-⚠️ Audit only (the AI review is not part of this build): 1 critical, 1 high, 1 medium, 1 low findings (4 coverage gaps)
+⚠️ Audit only (the AI review is not part of this build): 1 critical, 2 high, 3 medium, 1 low findings (4 coverage gaps)
 
 **web-1** · debian 12 · kernel 6.1.0-28-amd64 · run 20261114T061500Z-3fa2, 2026-11-14 06:15 UTC
 
@@ -8,23 +8,28 @@
 
 ## Critical risk (1)
 
-- [CVE-2026-2000](https://security-tracker.debian.org/tracker/CVE-2026-2000) in linux-image-6.1.0-28-amd64 6.1.119-1 (kernel): severity High, known exploited (CISA KEV).
-  Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot.
+- [CVE-2026-2000](https://security-tracker.debian.org/tracker/CVE-2026-2000): severity High, known exploited (CISA KEV).
+  - linux-image-6.1.0-28-amd64 6.1.119-1 in kernel: Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot.
 
-## High risk (1)
+## High risk (2)
 
-- [CVE-2026-1234](https://security-tracker.debian.org/tracker/CVE-2026-1234) in libssl3 3.0.15-1\~deb12u1 (nginx, node, python3.11): severity High, EPSS 41.0%.
-  Upgrade libssl3 to 3.0.16-1\~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.
+- [CVE-2026-1234](https://security-tracker.debian.org/tracker/CVE-2026-1234): severity High, EPSS 41.0%.
+  - libssl3 3.0.15-1\~deb12u1 in nginx, node, python3.11: Upgrade libssl3 to 3.0.16-1\~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.
+  - libssl3 3.0.11-1\~deb12u2 in shop-web-1: Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1\~deb12u1 or later, then recreate the container shop-web-1.
 
-## Medium risk (1)
+## Medium risk (3)
 
-- [GHSA-35jh-r3h4-6jhm](https://security-tracker.debian.org/tracker/GHSA-35jh-r3h4-6jhm) in lodash 4.17.20 (node): severity High, EPSS 0.2%.
-  Upgrade lodash in /srv/shop to 4.17.21, then restart shop.service.
+- 1 in the app directory /srv/shop (node); all in lodash (1)
+- 1 in the container shop-web-1 (ghcr.io/acme/shop:2026.11.3); all in libssl3 (1)
+- 1 in this host's packages (1 package); all in libssl3 (1)
+
+Every medium risk finding, with its remediation, is in audit.json.
 
 ## Low risk (1)
 
-- [CVE-2026-3000](https://security-tracker.debian.org/tracker/CVE-2026-3000) in zlib1g 1:1.2.13.dfsg-1 (shop-web-1): severity Low.
-  No fix is known for zlib1g 1:1.2.13.dfsg-1 yet.
+- 1 in the container shop-web-1 (ghcr.io/acme/shop:2026.11.3); all in zlib1g (1)
+
+Every low risk finding, with its remediation, is in audit.json.
 
 ## Restart or reboot needed
 

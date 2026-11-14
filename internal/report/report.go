@@ -4,6 +4,7 @@ package report
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -88,7 +89,7 @@ func Render(in Input) string {
 	}
 	if in.Audit != nil {
 		writeUpgrades(&b, in.Audit.Upgrades)
-		writeFindings(&b, in.Audit.Findings, itemNamesByID(in.Inventory))
+		writeFindings(&b, in.Audit.Findings, in.Inventory)
 	}
 	writeRestarts(&b, in.Inventory)
 	writeGaps(&b, gaps, in.Audit, in.Inventory)
@@ -198,7 +199,15 @@ func clears(n int) string {
 	return fmt.Sprintf("all %d of its findings", n)
 }
 
-func writeFindings(b *strings.Builder, findings []audit.Finding, names map[string]string) {
+// maxGroups is how many groups the summary of a risk tier names.
+const maxGroups = 25
+
+// severities orders the severities a vulnerability can have in different sources.
+var severities = []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
+
+// writeFindings lists critical and high findings in full, grouped by vulnerability, and
+// summarizes medium and low ones by where they are.
+func writeFindings(b *strings.Builder, findings []audit.Finding, inv *inventory.Inventory) {
 	byTier := map[string][]audit.Finding{}
 	for _, f := range findings {
 		byTier[f.Risk] = append(byTier[f.Risk], f)
@@ -208,45 +217,207 @@ func writeFindings(b *strings.Builder, findings []audit.Finding, names map[strin
 		if len(fs) == 0 {
 			continue
 		}
-		slices.SortFunc(fs, func(a, b audit.Finding) int {
-			return cmp.Or(cmp.Compare(b.Vulnerability.EPSS, a.Vulnerability.EPSS), cmp.Compare(a.Vulnerability.ID, b.Vulnerability.ID), cmp.Compare(a.ID, b.ID))
-		})
 		fmt.Fprintf(b, "## %s risk (%d)\n\n", titleCase(tier), len(fs))
-		for _, f := range fs {
-			var items []string
-			for _, id := range f.Items {
-				items = append(items, names[id])
-			}
-			slices.Sort(items)
-			items = slices.Compact(items)
-			fmt.Fprintf(b, "- %s in %s %s", vulnLink(f.Vulnerability), md(f.Package.Name), md(f.Package.Version))
-			if len(items) > maxItems {
-				items = append(items[:maxItems], fmt.Sprintf("and %d more", len(items)-maxItems))
-			}
-			if len(items) > 0 {
-				fmt.Fprintf(b, " (%s)", md(strings.Join(items, ", ")))
-			}
-			fmt.Fprintf(b, ": %s.\n  %s\n", signals(f), md(f.Remediation))
+		if tier == audit.RiskCritical || tier == audit.RiskHigh {
+			writeByVulnerability(b, fs, itemNamesByID(inv))
+		} else {
+			writeSummary(b, tier, fs, inv)
 		}
 		b.WriteString("\n")
 	}
 }
 
-func signals(f audit.Finding) string {
-	s := []string{"severity " + f.Vulnerability.Severity}
-	if f.Vulnerability.KnownExploited {
+func writeByVulnerability(b *strings.Builder, fs []audit.Finding, names map[string]string) {
+	type affected struct {
+		items string
+		f     audit.Finding
+	}
+	byID := map[string][]affected{}
+	for _, f := range fs {
+		byID[f.Vulnerability.ID] = append(byID[f.Vulnerability.ID], affected{itemList(f, names), f})
+	}
+	vulns := map[string]audit.Vulnerability{}
+	for id, as := range byID {
+		slices.SortFunc(as, func(x, y affected) int {
+			return cmp.Or(cmp.Compare(x.items, y.items), cmp.Compare(x.f.Package.Name, y.f.Package.Name), cmp.Compare(x.f.Package.Version, y.f.Package.Version), cmp.Compare(x.f.ID, y.f.ID))
+		})
+		group := make([]audit.Finding, len(as))
+		for i, a := range as {
+			group[i] = a.f
+		}
+		vulns[id] = merge(group)
+	}
+	ids := slices.Collect(maps.Keys(byID))
+	slices.SortFunc(ids, func(x, y string) int { return cmp.Or(cmp.Compare(vulns[y].EPSS, vulns[x].EPSS), cmp.Compare(x, y)) })
+	for _, id := range ids {
+		fmt.Fprintf(b, "- %s: %s.\n", vulnLink(vulns[id]), signals(vulns[id]))
+		for _, a := range byID[id] {
+			fmt.Fprintf(b, "  - %s %s", escapeBlockStart(md(a.f.Package.Name)), md(a.f.Package.Version))
+			if a.items != "" {
+				fmt.Fprintf(b, " in %s", md(a.items))
+			}
+			if a.f.Source == "kernel-cna" {
+				b.WriteString(" (matched by upstream kernel version)")
+			}
+			fmt.Fprintf(b, ": %s\n", md(a.f.Remediation))
+		}
+	}
+}
+
+// itemList names the items of a finding.
+func itemList(f audit.Finding, names map[string]string) string {
+	var items []string
+	for _, id := range f.Items {
+		items = append(items, names[id])
+	}
+	slices.Sort(items)
+	items = slices.Compact(items)
+	if len(items) > maxItems {
+		items = append(items[:maxItems], fmt.Sprintf("and %d more", len(items)-maxItems))
+	}
+	return strings.Join(items, ", ")
+}
+
+// merge is the vulnerability of a group of findings: every severity its sources give, KEV and the
+// highest EPSS of any of them, and their links in order.
+func merge(fs []audit.Finding) audit.Vulnerability {
+	v := audit.Vulnerability{ID: fs[0].Vulnerability.ID}
+	var sevs []string
+	for _, f := range fs {
+		if !slices.Contains(sevs, f.Vulnerability.Severity) {
+			sevs = append(sevs, f.Vulnerability.Severity)
+		}
+		v.KnownExploited = v.KnownExploited || f.Vulnerability.KnownExploited
+		v.EPSS = max(v.EPSS, f.Vulnerability.EPSS)
+		v.URLs = append(v.URLs, f.Vulnerability.URLs...)
+	}
+	slices.SortFunc(sevs, func(x, y string) int { return cmp.Compare(slices.Index(severities, x), slices.Index(severities, y)) })
+	v.Severity = strings.Join(sevs, " or ")
+	return v
+}
+
+func signals(v audit.Vulnerability) string {
+	s := []string{"severity " + v.Severity}
+	if v.KnownExploited {
 		s = append(s, "known exploited (CISA KEV)")
 	}
-	switch e := f.Vulnerability.EPSS; {
+	switch e := v.EPSS; {
 	case e > 0 && e < 0.0005: // would round to 0.0%
 		s = append(s, "EPSS <0.1%")
 	case e > 0:
 		s = append(s, fmt.Sprintf("EPSS %.1f%%", e*100))
 	}
-	if f.Source == "kernel-cna" {
-		s = append(s, "matched by upstream kernel version")
-	}
 	return strings.Join(s, ", ")
+}
+
+// writeSummary counts the findings of a tier per image, binary, app directory, jar and kernel,
+// and those of the host's packages together.
+func writeSummary(b *strings.Builder, tier string, fs []audit.Finding, inv *inventory.Inventory) {
+	type group struct {
+		name     string
+		count    int
+		packages map[string]int
+	}
+	origins, names, kernel := map[string]inventory.Origin{}, map[string][]string{}, map[string]bool{}
+	if inv != nil {
+		origins, names = originsByID(inv), itemNames(inv)
+		for _, it := range inv.Items {
+			if it.Kind == inventory.KindKernel {
+				for _, id := range it.Origins {
+					kernel[id] = true
+				}
+			}
+		}
+	}
+	groups := map[string]*group{}
+	hostPackages := map[string]bool{}
+	for _, f := range fs {
+		o := origins[f.Origin]
+		key := f.Origin
+		if o.Kind == inventory.OriginPackage && !kernel[f.Origin] {
+			key = ""
+			hostPackages[f.Origin] = true
+		}
+		g := groups[key]
+		if g == nil {
+			g = &group{packages: map[string]int{}}
+			if key != "" {
+				o.ID = f.Origin
+				g.name = groupName(o, names[f.Origin], kernel[f.Origin])
+			}
+			groups[key] = g
+		}
+		g.count++
+		g.packages[f.Package.Name]++
+	}
+	if g := groups[""]; g != nil {
+		g.name = "this host's packages (" + plural(len(hostPackages), "package", "packages") + ")"
+	}
+	list := slices.Collect(maps.Values(groups))
+	slices.SortFunc(list, func(x, y *group) int { return cmp.Or(cmp.Compare(y.count, x.count), cmp.Compare(x.name, y.name)) })
+	for i, g := range list {
+		if i == maxGroups {
+			rest := 0
+			for _, g := range list[i:] {
+				rest += g.count
+			}
+			fmt.Fprintf(b, "- … and %d more with %s.\n", len(list)-i, plural(rest, "finding", "findings"))
+			break
+		}
+		fmt.Fprintf(b, "- %d in %s; %s\n", g.count, md(g.name), topPackages(g.packages))
+	}
+	fmt.Fprintf(b, "\nEvery %s risk finding, with its remediation, is in audit.json.\n", tier)
+}
+
+// groupName names an origin in a summary, with its items.
+func groupName(o inventory.Origin, items []string, kernel bool) string {
+	if len(items) > maxItems {
+		items = append(items[:maxItems:maxItems], fmt.Sprintf("and %d more", len(items)-maxItems))
+	}
+	names := strings.Join(items, ", ")
+	var what string
+	switch {
+	case o.Kind == inventory.OriginKernelUpstream:
+		return "the kernel (Linux " + o.UpstreamVersion + ")"
+	case kernel:
+		return "the kernel (package " + o.Name + " " + o.Version + ")"
+	case o.Kind == inventory.OriginImage:
+		ref := cmp.Or(o.Ref, o.ImageID)
+		switch len(items) {
+		case 0:
+			return "the image " + ref
+		case 1:
+			return "the container " + names + " (" + ref + ")"
+		}
+		return "the containers " + names + " (" + ref + ")"
+	case o.Kind == inventory.OriginBinary:
+		what = "the binary " + strings.Join(o.Paths, ", ")
+	case o.Kind == inventory.OriginAppDir && o.Jar:
+		what = "the jar " + o.Path
+	case o.Kind == inventory.OriginAppDir:
+		what = "the app directory " + o.Path
+	default:
+		what = o.ID
+	}
+	if names == "" {
+		return what
+	}
+	return what + " (" + names + ")"
+}
+
+// topPackages names the three packages with the most findings in a group.
+func topPackages(counts map[string]int) string {
+	pkgs := slices.Collect(maps.Keys(counts))
+	slices.SortFunc(pkgs, func(x, y string) int { return cmp.Or(cmp.Compare(counts[y], counts[x]), cmp.Compare(x, y)) })
+	how := "all in "
+	if len(pkgs) > 3 {
+		pkgs, how = pkgs[:3], "most in "
+	}
+	parts := make([]string, len(pkgs))
+	for i, p := range pkgs {
+		parts[i] = fmt.Sprintf("%s (%d)", md(p), counts[p])
+	}
+	return how + strings.Join(parts, ", ")
 }
 
 func writeRestarts(b *strings.Builder, inv *inventory.Inventory) {
@@ -295,13 +466,42 @@ func writeGaps(b *strings.Builder, gaps []Gap, aud *audit.Audit, inv *inventory.
 		return
 	}
 	b.WriteString("## Coverage gaps\n\n")
-	for _, g := range gaps {
-		fmt.Fprintf(b, "- `%s` %s: %s\n", g.Code, md(g.Subject), md(g.Detail))
+	for _, g := range groupGaps(gaps) {
+		if len(g) == 1 {
+			fmt.Fprintf(b, "- `%s` %s: %s\n", g[0].Code, md(g[0].Subject), md(g[0].Detail))
+			continue
+		}
+		var examples []string
+		for _, x := range g[:min(3, len(g))] {
+			examples = append(examples, md(x.Subject))
+		}
+		if len(g) > 3 {
+			examples = append(examples, fmt.Sprintf("and %d more", len(g)-3))
+		}
+		fmt.Fprintf(b, "- %d × `%s`: %s (%s)\n", len(g), g[0].Code, md(g[0].Detail), strings.Join(examples, "; "))
 	}
 	for _, f := range failed {
 		b.WriteString(f + "\n")
 	}
 	b.WriteString("\n")
+}
+
+// groupGaps groups gaps by code and reason, the largest group first.
+func groupGaps(gaps []Gap) [][]Gap {
+	var groups [][]Gap
+	at := map[[2]string]int{}
+	for _, g := range gaps {
+		k := [2]string{g.Code, g.Detail}
+		i, ok := at[k]
+		if !ok {
+			i = len(groups)
+			at[k] = i
+			groups = append(groups, nil)
+		}
+		groups[i] = append(groups[i], g)
+	}
+	slices.SortStableFunc(groups, func(x, y []Gap) int { return cmp.Compare(len(y), len(x)) })
+	return groups
 }
 
 func writeFreshness(b *strings.Builder, aud *audit.Audit) {

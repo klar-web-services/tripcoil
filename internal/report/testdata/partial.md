@@ -13,18 +13,19 @@
 
 ## Critical risk (1)
 
-- [CVE-2026-2000](https://security-tracker.debian.org/tracker/CVE-2026-2000) in linux-image-6.1.0-28-amd64 6.1.119-1 (kernel): severity High, known exploited (CISA KEV).
-  Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot.
+- [CVE-2026-2000](https://security-tracker.debian.org/tracker/CVE-2026-2000): severity High, known exploited (CISA KEV).
+  - linux-image-6.1.0-28-amd64 6.1.119-1 in kernel: Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot.
 
 ## High risk (1)
 
-- [CVE-2026-1234](https://security-tracker.debian.org/tracker/CVE-2026-1234) in libssl3 3.0.15-1\~deb12u1 (nginx, node, python3.11): severity High, EPSS 41.0%.
-  Upgrade libssl3 to 3.0.16-1\~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.
+- [CVE-2026-1234](https://security-tracker.debian.org/tracker/CVE-2026-1234): severity High, EPSS 41.0%.
+  - libssl3 3.0.15-1\~deb12u1 in nginx, node, python3.11: Upgrade libssl3 to 3.0.16-1\~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.
 
 ## Medium risk (1)
 
-- [GHSA-35jh-r3h4-6jhm](https://security-tracker.debian.org/tracker/GHSA-35jh-r3h4-6jhm) in lodash 4.17.20 (node): severity High, EPSS 0.2%.
-  Upgrade lodash in /srv/shop to 4.17.21, then restart shop.service.
+- 1 in the app directory /srv/shop (node); all in lodash (1)
+
+Every medium risk finding, with its remediation, is in audit.json.
 
 ## Restart or reboot needed
 

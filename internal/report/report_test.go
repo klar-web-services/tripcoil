@@ -2,6 +2,7 @@ package report
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,12 @@ func hostAudit() *audit.Audit {
 				"Upgrade lodash in /srv/shop to 4.17.21, then restart shop.service.", "proc:shop"),
 			f("f:0000000000000004", img, "CVE-2026-3000", "Low", 0, false, audit.RiskLow, "zlib1g", "1:1.2.13.dfsg-1",
 				"No fix is known for zlib1g 1:1.2.13.dfsg-1 yet.", "container:shop-web-1"),
+			f("f:0000000000000005", img, "CVE-2026-1234", "High", 0.41, false, audit.RiskHigh, "libssl3", "3.0.11-1~deb12u2",
+				"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the container shop-web-1.", "container:shop-web-1"),
+			f("f:0000000000000006", img, "CVE-2026-3100", "High", 0.001, false, audit.RiskMedium, "libssl3", "3.0.11-1~deb12u2",
+				"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.17-1~deb12u1 or later, then recreate the container shop-web-1.", "container:shop-web-1"),
+			f("f:0000000000000007", libssl, "CVE-2026-3200", "Critical", 0.003, false, audit.RiskMedium, "libssl3", "3.0.15-1~deb12u1",
+				"Upgrade libssl3 to 3.0.17-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.", "proc:nginx", "proc:shop", "proc:worker"),
 		},
 		Upgrades: []audit.Upgrade{{Origin: shop, Path: "/srv/shop", Package: "lodash", Type: "npm", Installed: []string{"4.17.20"}, Version: "4.18.0", Findings: 4}},
 		Errors:   []problem.Problem{}, Warnings: []problem.Problem{},
@@ -158,18 +165,26 @@ func TestRenderEscapesUntrustedText(t *testing.T) {
 	aud.Findings[1].Vulnerability.URLs = nil
 	aud.Findings[2].Vulnerability.ID = "1. GHSA"
 	aud.Findings[2].Vulnerability.URLs = []string{"http://insecure.example"}
+	aud.Findings[2].Risk = audit.RiskHigh
 	aud.Findings[3].Package.Name = "a~b~c"
 	aud.Findings[3].Package.Version = "ev\u202eil\u200bx"
 	aud.Findings[3].Vulnerability.ID = "\n# Heading" // clean makes the newline a space
 	aud.Findings[3].Vulnerability.URLs = nil
+	aud.Findings[3].Risk = audit.RiskHigh
+	aud.Findings[4].Package.Name = "# deep"
+	aud.Findings[5].Package.Name = "*sum*|pkg"
+	inv.Items[6].Name = "shop_web*1"
+	inv.Origins[5].Ref = "ghcr.io/acme/[shop]:1"
 	aud.Upgrades[0].Installed = []string{"4.17.20", "*4.17.21*"}
 	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
-	for _, bad := range []string{"\x1b", "<script>", "|*pkg*", "[x](javascript", "](https://example.com/a)b)", "- # CVE-1", "- 1. GHSA", "-  # Heading", "a~b~c", "\u202e", "\u200b", "*4.17.21*"} {
+	for _, bad := range []string{"\x1b", "<script>", "|*pkg*", "[x](javascript", "](https://example.com/a)b)", "- # CVE-1", "- 1. GHSA", "-  # Heading", "a~b~c", "\u202e", "\u200b", "*4.17.21*",
+		"  - # deep", "*sum*|pkg", "shop_web*1", "[shop]"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("report contains %q", bad)
 		}
 	}
-	for _, want := range []string{`evil\|\*pkg\*`, `- \# CVE-1`, `- 1\. GHSA`, `- \# Heading`, `a\~b\~c`, "ev il x", `- Upgrade lodash 4.17.20, \*4.17.21\* in /srv/shop to 4.18.0`} {
+	for _, want := range []string{`evil\|\*pkg\*`, `- \# CVE-1`, `- 1\. GHSA`, `- \# Heading`, `a\~b\~c`, "ev il x", `- Upgrade lodash 4.17.20, \*4.17.21\* in /srv/shop to 4.18.0`,
+		`  - \# deep`, `\*sum\*\|pkg (1)`, `the container shop\_web\*1 (ghcr.io/acme/\[shop\]:1)`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q missing:\n%s", want, got)
 		}
@@ -205,7 +220,7 @@ func TestDescribeNamesAtMostFiveItems(t *testing.T) {
 
 func TestEPSSBelowRoundingPrintsAsLessThan(t *testing.T) {
 	for epss, want := range map[float64]string{0.0002: "EPSS <0.1%", 0.002: "EPSS 0.2%", 0: ""} {
-		got := signals(audit.Finding{Vulnerability: audit.Vulnerability{Severity: "High", EPSS: epss}})
+		got := signals(audit.Vulnerability{Severity: "High", EPSS: epss})
 		if strings.Contains(got, "EPSS") != (want != "") || (want != "" && !strings.Contains(got, want)) {
 			t.Errorf("EPSS %v: %q, want %q", epss, got, want)
 		}
@@ -220,7 +235,7 @@ func TestRenderNamesAtMostFiveItems(t *testing.T) {
 		aud.Findings[0].Items = append(aud.Findings[0].Items, "proc:"+n)
 	}
 	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
-	if !strings.Contains(got, "(a, b, c, d, e, and 5 more)") {
+	if !strings.Contains(got, " in a, b, c, d, e, and 5 more: ") {
 		t.Fatalf("%s", got)
 	}
 }
@@ -270,5 +285,145 @@ func TestVerdictNamesTheErrorThatFailedTheAudit(t *testing.T) {
 		if !strings.HasPrefix(verdict, "⛔ Run incomplete: ") || !strings.Contains(verdict, tc.want) {
 			t.Errorf("verdict %q, want %s", verdict, tc.want)
 		}
+	}
+}
+
+func TestRenderGroupsCriticalAndHighByVulnerability(t *testing.T) {
+	up := inventory.KernelUpstreamOriginID("7.3.3")
+	inv := &inventory.Inventory{
+		Items: []inventory.Item{
+			{ID: "kernel", Kind: inventory.KindKernel, Name: "kernel", Origins: []string{up}},
+			{ID: "container:b-web", Kind: inventory.KindContainer, Name: "b-web", Origins: []string{"image:b"}},
+			{ID: "container:a-api", Kind: inventory.KindContainer, Name: "a-api", Origins: []string{"image:a"}},
+		},
+		Origins: []inventory.Origin{
+			{ID: up, Kind: inventory.OriginKernelUpstream, UpstreamVersion: "7.3.3"},
+			{ID: "image:a", Kind: inventory.OriginImage, Ref: "acme/api:1"},
+			{ID: "image:b", Kind: inventory.OriginImage, Ref: "acme/web:1"},
+		},
+	}
+	f := func(id, origin, vuln, sev string, epss float64, risk, pkg, item string, urls ...string) audit.Finding {
+		return audit.Finding{ID: id, Origin: origin, Risk: risk, Items: []string{item}, Remediation: "Fix " + id + ".", Package: audit.Package{Name: pkg, Version: "1.2"},
+			Vulnerability: audit.Vulnerability{ID: vuln, Severity: sev, EPSS: epss, KnownExploited: risk == audit.RiskCritical, URLs: urls}}
+	}
+	kernelCNA := f("f:6", up, "CVE-2026-7000", "High", 0.2, audit.RiskHigh, "linux", "kernel")
+	kernelCNA.Source = "kernel-cna"
+	aud := &audit.Audit{Status: audit.Complete, Findings: []audit.Finding{
+		f("f:1", "image:b", "CVE-2026-1000", "Critical", 0.5, audit.RiskCritical, "zlib", "container:b-web", "http://insecure.example", "https://example.com/1000"),
+		f("f:2", "image:a", "CVE-2026-1000", "High", 0.5, audit.RiskCritical, "zlib", "container:a-api"),
+		f("f:3", "image:a", "CVE-2026-1000", "Critical", 0.5, audit.RiskCritical, "libz", "container:a-api"),
+		f("f:4", "image:a", "CVE-2026-2000", "High", 0.9, audit.RiskCritical, "openssl", "container:a-api"),
+		f("f:5", "image:b", "CVE-2026-3000", "Medium", 0.2, audit.RiskHigh, "curl", "container:b-web"),
+		kernelCNA,
+	}}
+	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
+	want := `## Critical risk (4)
+
+- CVE-2026-2000: severity High, known exploited (CISA KEV), EPSS 90.0%.
+  - openssl 1.2 in a-api: Fix f:4.
+- [CVE-2026-1000](https://example.com/1000): severity Critical or High, known exploited (CISA KEV), EPSS 50.0%.
+  - libz 1.2 in a-api: Fix f:3.
+  - zlib 1.2 in a-api: Fix f:2.
+  - zlib 1.2 in b-web: Fix f:1.
+
+## High risk (2)
+
+- CVE-2026-3000: severity Medium, EPSS 20.0%.
+  - curl 1.2 in b-web: Fix f:5.
+- CVE-2026-7000: severity High, EPSS 20.0%.
+  - linux 1.2 in kernel (matched by upstream kernel version): Fix f:6.
+
+`
+	if !strings.Contains(got, want) {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRenderSummarizesMediumAndLow(t *testing.T) {
+	up := inventory.KernelUpstreamOriginID("7.3.3")
+	inv := &inventory.Inventory{
+		Items: []inventory.Item{
+			{ID: "kernel", Kind: inventory.KindKernel, Name: "kernel", Origins: []string{up}},
+			{ID: "container:web-2", Kind: inventory.KindContainer, Name: "web-2", Origins: []string{img}},
+			{ID: "container:web-1", Kind: inventory.KindContainer, Name: "web-1", Origins: []string{img}},
+			{ID: "proc:java", Kind: inventory.KindProcess, Name: "java", Origins: []string{"appdir:/srv/app.jar", libssl}},
+		},
+		Origins: []inventory.Origin{
+			{ID: up, Kind: inventory.OriginKernelUpstream, UpstreamVersion: "7.3.3"},
+			{ID: img, Kind: inventory.OriginImage, ImageID: "sha256:1111", Ref: "ghcr.io/acme/web:1"},
+			{ID: "appdir:/srv/app.jar", Kind: inventory.OriginAppDir, Path: "/srv/app.jar", Jar: true},
+			{ID: libssl, Kind: inventory.OriginPackage, Name: "libssl3"},
+			{ID: "pkg:zlib", Kind: inventory.OriginPackage, Name: "zlib1g"},
+		},
+	}
+	aud := &audit.Audit{Status: audit.Complete}
+	add := func(origin, risk, pkg string, n int) {
+		for range n {
+			id := fmt.Sprintf("f:%d", len(aud.Findings))
+			aud.Findings = append(aud.Findings, audit.Finding{ID: id, Origin: origin, Risk: risk, Package: audit.Package{Name: pkg}, Remediation: "Fix " + id + ".",
+				Vulnerability: audit.Vulnerability{ID: "CVE-" + id, Severity: "High"}})
+		}
+	}
+	add(img, audit.RiskMedium, "chromium", 3)
+	add(img, audit.RiskMedium, "zlib", 1)
+	add(img, audit.RiskMedium, "openssl", 1)
+	add(img, audit.RiskMedium, "libxml2", 2)
+	add(libssl, audit.RiskMedium, "libssl3", 2)
+	add("pkg:zlib", audit.RiskMedium, "zlib1g", 1)
+	add("appdir:/srv/app.jar", audit.RiskMedium, "log4j-core", 2)
+	add(up, audit.RiskMedium, "linux", 2)
+	for i := range 25 {
+		b := fmt.Sprintf("binary:%02d", i)
+		inv.Origins = append(inv.Origins, inventory.Origin{ID: b, Kind: inventory.OriginBinary, Paths: []string{fmt.Sprintf("/opt/bin/b%02d", i)}})
+		add(b, audit.RiskMedium, "stdlib", 1)
+	}
+	add(img, audit.RiskLow, "zlib", 1)
+	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
+	want := `## Medium risk (39)
+
+- 7 in the containers web-1, web-2 (ghcr.io/acme/web:1); most in chromium (3), libxml2 (2), openssl (1)
+- 3 in this host's packages (2 packages); all in libssl3 (2), zlib1g (1)
+- 2 in the jar /srv/app.jar (java); all in log4j-core (2)
+- 2 in the kernel (Linux 7.3.3); all in linux (2)
+- 1 in the binary /opt/bin/b00; all in stdlib (1)
+`
+	if !strings.Contains(got, want) {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	want = `- 1 in the binary /opt/bin/b20; all in stdlib (1)
+- … and 4 more with 4 findings.
+
+Every medium risk finding, with its remediation, is in audit.json.
+
+## Low risk (1)
+
+- 1 in the containers web-1, web-2 (ghcr.io/acme/web:1); all in zlib (1)
+
+Every low risk finding, with its remediation, is in audit.json.
+`
+	if !strings.Contains(got, want) || strings.Contains(got, "/opt/bin/b21") || strings.Contains(got, "Fix f:") {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRenderGroupsCoverageGaps(t *testing.T) {
+	inv := &inventory.Inventory{}
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		id := "unresolved:" + n
+		inv.Items = append(inv.Items, inventory.Item{ID: "proc:" + n, Kind: inventory.KindProcess, Name: n, Origins: []string{id}})
+		inv.Origins = append(inv.Origins, inventory.Origin{ID: id, Kind: inventory.OriginUnresolved, Reason: "it runs in another root file system", Paths: []string{"/lib/" + n + "_x.so"}})
+	}
+	inv.Items = append(inv.Items,
+		inventory.Item{ID: "proc:lxd", Kind: inventory.KindProcess, Name: "lxd", Origins: []string{snap}},
+		inventory.Item{ID: "proc:p", Kind: inventory.KindProcess, Name: "p", Exe: "/usr/bin/python3", Notes: []string{problem.AppDirNotFound}},
+		inventory.Item{ID: "proc:q", Kind: inventory.KindProcess, Name: "q", Exe: "/usr/bin/python3", Notes: []string{problem.AppDirNotFound}})
+	inv.Origins = append(inv.Origins, inventory.Origin{ID: snap, Kind: inventory.OriginUnresolved, Reason: "it runs from a snap", Paths: []string{"/snap/lxd/1/bin/lxd"}})
+	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK}), Inventory: inv, NoReview: "x"})
+	want := "## Coverage gaps\n\n" +
+		"- 5 × `ORIGIN_UNRESOLVED`: it runs in another root file system (a: /lib/a\\_x.so; b: /lib/b\\_x.so; c: /lib/c\\_x.so; and 2 more)\n" +
+		"- 2 × `APPDIR_NOT_FOUND`: no app directory was found, so only the interpreter is audited (p (/usr/bin/python3); q (/usr/bin/python3))\n" +
+		"- `ORIGIN_UNRESOLVED` lxd: /snap/lxd/1/bin/lxd: it runs from a snap\n"
+	if !strings.Contains(got, want) || !strings.Contains(got, "(8 coverage gaps)") {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
