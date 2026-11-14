@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -225,6 +226,26 @@ func TestGrypeStopsWhenTheCacheRunsLow(t *testing.T) {
 	r.HasRoom = func(string) bool { return true }
 	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
 		t.Fatalf("with room: %v", err)
+	}
+}
+
+// A database update runs without the free-space check: it briefly needs about 3.4 GB of the cache
+// file system, which the floor does not leave on a small disk that has room for every scan.
+func TestUpdateDBDoesNotAskAboutSpace(t *testing.T) {
+	old := spaceCheckEvery
+	spaceCheckEvery = 5 * time.Millisecond
+	defer func() { spaceCheckEvery = old }()
+	r, _, _ := newRunner(t, "FAKE_GRYPE_SLEEP=0.3")
+	var asked atomic.Int32
+	r.HasRoom = func(string) bool {
+		asked.Add(1)
+		return false
+	}
+	if err := r.UpdateDB(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := asked.Load(); n != 0 {
+		t.Fatalf("UpdateDB asked about free space %d times", n)
 	}
 }
 

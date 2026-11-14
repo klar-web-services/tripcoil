@@ -121,11 +121,13 @@ const dbUpdateTimeout = time.Hour
 
 // UpdateDB downloads a newer vulnerability database when there is one. It also removes the
 // grype-db-download* directories before and after, so callers must hold the run lock: a
-// concurrent run could still be unpacking a database into one of them.
+// concurrent run could still be unpacking a database into one of them. HasRoom is not asked while
+// it runs: an update briefly needs about 3.4 GB of the cache file system, which the floor does not
+// leave on a 40 GB disk with 7 GB free, and what it unpacks is the database, not what users control.
 func (r *Runner) UpdateDB(ctx context.Context) error {
 	r.removeDownloads()
 	defer r.removeDownloads()
-	return r.runFor(ctx, []string{"db", "update"}, io.Discard, max(r.Timeout, dbUpdateTimeout))
+	return r.runFor(ctx, []string{"db", "update"}, io.Discard, max(r.Timeout, dbUpdateTimeout), false)
 }
 
 // removeDownloads removes the grype-db-download* directories that `grype db update` unpacks a
@@ -170,14 +172,14 @@ func (r *Runner) DBStatus(ctx context.Context) (DBStatus, error) {
 }
 
 func (r *Runner) run(ctx context.Context, args []string, stdout io.Writer) error {
-	return r.runFor(ctx, args, stdout, r.Timeout)
+	return r.runFor(ctx, args, stdout, r.Timeout, true)
 }
 
 // runFor runs Grype with the private configuration, writing its stdout to stdout, for at most
 // timeout (15 minutes when it is 0). Grype works in a fresh directory below the cache, also for
 // its temporary files: an image's layers are unpacked there, on the cache's disk rather than in a
-// /tmp that may be held in memory.
-func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, timeout time.Duration) error {
+// /tmp that may be held in memory. watch says that HasRoom is asked while Grype runs.
+func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, timeout time.Duration, watch bool) error {
 	binary, err := filepath.Abs(r.Binary)
 	if err != nil {
 		return err
@@ -232,7 +234,7 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	defer stop(nil)
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errGrypeTimeout)
 	defer cancel()
-	if r.HasRoom != nil {
+	if watch && r.HasRoom != nil {
 		watched := make(chan struct{})
 		go func() {
 			defer close(watched)

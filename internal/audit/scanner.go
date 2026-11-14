@@ -14,7 +14,8 @@ type grypeScanner struct {
 }
 
 // NewGrype returns the Scanner that runs the pinned Grype from cacheDir. Grype is stopped when the
-// cache file system falls below the floor that copies leave it (see hasRoom).
+// cache file system falls below the floor that copies leave it (see hasRoom), except while it
+// updates its database.
 func NewGrype(cacheDir string) Scanner {
 	return &grypeScanner{installer: grype.NewInstaller(cacheDir), runner: &grype.Runner{CacheDir: cacheDir,
 		HasRoom: func(dir string) bool { return hasRoom(dir, 0) == nil }}}
