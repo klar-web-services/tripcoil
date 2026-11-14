@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -292,15 +293,31 @@ func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
 
-// fileName is the name of a binary or jar on the host: of a binary, its first path.
+// fileName is the name of a binary's or jar's copy: a jar's own name, and the name of a binary's
+// first path, made a name that Syft never unpacks (see copyName).
 func fileName(o inventory.Origin) string {
 	switch {
 	case o.Kind == inventory.OriginAppDir:
 		return filepath.Base(o.Path)
 	case len(o.Paths) > 0:
-		return filepath.Base(o.Paths[0])
+		return copyName(filepath.Base(o.Paths[0]))
 	}
 	return o.SHA256
+}
+
+// archiveName matches the names for which Syft 1.57, in Grype 0.121.2, unpacks a file into the
+// cache, as measured: its file source unpacks a file whose name holds .tar, .zip, .7z or .rar, or
+// ends in .tgz, .tbz2, .txz, .tzst or .tlz, and its Java cataloger the Java archives below, .zip
+// and .rar among them. Appending a suffix would not do: the file source matches .tar, .zip, .7z
+// and .rar anywhere in the name.
+var archiveName = regexp.MustCompile(`(?i)\.(tar|zip|7z|rar)|\.(tgz|tbz2|txz|tzst|tlz|jar|war|ear|par|sar|nar|kar|hpi|jpi|far|zap|lpkg)$`)
+
+// copyName is the name of a binary's copy: its file name, with the dot of each archive extension
+// made an underscore, so that Syft reads the copy as the binary it is (libx.so.1.tar.gz becomes
+// libx.so.1_tar.gz). A user can map an archive under a library's name. A real binary's name keeps
+// its dots, so the binary classifiers' globs, such as libpython*.so*, still match it.
+func copyName(name string) string {
+	return archiveName.ReplaceAllStringFunc(name, func(ext string) string { return "_" + ext[1:] })
 }
 
 // source is what Grype scans for an origin: a verified copy of a binary or jar, an app directory,

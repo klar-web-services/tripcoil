@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -117,5 +118,53 @@ func TestUserFilesAreScannedAsPlainFilesAndDirectories(t *testing.T) {
 		default:
 			t.Errorf("Grype scanned %s", source)
 		}
+	}
+}
+
+// A binary's copy never has a name that makes Syft unpack it, as an archive or a Java archive: a
+// user can map a small archive that unpacks to gigabytes under a library's name, such as
+// libx.so.1.tar.gz. Real binaries keep their names, which Syft's classifiers go by.
+func TestCopyNamesAreNeverArchives(t *testing.T) {
+	for name, want := range map[string]string{
+		"libx.so.1.tar.gz": "libx.so.1_tar.gz",
+		"libx.so.1.tgz":    "libx.so.1_tgz",
+		"x.tar.gz.so":      "x_tar.gz.so",
+		"x.zip.bin":        "x_zip.bin",
+		"lib.7Z.so":        "lib_7Z.so",
+		"x.so.RAR":         "x.so_RAR",
+		"x.so.txz":         "x.so_txz",
+		"x.so.tbz2":        "x.so_tbz2",
+		"x.so.tzst":        "x.so_tzst",
+		"x.so.tlz":         "x.so_tlz",
+		"libx.so.1.jar":    "libx.so.1_jar",
+		"libx.so.lpkg":     "libx.so_lpkg",
+		"x.tar.tgz":        "x_tar_tgz",
+		// What Syft reads as the file it is keeps its name.
+		"x.tgz.bin": "x.tgz.bin", "x.so.gz": "x.so.gz", "libjar.so": "libjar.so", "libtar.so.0": "libtar.so.0",
+		"libzip.so.5": "libzip.so.5", "libpython3.12.so.1.0": "libpython3.12.so.1.0", "python3.12": "python3.12",
+		"node": "node", "ld-linux-x86-64.so.2": "ld-linux-x86-64.so.2", "_ssl.cpython-312-x86_64-linux-gnu.so": "_ssl.cpython-312-x86_64-linux-gnu.so",
+	} {
+		if got := copyName(name); got != want {
+			t.Errorf("copy of %s named %s, want %s", name, got, want)
+		}
+	}
+	// The copy Grype scans and the cache key both take the name; a jar keeps its own.
+	root, cache, inv := host(t)
+	write(t, filepath.Join(root, "home/u/libx.so.1.tar.gz"), "go binary v1")
+	o := &inv.Origins[2] // apiO
+	o.Paths = []string{"/home/u/libx.so.1.tar.gz"}
+	g := hostScanner(root, cache)
+	copied := "local-file:" + filepath.Join(cache, "scan", sumOf("go binary v1"), "libx.so.1_tar.gz")
+	g.sboms[copied] = g.sboms["local-file:"+filepath.Join(cache, "scan", sumOf("go binary v1"), "api")]
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if !slices.Contains(g.catalogs, copied) {
+		t.Fatalf("cataloged %q", g.catalogs)
+	}
+	au := &auditor{d: Deps{Root: root, Now: time.Now}}
+	if k, _, _ := au.cacheKey(context.Background(), *o); k != keyOf("binary", o.SHA256, "libx.so.1_tar.gz") {
+		t.Errorf("cache key %s", k)
+	}
+	if k, _, _ := au.cacheKey(context.Background(), inv.Origins[7]); k != keyOf("jar", "", "app.jar") {
+		t.Errorf("jar cache key %s", k)
 	}
 }
