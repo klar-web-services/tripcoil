@@ -55,7 +55,9 @@ func (r *Runner) Match(ctx context.Context, sbom, raw string) (*Report, error) {
 // dbUpdateTimeout bounds a database update: about 3 GB, at the idle IO class.
 const dbUpdateTimeout = time.Hour
 
-// UpdateDB downloads a newer vulnerability database when there is one.
+// UpdateDB downloads a newer vulnerability database when there is one. It also removes the
+// grype-db-download* directories before and after, so callers must hold the run lock: a
+// concurrent run could still be unpacking a database into one of them.
 func (r *Runner) UpdateDB(ctx context.Context) error {
 	r.removeDownloads()
 	defer r.removeDownloads()
