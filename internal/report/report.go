@@ -100,9 +100,9 @@ func verdict(in Input, gaps int) string {
 	r := in.Run
 	switch {
 	case r.Status == run.Interrupted:
-		return "⛔ Run incomplete: the run was interrupted" + suffixes(r, gaps)
+		return "⛔ Run incomplete: the run was interrupted" + suffixes(r, gaps, false)
 	case in.Audit == nil || r.Stages["audit"] == run.StageFailed:
-		return "⛔ Run incomplete: " + failure(r) + suffixes(r, gaps)
+		return "⛔ Run incomplete: " + failure(r) + suffixes(r, gaps, false)
 	}
 	counts := map[string]int{}
 	for _, f := range in.Audit.Findings {
@@ -112,7 +112,7 @@ func verdict(in Input, gaps int) string {
 	for _, t := range audit.Tiers {
 		parts = append(parts, fmt.Sprintf("%d %s", counts[t], t))
 	}
-	return fmt.Sprintf("⚠️ Audit only (%s): %s findings%s", in.NoReview, strings.Join(parts, ", "), suffixes(r, gaps))
+	return fmt.Sprintf("⚠️ Audit only (%s): %s findings%s", in.NoReview, strings.Join(parts, ", "), suffixes(r, gaps, true))
 }
 
 // failure is the reason a run has no audit results: the first error of the audit, or of an
@@ -128,16 +128,18 @@ func failure(r *run.Record) string {
 	return "the audit did not run"
 }
 
-func suffixes(r *run.Record, gaps int) string {
+// suffixes notes a partial run, and a failed one that still has audit results (otherwise the
+// verdict already gives the failure).
+func suffixes(r *run.Record, gaps int, withAudit bool) string {
 	s := ""
-	if r.Status == run.Partial {
+	if r.Status == run.Partial || r.Status == run.Failed && withAudit {
 		var codes []string
 		for _, e := range r.Errors {
 			if !slices.Contains(codes, e.Code) {
 				codes = append(codes, e.Code)
 			}
 		}
-		s += " (run partial: " + strings.Join(codes, ", ") + ")"
+		s += " (run " + r.Status + ": " + strings.Join(codes, ", ") + ")"
 	}
 	if gaps > 0 {
 		s += " (" + plural(gaps, "coverage gap", "coverage gaps") + ")"

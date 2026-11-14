@@ -236,3 +236,13 @@ func TestGaps(t *testing.T) {
 		t.Fatalf("gaps without an audit %v", gaps)
 	}
 }
+
+func TestRenderSaysWhenARunWithAuditResultsFailed(t *testing.T) {
+	r := record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK},
+		problem.New(problem.Error, problem.RunFolderUnwritable, "audit", "audit.json could not be written"))
+	r.Status = run.Failed
+	got := Render(Input{Run: r, Inventory: hostInventory(), Audit: hostAudit(), NoReview: "x"})
+	if !strings.Contains(got, "(run failed: RUN_FOLDER_UNWRITABLE)") || strings.Contains(got, "run partial") {
+		t.Fatal(got)
+	}
+}
