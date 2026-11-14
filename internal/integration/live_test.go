@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestLiveHost(t *testing.T) {
 		t.Fatalf("errors on a healthy host: %+v", inv.Errors)
 	}
 	kernel := inv.Items[0]
-	if kernel.Kind != inventory.KindKernel || kernel.UpstreamVersion == "" {
+	if kernel.Kind != inventory.KindKernel || kernel.UpstreamVersion == "" || len(kernel.Origins) == 0 {
 		t.Fatalf("kernel %+v", kernel)
 	}
 	packaged, unresolved := 0, 0
@@ -83,6 +84,13 @@ func TestLiveHost(t *testing.T) {
 		if o.ID == kernel.Origins[0] && o.Status != audit.Scanned {
 			t.Fatalf("kernel origin %+v", o)
 		}
+		// Without the distribution, every package origin is unidentified and nothing matches.
+		if strings.Contains(o.Reason, "did not recognise the distribution") {
+			t.Fatalf("origin %+v", o)
+		}
+	}
+	if statuses[inventory.OriginPackage+" "+audit.Scanned] == 0 {
+		t.Fatalf("no package origin was scanned: %v", statuses)
 	}
 	for _, f := range a.Findings {
 		tiers[f.Risk]++

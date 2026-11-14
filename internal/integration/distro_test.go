@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -33,8 +34,8 @@ func buildBinary(t *testing.T) string {
 	return bin
 }
 
-// isSleep600 matches exactly "sleep 600". Rocky's multicall coreutils shows it as
-// "/usr/bin/coreutils --coreutils-prog-shebang=sleep /usr/bin/sleep 600".
+// isSleep600 matches the script's "/bin/sleep 600". Rocky's multicall coreutils shows it as
+// "/usr/bin/coreutils --coreutils-prog-shebang=sleep /bin/sleep 600".
 func isSleep600(cmdline []string) bool {
 	if len(cmdline) == 4 {
 		if filepath.Base(cmdline[0]) != "coreutils" || cmdline[1] != "--coreutils-prog-shebang=sleep" {
@@ -51,28 +52,52 @@ func TestDistros(t *testing.T) {
 	}
 	bin := buildBinary(t)
 	cache := preparedCache(t)
-	cases := []struct{ image, family, pkgType, sleepExe, sleepPkg, libc string }{
-		{"debian:12", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6"},
-		{"debian:13", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6"},
-		{"ubuntu:24.04", "ubuntu", "deb", "/usr/bin/sleep", "coreutils", "libc6"},
+	// The old point releases hold a libc with a long-known vulnerability, cve, fixed in version
+	// fix: the Audit matches the distribution's packages with the distribution's data.
+	cases := []struct{ image, family, pkgType, sleepExe, sleepPkg, libc, cve, fix string }{
+		{"debian:12", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6", "", ""},
+		{"debian:12.0", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6", "CVE-2023-4911", "2.36-9+deb12u3"},
+		{"debian:13", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6", "", ""},
+		{"ubuntu:24.04", "ubuntu", "deb", "/usr/bin/sleep", "coreutils", "libc6", "", ""},
+		{"ubuntu:jammy-20230126", "ubuntu", "deb", "/usr/bin/sleep", "coreutils", "libc6", "CVE-2023-4911", "2.35-0ubuntu3.4"},
 		// Rocky's coreutils-single is one multicall binary: sleep runs as /usr/bin/coreutils.
-		{"rockylinux/rockylinux:9", "rhel", "rpm", "/usr/bin/coreutils", "coreutils", "glibc"},
-		{"alpine:3.21", "alpine", "apk", "/bin/busybox", "busybox", "musl"},
-		{"archlinux:latest", "arch", "alpm", "/usr/bin/sleep", "coreutils", "glibc"},
+		{"rockylinux/rockylinux:9", "rhel", "rpm", "/usr/bin/coreutils", "coreutils", "glibc", "", ""},
+		{"rockylinux/rockylinux:9.0", "rhel", "rpm", "/usr/bin/coreutils", "coreutils", "glibc", "CVE-2023-4911", "0:2.34-60.el9_2.7"},
+		{"alpine:3.21", "alpine", "apk", "/bin/busybox", "busybox", "musl", "", ""},
+		{"alpine:3.18.0", "alpine", "apk", "/bin/busybox", "busybox", "musl", "CVE-2025-26519", "1.2.4-r3"},
+		{"archlinux:latest", "arch", "alpm", "/usr/bin/sleep", "coreutils", "glibc", "", ""},
+		// Arch Linux's data names the group AVG-1621, with CVE-2021-33574 among its aliases.
+		{"archlinux:base-20211121.0.39613", "arch", "alpm", "/usr/bin/sleep", "coreutils", "glibc", "CVE-2021-33574", "2.34-1"},
 	}
-	for _, tc := range cases {
+	for i, tc := range cases {
 		t.Run(tc.image, func(t *testing.T) {
 			// The cache is shared with the host (the pinned Grype, its database and the kernel CNA
-			// data); what the run adds to it is given back to the host's user.
-			script := "sleep 600 & sleep 1; /usr/local/bin/tripcoil run >/tmp/run.out 2>&1; code=$?; " +
-				"chown -R " + fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()) + " /var/lib/tripcoil/cache; " +
-				"cat /var/lib/tripcoil/runs/latest/inventory.json || cat /tmp/run.out; echo; echo @@@$((6*7))@@@; " +
+			// data). The container is removed however the test ends, before what the run added to
+			// the cache is given to the cache's owner.
+			name := fmt.Sprintf("tripcoil-it-%d-%d", os.Getpid(), i)
+			t.Cleanup(func() {
+				if out, err := exec.Command("docker", "rm", "-f", name).CombinedOutput(); err != nil {
+					t.Errorf("docker rm: %v\n%s", err, out)
+				}
+				chown := `chown -R "$(stat -c %u:%g /var/lib/tripcoil/cache)" /var/lib/tripcoil/cache`
+				if out, err := exec.Command("docker", "run", "--rm", "-v", cache+":/var/lib/tripcoil/cache", tc.image,
+					"sh", "-c", chown).CombinedOutput(); err != nil {
+					t.Errorf("give the cache back: %v\n%s", err, out)
+				}
+			})
+			// Alpine 3.18's busybox runs a plain "sleep" in a fork of the shell, under the shell's
+			// command line; one with a path it executes.
+			script := "/bin/sleep 600 & sleep 1; /usr/local/bin/tripcoil run >/tmp/run.out 2>&1; code=$?; cat /tmp/run.out >&2; " +
+				"cat /var/lib/tripcoil/runs/latest/inventory.json; echo; echo @@@$((6*7))@@@; " +
 				"cat /var/lib/tripcoil/runs/latest/audit.json; exit $code"
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			ctx, cancel := context.WithTimeout(interrupt, 5*time.Minute)
 			defer cancel()
 			var stdout, stderr bytes.Buffer
-			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-v", bin+":/usr/local/bin/tripcoil:ro",
+			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--name", name, "-v", bin+":/usr/local/bin/tripcoil:ro",
 				"-v", cache+":/var/lib/tripcoil/cache", tc.image, "sh", "-c", script)
+			// Killing the docker client would leave the container running.
+			cmd.Cancel = func() error { return exec.Command("docker", "rm", "-f", name).Run() }
+			cmd.WaitDelay = time.Minute
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			runErr := cmd.Run()
 			invOut, audOut, _ := bytes.Cut(stdout.Bytes(), []byte(split))
@@ -82,7 +107,7 @@ func TestDistros(t *testing.T) {
 			}
 			var aud audit.Audit
 			if err := json.Unmarshal(audOut, &aud); err != nil {
-				t.Fatalf("no audit.json (run: %v): %v\nstdout: %s", runErr, err, audOut)
+				t.Fatalf("no audit.json (run: %v): %v\nstdout: %s\nstderr: %s", runErr, err, audOut, stderr.Bytes())
 			}
 			if runErr != nil {
 				t.Fatalf("tripcoil run failed: %v; errors %+v %+v\nstderr: %s", runErr, inv.Errors, aud.Errors, stderr.Bytes())
@@ -109,16 +134,19 @@ func TestDistros(t *testing.T) {
 			if sleep == nil {
 				t.Fatalf("no item runs sleep from %s: %+v", tc.sleepExe, inv.Items)
 			}
-			var sleepPkg, libc bool
+			var sleepPkg bool
+			var libc string
 			for _, id := range sleep.Origins {
 				o := origins[id]
 				if o.Kind != inventory.OriginPackage || o.Type != tc.pkgType {
 					continue
 				}
 				sleepPkg = sleepPkg || o.Name == tc.sleepPkg || o.Name == tc.sleepPkg+"-single"
-				libc = libc || o.Name == tc.libc
+				if o.Name == tc.libc {
+					libc = id
+				}
 			}
-			if !sleepPkg || !libc {
+			if !sleepPkg || libc == "" {
 				t.Fatalf("sleep's origins miss %s or %s: %v", tc.sleepPkg, tc.libc, sleep.Origins)
 			}
 			// The Audit read this distribution's package database: each of sleep's packages is
@@ -134,6 +162,21 @@ func TestDistros(t *testing.T) {
 			}
 			if aud.Status != audit.Complete || aud.Grype.DBBuilt.IsZero() || aud.KernelData == nil {
 				t.Fatalf("audit %s, errors %+v", aud.Status, aud.Errors)
+			}
+			if tc.cve != "" {
+				matched := false
+				var libcFindings []string
+				for _, f := range aud.Findings {
+					if f.Origin != libc {
+						continue
+					}
+					v := f.Vulnerability
+					matched = matched || (v.ID == tc.cve || slices.Contains(v.Aliases, tc.cve)) && slices.Contains(f.Fix.Versions, tc.fix)
+					libcFindings = append(libcFindings, fmt.Sprintf("%s%v %s %v", v.ID, v.Aliases, f.Package.Version, f.Fix.Versions))
+				}
+				if !matched {
+					t.Errorf("no finding of %s fixed in %s on %s; its findings: %v", tc.cve, tc.fix, libc, libcFindings)
+				}
 			}
 			self := false
 			for _, it := range inv.Items {

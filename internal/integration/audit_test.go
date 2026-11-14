@@ -6,11 +6,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,17 +26,28 @@ import (
 )
 
 // The tests share one Tripcoil cache with the pinned Grype, today's database and the kernel CNA
-// data, prepared on first use and removed when the tests end.
+// data, prepared on first use and removed when the tests end. It holds about 3.5 GB, under
+// $TRIPCOIL_TEST_CACHE_PARENT when that is set, else under the temporary directory, which may be
+// a tmpfs; TMPDIR=/var/tmp works too.
 var (
 	cacheOnce sync.Once
 	cacheDir  string
 	cacheErr  error
 )
 
+// interrupt ends when the tests are interrupted, so that the containers they run are removed and
+// the cache is too.
+var interrupt context.Context
+
 func TestMain(m *testing.M) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	interrupt = ctx
 	code := m.Run()
+	stop()
 	if cacheDir != "" {
-		os.RemoveAll(cacheDir)
+		if err := os.RemoveAll(cacheDir); err != nil {
+			fmt.Fprintf(os.Stderr, "remove the cache: %v\n", err)
+		}
 	}
 	os.Exit(code)
 }
@@ -41,13 +55,13 @@ func TestMain(m *testing.M) {
 func preparedCache(t *testing.T) string {
 	t.Helper()
 	cacheOnce.Do(func() {
-		if cacheDir, cacheErr = os.MkdirTemp("", "tripcoil-cache-"); cacheErr != nil {
+		if cacheDir, cacheErr = os.MkdirTemp(os.Getenv("TRIPCOIL_TEST_CACHE_PARENT"), "tripcoil-cache-"); cacheErr != nil {
 			return
 		}
-		if _, _, cacheErr = audit.NewGrype(cacheDir).Prepare(context.Background()); cacheErr != nil {
+		if _, _, cacheErr = audit.NewGrype(cacheDir).Prepare(interrupt); cacheErr != nil {
 			return
 		}
-		_, cacheErr = kernelcna.NewSource(cacheDir).Load(context.Background(), time.Now(), 48*time.Hour)
+		_, cacheErr = kernelcna.NewSource(cacheDir).Load(interrupt, time.Now(), 48*time.Hour)
 	})
 	if cacheErr != nil {
 		t.Fatalf("prepare the cache: %v", cacheErr)
@@ -159,14 +173,44 @@ func TestAuditFixtures(t *testing.T) {
 	// The app directory's SBOM is cached; the Go binary's never is, because Grype keeps only the Go
 	// matches whose code is linked into it. (The package database's is, except on Arch Linux,
 	// whose SBOM loses the distribution.)
-	if sboms, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "appdir-*.cdx.json")); len(sboms) != 1 {
-		t.Errorf("cached app directory SBOMs %v", sboms)
+	appSBOMs, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "appdir-*.cdx.json"))
+	if len(appSBOMs) != 1 {
+		t.Fatalf("cached app directory SBOMs %v", appSBOMs)
 	}
 	if sboms, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "binary-*.cdx.json")); len(sboms) != 0 {
 		t.Errorf("cached Go binary SBOMs %v", sboms)
 	}
-	if again := audit.Run(ctx, d, inv); len(again.Findings) != len(a.Findings) {
-		t.Fatalf("second run: %d findings, first %d", len(again.Findings), len(a.Findings))
+
+	// The second run matches the cached SBOM, which marks it used, and finds the same.
+	used := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(appSBOMs[0], used, used); err != nil {
+		t.Fatal(err)
+	}
+	again := audit.Run(ctx, d, inv)
+	if again.Status != audit.Complete || len(again.Errors) != 0 {
+		t.Fatalf("second run %s: %+v", again.Status, again.Errors)
+	}
+	if fi, err := os.Stat(appSBOMs[0]); err != nil {
+		t.Errorf("the cached app directory SBOM is gone: %v", err)
+	} else if !fi.ModTime().After(used) {
+		t.Errorf("the second run did not use the cached app directory SBOM, last used %s", fi.ModTime())
+	}
+	first := map[string]bool{}
+	for _, f := range a.Findings {
+		first[f.ID] = true
+	}
+	var diff []string
+	for _, f := range again.Findings {
+		if !first[f.ID] {
+			diff = append(diff, "+"+f.ID)
+		}
+		delete(first, f.ID)
+	}
+	for id := range first {
+		diff = append(diff, "-"+id)
+	}
+	if len(diff) != 0 {
+		t.Errorf("second run's findings differ from the first's: %v", diff)
 	}
 }
 
