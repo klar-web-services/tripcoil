@@ -3,7 +3,6 @@ package audit
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -54,7 +53,7 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 		case res.Packages == 0 && kernel:
 			// It is counted at its running version only when runningKernel found it at the
 			// version the Inventory saw, and changed it.
-			au.failOrigin(o, fmt.Errorf("the kernel package %s %s changed since the inventory, so the kernel is audited at the next run", o.Name, o.Version))
+			au.failOrigin(o, errors.New("the kernel package changed since the inventory, so the kernel is audited at the next run"))
 			continue
 		case res.Packages == 0:
 			res.Status, res.Reason = Unidentified, "the package tool knows it, but Grype did not read it from the package database"

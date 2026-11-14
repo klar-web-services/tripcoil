@@ -338,6 +338,8 @@ func originName(o inventory.Origin) string {
 		return "image " + cmp.Or(o.Ref, o.ImageID)
 	case inventory.OriginKernelUpstream:
 		return "the kernel (Linux " + o.UpstreamVersion + ")"
+	case inventory.OriginPackage:
+		return o.Name + " " + o.Version
 	}
 	return o.ID
 }

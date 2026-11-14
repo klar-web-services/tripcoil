@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/kernelcna"
@@ -23,7 +24,11 @@ func (au *auditor) kernel(ctx context.Context, o inventory.Origin) {
 		return
 	}
 	au.a.KernelData = &KernelData{Commit: data.Commit, Checked: data.Checked}
-	if !kernelcna.IsVersion(o.UpstreamVersion) {
+	switch {
+	case strings.HasSuffix(o.UpstreamVersion, "-rc0"): // such as Fedora rawhide's 6.14.0-0.rc0.20250203git...
+		au.failOrigin(o, fmt.Errorf("%s is a merge-window snapshot, which the kernel CNA data cannot match", o.UpstreamVersion))
+		return
+	case !kernelcna.IsVersion(o.UpstreamVersion):
 		au.failOrigin(o, fmt.Errorf("%q is not a kernel version, so the kernel cannot be matched", o.UpstreamVersion))
 		return
 	}

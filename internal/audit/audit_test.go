@@ -466,7 +466,7 @@ func TestAuditKernelPackageUpgradedSinceTheInventory(t *testing.T) {
 		a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
 		st := statuses(a)
 		if st[libsslO] != Scanned || st[kernelO] != ScanFailed || a.Status != Partial || len(a.Errors) != 1 ||
-			!strings.Contains(a.Errors[0].Message, "the kernel package linux-image-6.1.0-28-amd64 6.1.123-1 changed since the inventory") {
+			a.Errors[0].Message != "linux-image-6.1.0-28-amd64 6.1.123-1: the kernel package changed since the inventory, so the kernel is audited at the next run" {
 			t.Fatalf("audit %s, statuses %v, errors %+v", a.Status, st, a.Errors)
 		}
 		if f := byVuln(a)["CVE-2026-1234"]; f.Origin != libsslO {
@@ -779,15 +779,20 @@ func TestAuditReadsDeletedMappings(t *testing.T) {
 }
 
 func TestAuditKernelVersionThatDoesNotParse(t *testing.T) {
-	up := inventory.KernelUpstreamOriginID("5.15.0-91-generic~custom")
-	inv := &inventory.Inventory{
-		Items:   []inventory.Item{{ID: "kernel", Kind: inventory.KindKernel, Origins: []string{up}}},
-		Origins: []inventory.Origin{{ID: up, Kind: inventory.OriginKernelUpstream, UpstreamVersion: "5.15.0-91-generic~custom"}},
-	}
-	d := deps(files(t, map[string]string{"etc/os-release": "ID=arch\n"}), t.TempDir(), t.TempDir(), &fakeScanner{status: grype.DBStatus{Built: built, Valid: true}}, fakeKernel{data: kernelTestData(t)})
-	d.Family = osrel.Arch
-	if a := Run(context.Background(), d, inv); a.Status != Partial || statuses(a)[up] != ScanFailed {
-		t.Fatalf("audit %+v: a kernel that cannot be matched is never clean", a)
+	for version, msg := range map[string]string{
+		"5.15.0-91-generic~custom": `the kernel (Linux 5.15.0-91-generic~custom): "5.15.0-91-generic~custom" is not a kernel version, so the kernel cannot be matched`,
+		"6.14-rc0":                 "the kernel (Linux 6.14-rc0): 6.14-rc0 is a merge-window snapshot, which the kernel CNA data cannot match",
+	} {
+		up := inventory.KernelUpstreamOriginID(version)
+		inv := &inventory.Inventory{
+			Items:   []inventory.Item{{ID: "kernel", Kind: inventory.KindKernel, Origins: []string{up}}},
+			Origins: []inventory.Origin{{ID: up, Kind: inventory.OriginKernelUpstream, UpstreamVersion: version}},
+		}
+		d := deps(files(t, map[string]string{"etc/os-release": "ID=arch\n"}), t.TempDir(), t.TempDir(), &fakeScanner{status: grype.DBStatus{Built: built, Valid: true}}, fakeKernel{data: kernelTestData(t)})
+		d.Family = osrel.Arch
+		if a := Run(context.Background(), d, inv); a.Status != Partial || statuses(a)[up] != ScanFailed || len(a.Errors) != 1 || a.Errors[0].Message != msg {
+			t.Fatalf("audit %+v: a kernel that cannot be matched is never clean", a)
+		}
 	}
 }
 
