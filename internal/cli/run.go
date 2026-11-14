@@ -108,8 +108,9 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	if ctx.Err() != nil {
 		rec.Interrupt(d.now(), "inventory")
 		if inv != nil {
+			rec.Counts["items"], rec.Counts["origins"] = len(inv.Items), len(inv.Origins)
 			if err := run.WriteJSON(filepath.Join(dir, "inventory.json"), inv, 0o640); err != nil {
-				fmt.Fprintf(stderr, "%s: cannot write inventory.json: %v\n", problem.RunFolderUnwritable, err)
+				rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write inventory.json: %v", err))
 			}
 		}
 		if err := run.WriteJSON(filepath.Join(dir, "run.json"), rec, 0o640); err != nil {

@@ -54,6 +54,37 @@ func TestRunInterrupted(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d.stateDir, "runs", runID, "inventory.json")); err != nil {
 		t.Fatalf("what was collected must be written: %v", err)
 	}
+	if rec.Counts["items"] != 1 || rec.Counts["origins"] != 1 {
+		t.Fatalf("counts %+v", rec.Counts)
+	}
+}
+
+func TestRunInterruptedInventoryWriteFailed(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	d.collect = func(context.Context, string) (*inventory.Inventory, error) {
+		blocker := filepath.Join(d.stateDir, "runs", runID, "inventory.json", "x")
+		if err := os.MkdirAll(blocker, 0o750); err != nil { // a directory where inventory.json goes
+			t.Fatal(err)
+		}
+		return sampleInventory(), nil
+	}
+	d.interrupts = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, func() {}
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	rec := readRecord(t, d.stateDir)
+	if rec.Status != run.Interrupted || len(rec.Errors) != 2 || rec.Errors[0].Code != problem.Interrupted ||
+		rec.Errors[1].Code != problem.RunFolderUnwritable {
+		t.Fatalf("run.json %+v", rec)
+	}
+	if _, err := os.Lstat(filepath.Join(d.stateDir, "runs", "latest")); !os.IsNotExist(err) {
+		t.Fatal("latest must keep pointing at the last finished run")
+	}
 }
 
 func sampleInventory(errs ...problem.Problem) *inventory.Inventory {
