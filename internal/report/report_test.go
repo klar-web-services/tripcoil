@@ -249,3 +249,26 @@ func TestRenderSaysWhenARunWithAuditResultsFailed(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// The verdict of a run without audit results names the error that failed the audit, whatever else
+// went wrong before or besides it.
+func TestVerdictNamesTheErrorThatFailedTheAudit(t *testing.T) {
+	docker := problem.New(problem.Error, problem.DockerUnavailable, "inventory", "the Docker socket did not answer")
+	kernel := problem.New(problem.Error, problem.KernelDataStale, "audit", "the kernel CNA data is too old")
+	for _, tc := range []struct {
+		errs []problem.Problem
+		want string
+	}{
+		{[]problem.Problem{docker, problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot create the raw/ folder")}, "(RUN_FOLDER_UNWRITABLE)"},
+		{[]problem.Problem{docker, kernel, problem.New(problem.Error, problem.GrypeUnavailable, "audit", "Grype is not available")}, "(GRYPE_UNAVAILABLE)"},
+		{[]problem.Problem{docker, kernel, problem.New(problem.Error, problem.DBStale, "audit", "the database is too old")}, "(DB_STALE)"},
+		{[]problem.Problem{docker, kernel}, "(KERNEL_DATA_STALE)"},
+		{[]problem.Problem{docker}, "(DOCKER_UNAVAILABLE)"},
+	} {
+		r := record(map[string]string{"inventory": run.StagePartial, "audit": run.StageFailed}, tc.errs...)
+		verdict, _, _ := strings.Cut(Render(Input{Run: r, Inventory: hostInventory(), Audit: &audit.Audit{Status: audit.Failed}, NoReview: "x"}), "\n")
+		if !strings.HasPrefix(verdict, "⛔ Run incomplete: ") || !strings.Contains(verdict, tc.want) {
+			t.Errorf("verdict %q, want %s", verdict, tc.want)
+		}
+	}
+}

@@ -115,9 +115,17 @@ func verdict(in Input, gaps int) string {
 	return fmt.Sprintf("⚠️ Audit only (%s): %s findings%s", in.NoReview, strings.Join(parts, ", "), suffixes(r, gaps, true))
 }
 
-// failure is the reason a run has no audit results: the first error of the audit, or of an
-// earlier stage that stopped it.
+// failure is the reason a run has no audit results: the error that fails a whole audit (an
+// unwritable run folder, Grype unavailable, a stale database), else the first error of the audit,
+// or of an earlier stage that stopped it.
 func failure(r *run.Record) string {
+	for _, code := range []string{problem.RunFolderUnwritable, problem.GrypeUnavailable, problem.DBStale} {
+		for _, e := range r.Errors {
+			if e.Code == code {
+				return md(e.Message) + " (" + e.Code + ")"
+			}
+		}
+	}
 	for _, stage := range []string{"audit", "inventory", ""} {
 		for _, e := range r.Errors {
 			if e.Stage == stage {
