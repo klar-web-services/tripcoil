@@ -217,6 +217,14 @@ func TestKernel(t *testing.T) {
 			origin: KernelUpstreamOriginID("6.13-rc7"),
 		},
 		{
+			name: "fedora rawhide snapshot, short date", release: osrel.Release{ID: "fedora", VersionID: "46"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "7.4.0-0.rc2.261111g067c5c24cef2.21.fc46.x86_64", "Linux version 7.4.0-0.rc2.261111g067c5c24cef2.21.fc46.x86_64", "", "usr/lib/modules/7.4.0-0.rc2.261111g067c5c24cef2.21.fc46.x86_64")
+			},
+			running: "7.4.0-0.rc2.261111g067c5c24cef2.21.fc46.x86_64", upstream: "7.4-rc2",
+			origin: KernelUpstreamOriginID("7.4-rc2"),
+		},
+		{
 			// The kernel CNA matching rejects -rc0, so the Audit says it cannot match this kernel.
 			name: "fedora rawhide merge-window snapshot", release: osrel.Release{ID: "fedora", VersionID: "42"},
 			root: func(t *testing.T) string {
