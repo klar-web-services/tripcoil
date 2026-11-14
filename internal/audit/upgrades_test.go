@@ -108,7 +108,7 @@ func TestUpgrades(t *testing.T) {
 			name: "a Maven artifactId under two groupIds is two packages",
 			findings: []Finding{withPURL(fixedIn("java-archive", "core", "1.0.0", "1.0.1"), "pkg:maven/org.a/core@1.0.0"),
 				withPURL(fixedIn("java-archive", "core", "1.0.0", "2.0.0"), "pkg:maven/org.b/core@1.0.0")},
-			want: []Upgrade{up("core", "java-archive", "1.0.0", "1.0.1", 1), up("core", "java-archive", "1.0.0", "2.0.0", 1)},
+			want: []Upgrade{up("org.a:core", "java-archive", "1.0.0", "1.0.1", 1), up("org.b:core", "java-archive", "1.0.0", "2.0.0", 1)},
 		},
 		{
 			name: "qualifiers and subpath do not split a package",
@@ -209,7 +209,7 @@ func TestCheckUpgrades(t *testing.T) {
 		g := &fakeScanner{vulns: map[string][]grype.Vulnerability{"pkg:maven/org.a/core@2.0.0": {gone}}}
 		ups, _, _ := checked(ctx, t, g, []Finding{withPURL(fixedIn("java-archive", "core", "1.0.0", "2.0.0"), "pkg:maven/org.a/core@1.0.0"),
 			withPURL(fixedIn("java-archive", "core", "1.0.0", "2.0.0"), "pkg:maven/org.b/core@1.0.0")})
-		if len(ups) != 1 || ups[0].Package != "core" {
+		if len(ups) != 1 || ups[0].Package != "org.b:core" {
 			t.Fatalf("lines %+v", ups)
 		}
 	})

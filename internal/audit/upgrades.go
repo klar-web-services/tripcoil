@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,7 @@ import (
 // matched again that way: it has no purl, or Grype matched it by CPE, which the purl does not carry.
 type upgradeCandidate struct {
 	Upgrade
+	name  string // the package's name as Grype reports it
 	check []grype.Component
 }
 
@@ -54,8 +56,9 @@ func upgradeCandidates(findings []Finding) []upgradeCandidate {
 		fs := groups[k]
 		if v, ok := upgradeVersion(fs); ok {
 			out = append(out, upgradeCandidate{
-				Upgrade: Upgrade{Origin: k.origin, Path: strings.TrimPrefix(k.origin, "appdir:"), Package: fs[0].Package.Name, Type: k.typ,
+				Upgrade: Upgrade{Origin: k.origin, Path: strings.TrimPrefix(k.origin, "appdir:"), Package: upgradeName(fs[0].Package), Type: k.typ,
 					Installed: installedVersions(fs), Version: v, Findings: len(fs)},
+				name:  fs[0].Package.Name,
 				check: matchAt(fs, v),
 			})
 		}
@@ -64,6 +67,22 @@ func upgradeCandidates(findings []Finding) []upgradeCandidate {
 		return cmp.Or(cmp.Compare(b.Findings, a.Findings), cmp.Compare(a.Path, b.Path), cmp.Compare(a.Package, b.Package), cmp.Compare(a.Type, b.Type))
 	})
 	return out
+}
+
+// upgradeName names a package in an upgrade line: by its name, but a Maven package as
+// groupId:artifactId from its purl, because Grype names it by the artifactId alone.
+func upgradeName(p Package) string {
+	coords, ok := strings.CutPrefix(purlWithoutVersion(p.PURL), "pkg:maven/")
+	i := strings.LastIndexByte(coords, '/')
+	if !ok || i < 0 {
+		return p.Name
+	}
+	group, err1 := url.PathUnescape(coords[:i])
+	artifact, err2 := url.PathUnescape(coords[i+1:])
+	if err1 != nil || err2 != nil {
+		return p.Name
+	}
+	return group + ":" + artifact
 }
 
 // installedVersions lists the installed versions of a package's findings, each once, lowest first.
@@ -167,7 +186,7 @@ func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) 
 			continue
 		}
 		for i, c := range cands {
-			matched[i] = matched[i] || (c.Type == m.Artifact.Type && c.Package == m.Artifact.Name)
+			matched[i] = matched[i] || (c.Type == m.Artifact.Type && c.name == m.Artifact.Name)
 		}
 	}
 	for i, c := range cands {

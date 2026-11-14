@@ -255,7 +255,7 @@ func TestAuditChecksUpgradeLines(t *testing.T) {
 	g := hostScanner(root, cache)
 	g.vulns["lodash@4.17.21"] = []grype.Vulnerability{vuln("GHSA-0000-0000-0000", "High", "fixed", "4.17.22")}
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
-	if len(a.Upgrades) != 1 || a.Upgrades[0].Package != "log4j-core" || len(a.Warnings) != 0 {
+	if len(a.Upgrades) != 1 || a.Upgrades[0].Package != "org.apache.logging.log4j:log4j-core" || len(a.Warnings) != 0 {
 		t.Fatalf("upgrades %+v, warnings %+v: lodash 4.17.21 is still vulnerable", a.Upgrades, a.Warnings)
 	}
 	g.matchErr = map[string]error{"upgrades.cdx.json": errors.New("Grype failed: boom")}
