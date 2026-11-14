@@ -12,6 +12,10 @@ func TestParseCgroup(t *testing.T) {
 	if got := ParseCgroup([]byte(v1)); got != "/system.slice/nginx.service" {
 		t.Fatalf("v1: %q", got)
 	}
+	legacy := "12:memory:/system.slice/nginx.service\n1:name=systemd:/system.slice/nginx.service\n0::/\n"
+	if got := ParseCgroup([]byte(legacy)); got != "/system.slice/nginx.service" {
+		t.Fatalf("legacy v1 with 0::: %q", got)
+	}
 }
 
 func TestDockerContainerID(t *testing.T) {

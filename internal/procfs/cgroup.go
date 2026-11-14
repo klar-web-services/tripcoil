@@ -5,23 +5,29 @@ import (
 	"strings"
 )
 
-// ParseCgroup returns the unified (v2) cgroup path from /proc/<pid>/cgroup, or on a v1 host the
-// path in the systemd hierarchy.
+// ParseCgroup returns the path in the systemd hierarchy from /proc/<pid>/cgroup: the name=systemd path on a v1 or hybrid host, otherwise the unified (v2) path.
 func ParseCgroup(data []byte) string {
-	var v1 string
+	var unified, systemd string
+	var hasUnified, hasSystemd bool
 	for _, line := range strings.Split(string(data), "\n") {
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) != 3 {
 			continue
 		}
 		if parts[0] == "0" && parts[1] == "" {
-			return parts[2]
+			unified, hasUnified = parts[2], true
 		}
 		if parts[1] == "name=systemd" {
-			v1 = parts[2]
+			systemd, hasSystemd = parts[2], true
 		}
 	}
-	return v1
+	if hasSystemd {
+		return systemd
+	}
+	if hasUnified {
+		return unified
+	}
+	return ""
 }
 
 var dockerID = regexp.MustCompile(`(?m)(?:/docker-|/docker/)([0-9a-f]{64})(?:\.scope)?(?:/|$)`)
