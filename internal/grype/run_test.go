@@ -34,6 +34,14 @@ func args(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimSpace(read(t, log)), "\n")
 }
 
+func noWorkDirs(t *testing.T, r *Runner) {
+	t.Helper()
+	left, err := os.ReadDir(filepath.Join(r.CacheDir, "tmp"))
+	if err != nil || len(left) > 0 {
+		t.Fatalf("work directories left behind: %v %v", left, err)
+	}
+}
+
 func TestScanRunsGrypeIsolated(t *testing.T) {
 	r, dir, log := newRunner(t, "GRYPE_DB_AUTO_UPDATE=true", "SYFT_EXCLUDE=x", "TMPDIR=/tmp")
 	raw, sbom := filepath.Join(dir, "out.json"), filepath.Join(dir, "out.cdx.json")
@@ -105,20 +113,74 @@ func TestUpdateAndStatus(t *testing.T) {
 	}
 }
 
+func TestUpdateDBRemovesUnpackedDownloads(t *testing.T) {
+	for _, exit := range []string{"0", "1"} {
+		r, _, log := newRunner(t, "FAKE_GRYPE_EXIT="+exit)
+		db := filepath.Join(r.CacheDir, "grype-db")
+		r.Environ = append(r.Environ, "FAKE_GRYPE_DB="+db)
+		for _, dir := range []string{"6", "grype-db-download1"} {
+			if err := os.MkdirAll(filepath.Join(db, dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(db, dir, "vulnerability.db"), []byte("db"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.UpdateDB(context.Background()); (err != nil) != (exit == "1") {
+			t.Fatalf("exit %s: %v", exit, err)
+		}
+		if seen := read(t, log+".db"); strings.Contains(seen, "grype-db-download") {
+			t.Errorf("exit %s: Grype started with an earlier download still there:\n%s", exit, seen)
+		}
+		if left, _ := filepath.Glob(filepath.Join(db, "grype-db-download*")); len(left) > 0 {
+			t.Errorf("exit %s: downloads left behind: %q", exit, left)
+		}
+		if _, err := os.Stat(filepath.Join(db, "6", "vulnerability.db")); err != nil {
+			t.Errorf("exit %s: the current database is gone: %v", exit, err)
+		}
+	}
+}
+
 func TestRunFailuresAndTimeouts(t *testing.T) {
 	r, dir, _ := newRunner(t, "FAKE_GRYPE_EXIT=1", "FAKE_GRYPE_STDERR=could not fetch image")
 	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
 	if _, err := r.Scan(context.Background(), "docker:sha256:1", a, b); err == nil || !strings.Contains(err.Error(), "could not fetch image") {
 		t.Fatalf("err %v", err)
 	}
+	noWorkDirs(t, r)
 	r, dir, _ = newRunner(t, "FAKE_GRYPE_SLEEP=5")
 	r.Timeout = 300 * time.Millisecond
 	if _, err := r.Scan(context.Background(), "dir:/src", a, b); err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err %v", err)
 	}
+	noWorkDirs(t, r)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := r.Scan(ctx, "dir:/src", a, b); err != context.Canceled {
 		t.Fatalf("cancelled: %v", err)
 	}
+	noWorkDirs(t, r)
+}
+
+func TestCancelWhileGrypeRuns(t *testing.T) {
+	r, dir, log := newRunner(t, "FAKE_GRYPE_SLEEP=5")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for range 500 {
+			if _, err := os.Stat(log + ".pwd"); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		cancel()
+	}()
+	start := time.Now()
+	if _, err := r.Scan(ctx, "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != context.Canceled {
+		t.Fatalf("err %v", err)
+	}
+	if took := time.Since(start); took > 4*time.Second {
+		t.Fatalf("Grype was not stopped: Scan returned after %s", took)
+	}
+	noWorkDirs(t, r)
 }

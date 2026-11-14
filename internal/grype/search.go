@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // searchBatch is how many IDs one `grype db search vuln` call looks up.
@@ -15,6 +16,11 @@ const searchBatch = 1000
 // records: severity, CVSS, EPSS and KEV. An ID the database does not hold is missing from the
 // result.
 func (r *Runner) SearchVulnerabilities(ctx context.Context, ids []string) (map[string]Vulnerability, error) {
+	for _, id := range ids {
+		if strings.HasPrefix(id, "-") {
+			return nil, fmt.Errorf("not a vulnerability ID: %q", id)
+		}
+	}
 	out := map[string]Vulnerability{}
 	for start := 0; start < len(ids); start += searchBatch {
 		batch := ids[start:min(start+searchBatch, len(ids))]

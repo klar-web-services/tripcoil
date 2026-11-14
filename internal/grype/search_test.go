@@ -3,7 +3,9 @@ package grype
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -37,5 +39,21 @@ func TestSearchVulnerabilities(t *testing.T) {
 	got := args(t, log) // the second call, with the 1001st ID
 	if !slices.Equal(got, []string{"db", "search", "vuln", "CVE-2026-1000", "--provider", "nvd", "--limit", "0", "-o", "json", "-c", got[len(got)-1]}) {
 		t.Fatalf("args %q", got)
+	}
+	first := strings.Split(strings.SplitN(read(t, log+".calls"), "\n\n", 2)[0], "\n")
+	want := append(append([]string{"db", "search", "vuln"}, ids[:1000]...), "--provider", "nvd", "--limit", "0", "-o", "json", "-c")
+	if !slices.Equal(first[:len(first)-1], want) {
+		t.Fatalf("the first call does not look up exactly the first 1000 IDs: %d arguments", len(first))
+	}
+}
+
+func TestSearchVulnerabilitiesRejectsFlags(t *testing.T) {
+	r, _, log := newRunner(t, "FAKE_GRYPE_SEARCH=[]")
+	_, err := r.SearchVulnerabilities(context.Background(), []string{"CVE-2024-1086", "--provider=debian"})
+	if err == nil || !strings.Contains(err.Error(), "--provider=debian") {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Fatalf("Grype ran: %v", err)
 	}
 }

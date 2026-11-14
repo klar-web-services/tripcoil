@@ -57,7 +57,21 @@ const dbUpdateTimeout = time.Hour
 
 // UpdateDB downloads a newer vulnerability database when there is one.
 func (r *Runner) UpdateDB(ctx context.Context) error {
+	r.removeDownloads()
+	defer r.removeDownloads()
 	return r.runFor(ctx, []string{"db", "update"}, io.Discard, max(r.Timeout, dbUpdateTimeout))
+}
+
+// removeDownloads removes the grype-db-download* directories that `grype db update` unpacks a
+// new database into, up to 3 GB each, and leaves behind when it is stopped or fails.
+func (r *Runner) removeDownloads() {
+	db := filepath.Join(r.CacheDir, "grype-db")
+	entries, _ := os.ReadDir(db)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "grype-db-download") {
+			os.RemoveAll(filepath.Join(db, e.Name()))
+		}
+	}
 }
 
 // DBStatus is what `grype db status -o json` reports about the cached database.

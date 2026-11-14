@@ -10,7 +10,12 @@ const fakeGrypeScript = `#!/bin/sh
 # Fake Grype for the runner tests, controlled by FAKE_GRYPE_* variables; see fakeGrype.
 log="${FAKE_GRYPE_LOG:-/dev/null}"
 printf '%s\n' "$@" > "$log"
-if [ "$log" != /dev/null ]; then env > "$log.env"; pwd > "$log.pwd"; fi
+if [ "$log" != /dev/null ]; then env > "$log.env"; pwd > "$log.pwd"; printf '%s\n' "$@" "" >> "$log.calls"; fi
+if [ "$1 $2" = "db update" ] && [ -n "$FAKE_GRYPE_DB" ]; then
+  if [ "$log" != /dev/null ]; then ls "$FAKE_GRYPE_DB" > "$log.db"; fi
+  mkdir -p "$FAKE_GRYPE_DB/grype-db-download2"
+  printf 'partial' > "$FAKE_GRYPE_DB/grype-db-download2/vulnerability.db"
+fi
 if [ "$1 $2" = "db status" ]; then
   if [ -n "$FAKE_GRYPE_STATUS" ]; then printf '%s\n' "$FAKE_GRYPE_STATUS"; fi
   exit "${FAKE_GRYPE_STATUS_EXIT:-0}"
@@ -42,10 +47,12 @@ exit "${FAKE_GRYPE_EXIT:-0}"
 
 // fakeGrype writes an executable that imitates Grype's command line and returns its path.
 // FAKE_GRYPE_LOG receives the arguments ("<log>.env", ".pwd" and ".cfg" get the environment,
-// working directory and config). FAKE_GRYPE_JSON and FAKE_GRYPE_SBOM are written for
-// -o json= and -o cyclonedx-json=. FAKE_GRYPE_STATUS and FAKE_GRYPE_STATUS_EXIT are the output
-// and exit code of "db status", FAKE_GRYPE_SEARCH the output of "db search". FAKE_GRYPE_EXIT,
-// FAKE_GRYPE_STDERR and FAKE_GRYPE_SLEEP apply to every other command.
+// working directory and config; ".calls" collects the arguments of every call, each followed by
+// an empty line). FAKE_GRYPE_JSON and FAKE_GRYPE_SBOM are written for -o json= and
+// -o cyclonedx-json=. FAKE_GRYPE_STATUS and FAKE_GRYPE_STATUS_EXIT are the output and exit code
+// of "db status", FAKE_GRYPE_SEARCH the output of "db search". FAKE_GRYPE_DB is the database
+// directory: "db update" lists it to "<log>.db" and leaves a half-unpacked grype-db-download2 in
+// it. FAKE_GRYPE_EXIT, FAKE_GRYPE_STDERR and FAKE_GRYPE_SLEEP apply to every other command.
 func fakeGrype(t testing.TB) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "grype")
