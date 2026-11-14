@@ -344,6 +344,22 @@ func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 				}
 			}
 		}, []string{"binary", "image"}}, // the stripped binary has no matches, the image's no fix version
+		// The finding ID hashes the location: a cached SBOM must not change it.
+		{"another location", func(g *fakeScanner, _ *inventory.Inventory) {
+			g.matching = func(r *grype.Report) {
+				for i := range r.Matches {
+					r.Matches[i].Artifact.Locations = []string{"/elsewhere"}
+				}
+			}
+		}, []string{"binary"}},
+		{"the locations in another order", func(g *fakeScanner, _ *inventory.Inventory) {
+			g.found = map[string][]string{"zlib1g": {"/var/lib/dpkg/status", "/usr/share/doc/zlib1g/copyright"}}
+			g.matching = func(r *grype.Report) {
+				for i := range r.Matches {
+					slices.Sort(r.Matches[i].Artifact.Locations)
+				}
+			}
+		}, []string{"appdir", "binary", "image", "jar", "packages"}},
 		{"a failed match", func(g *fakeScanner, inv *inventory.Inventory) {
 			g.matchErr = map[string]error{packagesID + ".verify.cdx.json": errors.New("Grype timed out after 15m0s")}
 			for _, o := range inv.Origins {

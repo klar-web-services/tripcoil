@@ -255,7 +255,8 @@ func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []stri
 }
 
 // sameMatches reports whether two reports name the same distribution and hold the same set of
-// matches, each by vulnerability, package, namespace and fix.
+// matches, each by vulnerability, package, the location its finding names (which the finding ID
+// hashes), namespace and fix.
 func sameMatches(a, b *grype.Report) bool {
 	if a.Distro != b.Distro || a.DistroVersion != b.DistroVersion {
 		return false
@@ -264,7 +265,7 @@ func sameMatches(a, b *grype.Report) bool {
 		s := map[string]bool{}
 		for _, m := range r.Matches {
 			v := m.Vulnerability
-			s[strings.Join(append([]string{v.ID, m.Artifact.Name, m.Artifact.Version, m.Artifact.Type, v.Namespace, v.FixState}, v.FixVersions...), "\x00")] = true
+			s[strings.Join(append([]string{v.ID, m.Artifact.Name, m.Artifact.Version, m.Artifact.Type, findingLocation(m.Artifact.Locations), v.Namespace, v.FixState}, v.FixVersions...), "\x00")] = true
 		}
 		return s
 	}
