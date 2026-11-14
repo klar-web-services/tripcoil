@@ -19,8 +19,8 @@ var (
 	// keyValue matches key=value where the key names a secret, also inside a longer argument
 	// (a process title such as "postgres: shop password=x idle").
 	keyValue = regexp.MustCompile(`(?i)\b([\w.-]*(?:password|token|secret|api[-_]?key)[\w.-]*)=(\S+)`)
-	// urlCreds matches the password in scheme://user:password@host.
-	urlCreds = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
+	// urlCreds matches the password in scheme://user:password@host; the user may be empty (redis://:password@host).
+	urlCreds = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/\s:@]*):([^/\s@]+)@`)
 )
 
 // Cmdline returns a copy of args with secret values replaced by Mask.

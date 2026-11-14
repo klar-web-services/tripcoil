@@ -16,6 +16,7 @@ func TestCmdline(t *testing.T) {
 		{[]string{"app", "--db-password=s3cret"}, []string{"app", "--db-password=<redacted>"}},
 		{[]string{"env", "PGPASSWORD=s3cret", "AWS_SECRET_ACCESS_KEY=x", "api_key=y"}, []string{"env", "PGPASSWORD=<redacted>", "AWS_SECRET_ACCESS_KEY=<redacted>", "api_key=<redacted>"}},
 		{[]string{"app", "postgres://shop:s3cret@db:5432/shop"}, []string{"app", "postgres://shop:<redacted>@db:5432/shop"}},
+		{[]string{"celery", "--broker", "redis://:s3cret@redis:6379/0"}, []string{"celery", "--broker", "redis://:<redacted>@redis:6379/0"}},
 		{[]string{"app", "--url=https://x.example/hook?token=abc&x=1"}, []string{"app", "--url=https://x.example/hook?token=<redacted>"}},
 		{[]string{"postgres: shop password=s3cret idle"}, []string{"postgres: shop password=<redacted> idle"}},
 		{[]string{"nginx: master process /usr/sbin/nginx"}, []string{"nginx: master process /usr/sbin/nginx"}},
