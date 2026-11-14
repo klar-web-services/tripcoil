@@ -3,9 +3,11 @@ package audit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
+	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
 func TestSBOMCache(t *testing.T) {
@@ -211,6 +214,10 @@ func TestTreeFingerprintStaysOnOneFileSystem(t *testing.T) {
 		if k, _, err := appDirKey(context.Background(), dir, "2026-11-14"); k != "" || err != nil {
 			t.Fatalf("key across a mount: %q %v", k, err)
 		}
+		au := &auditor{d: Deps{Root: "/", Now: time.Now}}
+		if k, _, err := au.cacheKey(context.Background(), inventory.Origin{Kind: inventory.OriginAppDir, Path: dir}); !au.mountBelow(dir) || k != "" || err != nil {
+			t.Fatalf("mountinfo does not list the mount below %s: %q %v", dir, k, err)
+		}
 		return
 	}
 	dir := files(t, map[string]string{"package-lock.json": `{"lockfileVersion":3}`, "data/.keep": ""})
@@ -229,5 +236,50 @@ func TestTreeFingerprintStaysOnOneFileSystem(t *testing.T) {
 	}
 	if err != nil || !strings.Contains(string(out), "--- PASS: TestTreeFingerprintStaysOnOneFileSystem") {
 		t.Fatalf("in a mount namespace: %v\n%s", err, out)
+	}
+}
+
+// A mount point strictly below an app directory, as mountinfo lists it, gives the directory no key
+// without a walk, which would lstat the mount: it may hang.
+func TestAppDirMountBelow(t *testing.T) {
+	lock := `{"lockfileVersion":3}`
+	root := files(t, map[string]string{"srv/shop/package-lock.json": lock, "srv/shop/data/x": "", "srv/shopping/package-lock.json": lock,
+		"srv/my shop/package-lock.json": lock, "srv/my shop/data/x": "", "srv/app/package-lock.json": lock})
+	info := filepath.Join(t.TempDir(), "mountinfo")
+	write(t, info, fmt.Sprintf(`22 1 0:21 / /proc rw,nosuid shared:5 - proc proc rw
+36 25 0:40 / %[1]s/srv/shop/data rw,relatime shared:80 - nfs4 server:/export rw
+37 25 0:41 / %[1]s/srv/my\040shop/data rw - tmpfs tmpfs rw
+38 25 8:17 / %[1]s/srv/app rw - ext4 /dev/sdb1 rw
+39 25 0:42 / %[1]s/srv/application/x rw - tmpfs tmpfs rw
+`, root))
+	old := mountInfo
+	defer func() { mountInfo = old }()
+	mountInfo = info
+	au := &auditor{d: Deps{Root: root, Now: func() time.Time { return now }}}
+	key := func(dir string) string {
+		t.Helper()
+		k, _, err := au.cacheKey(context.Background(), inventory.Origin{Kind: inventory.OriginAppDir, Path: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	// The app directory itself may be a mount point; /srv/shop is not below /srv/shopping, nor
+	// /srv/app below /srv/application.
+	for dir, keyed := range map[string]bool{"/srv/shop": false, "/srv/my shop": false, "/srv/shopping": true, "/srv/app": true} {
+		if k := key(dir); (k != "") != keyed {
+			t.Errorf("%s: key %q", dir, k)
+		}
+	}
+	write(t, info, "")
+	if k := key("/srv/shop"); k != "" {
+		t.Errorf("key %q: mountinfo is read once per Audit", k)
+	}
+	if mounts, err := readMountPoints(info); len(mounts) != 0 || err != nil {
+		t.Errorf("an empty mountinfo: %q %v", mounts, err)
+	}
+	write(t, info, `40 25 0:43 / /a\011b\134c\012d\0407\777 rw - tmpfs tmpfs rw`)
+	if mounts, err := readMountPoints(info); !slices.Equal(mounts, []string{"/a\tb\\c\nd 7\\777"}) || err != nil {
+		t.Errorf("octal escapes: %q %v", mounts, err)
 	}
 }

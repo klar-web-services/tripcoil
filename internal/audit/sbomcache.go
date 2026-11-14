@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -139,6 +140,62 @@ func appDirKey(ctx context.Context, dir, day string) (string, []string, error) {
 		return "", nil, nil
 	}
 	return keyOf("appdir", append(parts, tree)...), files, nil
+}
+
+// mountInfo lists the mount points of Tripcoil's mount namespace.
+var mountInfo = "/proc/self/mountinfo" // replaced by tests
+
+// mountBelow reports whether a mount point lies strictly below dir, which then has no key: the tree
+// walk must never lstat a mount point, which may hang, such as an NFS mount whose server is gone.
+// The mount points are read once per Audit; the walk's device check covers a mount made since.
+// dir is compared with its symbolic links resolved, as mountinfo spells mount points. When either
+// cannot be read, dir counts as having a mount below it.
+func (au *auditor) mountBelow(dir string) bool {
+	if !au.mountsRead {
+		au.mounts, au.mountsErr = readMountPoints(mountInfo)
+		au.mountsRead = true
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if au.mountsErr != nil || err != nil {
+		return true
+	}
+	prefix := strings.TrimSuffix(real, "/") + "/"
+	for _, m := range au.mounts {
+		if m != real && strings.HasPrefix(m, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// readMountPoints lists the mount points of a mountinfo file: the fifth field of each line, whose
+// space, tab, newline and backslash the kernel writes as octal escapes, such as \040.
+func readMountPoints(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 5 {
+			continue
+		}
+		mount := f[4]
+		var b strings.Builder
+		for i := 0; i < len(mount); i++ {
+			if mount[i] == '\\' && i+3 < len(mount) {
+				if c, err := strconv.ParseUint(mount[i+1:i+4], 8, 8); err == nil {
+					b.WriteByte(byte(c))
+					i += 3
+					continue
+				}
+			}
+			b.WriteByte(mount[i])
+		}
+		out = append(out, b.String())
+	}
+	return out, nil
 }
 
 // treeFingerprint hashes the path, type, size, inode and ctime of every entry below dir, without

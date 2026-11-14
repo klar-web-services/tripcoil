@@ -79,6 +79,10 @@ type auditor struct {
 	cache sbomCache
 	maps  map[int][]procfs.Mapping // the mappings of processes, read once
 	seen  map[string]bool          // the IDs of the findings so far
+
+	mounts     []string // the mount points, read at the first app directory (see mountBelow)
+	mountsErr  error
+	mountsRead bool
 }
 
 // Run audits every origin of the Inventory. It always returns an Audit: one that could not match

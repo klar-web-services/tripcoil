@@ -273,9 +273,10 @@ func sameMatches(a, b *grype.Report) bool {
 }
 
 // cacheKey is an origin's SBOM cache key (spec section 6.2), or "" when it is cataloged every
-// run, such as an app directory without a lockfile (see appDirKey). For an app directory it also
-// returns the files the key hashes, as Grype names its locations. A binary's or jar's key holds
-// its file name too, because the SBOM depends on it (see source).
+// run, such as an app directory without a lockfile (see appDirKey) or with a mount below it (see
+// mountBelow). For an app directory it also returns the files the key hashes, as Grype names its
+// locations. A binary's or jar's key holds its file name too, because the SBOM depends on it (see
+// source).
 func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
@@ -286,7 +287,11 @@ func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []
 		if o.Jar {
 			return keyOf("jar", o.SHA256, fileName(o)), nil, nil
 		}
-		return appDirKey(ctx, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"))
+		dir := filepath.Join(au.d.Root, o.Path)
+		if au.mountBelow(dir) {
+			return "", nil, nil
+		}
+		return appDirKey(ctx, dir, au.d.Now().UTC().Format("2006-01-02"))
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
