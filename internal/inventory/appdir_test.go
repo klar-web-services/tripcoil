@@ -51,6 +51,7 @@ func TestFindAppDir(t *testing.T) {
 		"home/deploy/.local/bin/gunicorn", "root/package.json", "root/.local/bin/celery", "srv/app/requirements.txt",
 		"home/app/package.json", "home/app/src/server.js",
 		"srv/mono/package.json",
+		"srv/web/package.json", "srv/web/server.js", "opt/newrelic/package.json", "opt/newrelic/newrelic.js", "opt/svc/app.jar",
 	)
 	const nvm = "/home/n8n/.nvm/versions/node/v20.11.0"
 	for link, target := range map[string]string{
@@ -80,6 +81,10 @@ func TestFindAppDir(t *testing.T) {
 		{"venv", []string{"/srv/api/.venv/bin/python3", "/srv/api/.venv/bin/gunicorn", "app:app"}, "/", appDir{Path: "/srv/api/.venv"}, true},
 		{"venv python", []string{"/srv/api/.venv/bin/python3", "-m", "uvicorn", "main:app"}, "/", appDir{Path: "/srv/api/.venv"}, true},
 		{"jar", []string{"java", "-Xmx1g", "-jar", "/srv/app.jar"}, "/", appDir{Path: "/srv/app.jar", Jar: true}, true},
+		{"preload option value is not the script", []string{"node", "-r", "/opt/newrelic/newrelic.js", "/srv/web/server.js"}, "/", appDir{Path: "/srv/web"}, true},
+		{"loader option value is not the script", []string{"node", "--experimental-loader", "/opt/newrelic/newrelic.js", "/srv/web/server.js"}, "/", appDir{Path: "/srv/web"}, true},
+		{"single-jar class path", []string{"java", "-Xmx1g", "-cp", "/opt/svc/app.jar", "com.example.Main"}, "/", appDir{Path: "/opt/svc/app.jar", Jar: true}, true},
+		{"multi-entry class path", []string{"java", "-cp", "/opt/svc/app.jar:/opt/svc/lib/*", "com.example.Main"}, "/srv/app", appDir{Path: "/srv/app"}, true},
 		{"pm2 falls back to cwd", []string{"node", "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
 		{"global npm package through a symlink", []string{"node", "/usr/bin/node-red"}, "/", appDir{Path: "/usr/lib/node_modules/node-red"}, true},
 		{"global package under nvm", []string{nvm + "/bin/node", nvm + "/bin/n8n"}, "/home/n8n", appDir{Path: nvm + "/lib/node_modules/n8n"}, true},

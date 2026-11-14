@@ -50,6 +50,19 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 		if a == "-m" {
 			break // python -m module: the code is found through the cwd
 		}
+		switch a {
+		case "-cp", "-classpath", "--class-path":
+			if i+1 < len(cmdline) && !strings.Contains(cmdline[i+1], ":") {
+				if p := abs(cmdline[i+1]); strings.HasSuffix(p, ".jar") && f.isFile(p) {
+					return appDir{Path: f.resolve(p), Jar: true}, true
+				}
+			}
+			i++
+			continue
+		case "-r", "--require", "--import", "--loader", "--experimental-loader", "-p", "--module-path":
+			i++ // a preloaded module or a module path, not the script
+			continue
+		}
 		if strings.HasPrefix(a, "-") {
 			continue
 		}
