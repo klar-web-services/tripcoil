@@ -451,3 +451,48 @@ func TestProcessCollectorIgnoresProcessesThatEnd(t *testing.T) {
 		t.Fatalf("read %d bytes of another process's files", src[30].read)
 	}
 }
+
+func TestProcessCollectorUnresolvedOriginsAreStable(t *testing.T) {
+	t.Run("process and file subjects", func(t *testing.T) {
+		src := fakeSource{
+			3: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true},
+			4: {cmdline: []string{"bash"}, exe: "/usr/bin/bash"},
+		}
+		c := &processCollector{src: src, root: hostRoot(t), distro: debian, cacheDir: t.TempDir()}
+		res, err := c.collect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		reasons := map[int]string{}
+		for _, it := range res.items {
+			if len(it.Origins) != 1 {
+				t.Fatalf("item %+v", it)
+			}
+			reasons[it.Processes[0].PID] = originByID(res.origins, it.Origins[0]).Reason
+		}
+		if len(res.origins) != 2 || !strings.Contains(reasons[3], "another root") || !strings.Contains(reasons[4], "package tool failed") {
+			t.Fatalf("reasons %v, origins %+v", reasons, res.origins)
+		}
+	})
+	t.Run("no /proc paths in reasons", func(t *testing.T) {
+		src := fakeSource{
+			30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api",
+				openErr: &fs.PathError{Op: "open", Path: "/proc/30/map_files/5-6", Err: syscall.EPERM},
+				maps:    []procfs.Mapping{{Start: "5", End: "6", Path: "/tmp/libnetty_transport.so"}}},
+			80: {cmdline: []string{"secret-daemon"}, exeErr: &fs.PathError{Op: "readlink", Path: "/proc/80/exe", Err: syscall.EACCES}},
+		}
+		c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+		res, err := c.collect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.origins) != 3 {
+			t.Fatalf("origins %+v", res.origins)
+		}
+		for _, o := range res.origins {
+			if strings.Contains(o.Reason, "/proc/") || !strings.Contains(o.Reason, "permission denied") && !strings.Contains(o.Reason, "not permitted") {
+				t.Errorf("reason %q", o.Reason)
+			}
+		}
+	})
+}

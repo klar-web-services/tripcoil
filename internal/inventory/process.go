@@ -149,7 +149,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 	p.started, _ = c.src.StartTime(pid)
 	switch {
 	case exeErr != nil:
-		p.unresolved = fmt.Sprintf("its executable cannot be read (%v)", exeErr)
+		p.unresolved = fmt.Sprintf("its executable cannot be read (%s)", errReason(exeErr))
 	case strings.HasPrefix(exe, "/snap/"):
 		p.unresolved = "it runs from a snap, and snaps are not audited in v1"
 	default:
@@ -280,7 +280,7 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 		// Its own item: another root's /usr/sbin/nginx is not the host's /usr/sbin/nginx.
 		d := b.process("unresolved:"+subject, p.exe, "", name)
 		d.addProcess(proc, p.unit)
-		o := Origin{ID: UnresolvedOriginID(subject), Kind: OriginUnresolved, Reason: p.unresolved}
+		o := Origin{ID: UnresolvedOriginID("process:" + subject), Kind: OriginUnresolved, Reason: p.unresolved}
 		if p.exe != "" {
 			o.Paths = []string{p.exe}
 		}
@@ -354,7 +354,7 @@ func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draf
 	}
 	o, err := c.fileOrigin(ctx, path, deleted, open)
 	if err != nil {
-		b.link(d, Origin{ID: UnresolvedOriginID(path), Kind: OriginUnresolved, Reason: fmt.Sprintf("the running file was not read (%v)", err), Paths: []string{path}})
+		b.link(d, Origin{ID: UnresolvedOriginID(path), Kind: OriginUnresolved, Reason: fmt.Sprintf("the running file was not read (%s)", errReason(err)), Paths: []string{path}})
 		return
 	}
 	b.link(d, o)
@@ -388,6 +388,20 @@ func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted 
 		c.files[key] = o
 	}
 	return o, nil
+}
+
+// errReason describes err without the paths it names, such as /proc/<pid>/map_files/<range>,
+// which change from run to run.
+func errReason(err error) string {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err.Error()
+	}
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		return linkErr.Err.Error()
+	}
+	return err.Error()
 }
 
 func (c *processCollector) existsOnHost(path string) bool {
