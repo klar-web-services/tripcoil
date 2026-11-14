@@ -642,3 +642,24 @@ func TestProcessCollectorPlainChroot(t *testing.T) {
 		t.Fatalf("haproxy %+v, origin %+v", haproxy, o)
 	}
 }
+
+func TestProcessCollectorUnresolvedOriginPerPathAndReason(t *testing.T) {
+	src := fakeSource{
+		30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", reused: true},
+		31: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", openErr: &fs.PathError{Op: "open", Path: "/proc/31/exe", Err: syscall.EACCES}},
+	}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasons []string
+	for _, id := range byName(res.items, "api").Origins {
+		reasons = append(reasons, originByID(res.origins, id).Reason)
+	}
+	slices.Sort(reasons)
+	want := []string{"the running file was not read (permission denied)", "the running file was not read (the process ended during the inventory)"}
+	if !slices.Equal(reasons, want) {
+		t.Fatalf("reasons %q, want %q", reasons, want)
+	}
+}

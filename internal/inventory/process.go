@@ -384,7 +384,8 @@ func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draf
 	}
 	o, err := c.fileOrigin(ctx, path, deleted, open)
 	if err != nil {
-		b.link(d, Origin{ID: UnresolvedOriginID(path), Kind: OriginUnresolved, Reason: fmt.Sprintf("the running file was not read (%s)", errReason(err)), Paths: []string{path}})
+		reason := fmt.Sprintf("the running file was not read (%s)", errReason(err))
+		b.link(d, Origin{ID: UnresolvedOriginID(path + "\x00" + reason), Kind: OriginUnresolved, Reason: reason, Paths: []string{path}})
 		return
 	}
 	b.link(d, o)
