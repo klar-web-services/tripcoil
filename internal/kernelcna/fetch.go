@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,10 +23,18 @@ import (
 const DefaultBaseURL = "https://git.kernel.org/pub/scm/linux/security/vulns.git"
 
 const (
-	refreshAfter     = 24 * time.Hour // the data is checked for news at most daily (spec section 6.3)
-	minRecords       = 15000          // a snapshot holds about 18,000; fewer means a broken download
-	maxSnapshotBytes = 256 << 20      // compressed; about 35 MB in 2026
-	maxRecordBytes   = 4 << 20
+	refreshAfter        = 24 * time.Hour // the data is checked for news at most daily (spec section 6.3)
+	minRecords          = 15000          // a snapshot holds about 18,000; fewer means a broken download
+	maxRecords          = 100000
+	maxSnapshotBytes    = 256 << 20 // compressed; about 35 MB in 2026
+	maxSnapshotTarBytes = 2 << 30   // unpacked; about 364 MB in 2026
+	maxRecordBytes      = 4 << 20
+)
+
+var (
+	snapshotCap    int64 = maxSnapshotBytes    // lowered by tests
+	snapshotTarCap int64 = maxSnapshotTarBytes // lowered by tests
+	recordsCap           = maxRecords          // lowered by tests
 )
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -48,7 +56,7 @@ func (s *Source) path() string { return filepath.Join(s.CacheDir, "kernel-cna.js
 
 // Load returns the data in the cache, first checking for newer data when it was last checked a
 // day ago, or maxAge ago when that is shorter. When the check fails, data checked within maxAge is
-// still used; older data, or none, is an error.
+// still used; older data, data checked at a time still to come, or none, is an error.
 func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) (*Data, error) {
 	old := s.read()
 	if old != nil && now.Sub(old.Checked) < min(refreshAfter, maxAge) && !old.Checked.After(now) {
@@ -62,11 +70,15 @@ func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) 
 		return nil, ctx.Err()
 	case old == nil:
 		return nil, fmt.Errorf("the kernel CNA data cannot be fetched: %w", err)
+	case old.Checked.After(now):
+		return nil, fmt.Errorf("the kernel CNA data was last checked at %s, which is in the future, and checking it again failed: %w",
+			old.Checked.Format(time.RFC3339), err)
 	case now.Sub(old.Checked) <= maxAge:
 		return old, nil
 	}
-	return nil, fmt.Errorf("the kernel CNA data was last checked %.0f hours ago, which is older than audit.maxDatabaseAgeHours (%.0f), and checking it again failed: %w",
-		now.Sub(old.Checked).Hours(), maxAge.Hours(), err)
+	// Rounded up to a tenth, so the age never prints as the limit it exceeds.
+	return nil, fmt.Errorf("the kernel CNA data was last checked %.1f hours ago, which is older than audit.maxDatabaseAgeHours (%.0f), and checking it again failed: %w",
+		math.Ceil(now.Sub(old.Checked).Hours()*10)/10, maxAge.Hours(), err)
 }
 
 // read returns the cached data, or nil when there is none or it cannot be read.
@@ -83,7 +95,8 @@ func (s *Source) read() *Data {
 }
 
 // refresh asks which commit the repository is at, and downloads that commit's snapshot unless
-// the cache already holds it.
+// the cache already holds it. A cache that cannot be written only costs a check or a download
+// next time, so it is not an error.
 func (s *Source) refresh(ctx context.Context, old *Data, now time.Time) (*Data, error) {
 	commit, err := s.masterCommit(ctx)
 	if err != nil {
@@ -92,14 +105,16 @@ func (s *Source) refresh(ctx context.Context, old *Data, now time.Time) (*Data, 
 	if old != nil && old.Commit == commit {
 		d := *old
 		d.Checked = now
-		return &d, s.save(&d)
+		_ = s.save(&d)
+		return &d, nil
 	}
 	records, err := s.snapshot(ctx, commit)
 	if err != nil {
 		return nil, err
 	}
 	d := &Data{Commit: commit, Checked: now, Records: records}
-	return d, s.save(d)
+	_ = s.save(d)
+	return d, nil
 }
 
 // get fetches a URL with GET. A HEAD request once left kernel.org's cache serving empty
@@ -147,12 +162,13 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	gz, err := gzip.NewReader(io.LimitReader(resp.Body, maxSnapshotBytes))
+	gz, err := gzip.NewReader(&limited{r: resp.Body, max: snapshotCap, what: "the snapshot"})
 	if err != nil {
 		return nil, fmt.Errorf("the snapshot is not a gzip archive: %w", err)
 	}
 	published := regexp.MustCompile(`^vulns-` + commit + `/cve/published/[0-9]{4}/CVE-[0-9]{4}-[0-9]+\.json$`)
-	tr := tar.NewReader(gz)
+	unpacked := &limited{r: gz, max: snapshotTarCap, what: "the unpacked snapshot"}
+	tr := tar.NewReader(unpacked)
 	var records []Record
 	for {
 		hdr, err := tr.Next()
@@ -160,7 +176,7 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("the snapshot is damaged: %w", err)
+			return nil, damaged(err)
 		}
 		if hdr.Typeflag != tar.TypeReg || !published.MatchString(hdr.Name) {
 			continue // also symbolic links, rejected records and the repository's test fixtures
@@ -168,15 +184,26 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 		if hdr.Size > maxRecordBytes {
 			return nil, fmt.Errorf("%s is unexpectedly large", hdr.Name)
 		}
+		if len(records) == recordsCap {
+			return nil, fmt.Errorf("the snapshot holds more than %d records", recordsCap)
+		}
 		data, err := io.ReadAll(tr)
 		if err != nil {
-			return nil, fmt.Errorf("the snapshot is damaged: %w", err)
+			return nil, damaged(err)
 		}
 		r, err := ParseRecord(data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", hdr.Name, err)
 		}
 		records = append(records, r)
+	}
+	// archive/tar also stops at a file boundary when the stream ends there, without the two zero
+	// blocks that end an archive; gzip's checksum is only read once the stream is drained.
+	if unpacked.zeros < 2*512 {
+		return nil, errors.New("the snapshot ends early")
+	}
+	if _, err := io.Copy(io.Discard, unpacked); err != nil {
+		return nil, damaged(err)
 	}
 	if len(records) < s.MinRecords {
 		return nil, fmt.Errorf("the snapshot holds %d published records, fewer than the %d expected", len(records), s.MinRecords)
@@ -185,7 +212,50 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 	return records, nil
 }
 
-// save writes the data into the cache atomically.
+// limited fails a read that goes past max bytes, and counts the zero bytes the read ended on.
+type limited struct {
+	r     io.Reader
+	n     int64
+	max   int64
+	what  string
+	zeros int64
+}
+
+func (l *limited) Read(p []byte) (int, error) {
+	n, err := l.r.Read(p)
+	l.n += int64(n)
+	if l.n > l.max {
+		return 0, &tooLarge{l.what, l.max}
+	}
+	for i := n - 1; i >= 0; i-- {
+		if p[i] != 0 {
+			l.zeros = int64(n - 1 - i)
+			return n, err
+		}
+	}
+	l.zeros += int64(n)
+	return n, err
+}
+
+// tooLarge is the error of a read that went past its limit.
+type tooLarge struct {
+	what string
+	max  int64
+}
+
+func (e *tooLarge) Error() string { return fmt.Sprintf("%s is larger than %d bytes", e.what, e.max) }
+
+// damaged describes an error reading the snapshot.
+func damaged(err error) error {
+	var big *tooLarge
+	if errors.As(err, &big) {
+		return big
+	}
+	return fmt.Errorf("the snapshot is damaged: %w", err)
+}
+
+// save writes the data into the cache atomically. It first removes what a run killed before its
+// rename left; callers hold the run lock.
 func (s *Source) save(d *Data) error {
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -194,12 +264,20 @@ func (s *Source) save(d *Data) error {
 	if err := os.MkdirAll(s.CacheDir, 0o700); err != nil {
 		return err
 	}
+	leftovers, _ := filepath.Glob(filepath.Join(s.CacheDir, ".kernel-cna-*"))
+	for _, f := range leftovers {
+		_ = os.Remove(f)
+	}
 	tmp, err := os.CreateTemp(s.CacheDir, ".kernel-cna-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return err
 	}

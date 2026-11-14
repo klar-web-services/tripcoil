@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,9 +22,14 @@ const (
 	commitB = "1111111111111111111111111111111111111111"
 )
 
+type file struct {
+	name string
+	body []byte
+}
+
 // snapshotOf packs the test records as kernel.org's snapshot of commit, with the files a real
-// snapshot also holds around them.
-func snapshotOf(t *testing.T, commit string) []byte {
+// snapshot also holds around them, and the extra files.
+func snapshotOf(t *testing.T, commit string, extra ...file) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -49,10 +56,46 @@ func snapshotOf(t *testing.T, commit string) []byte {
 		add(rel, data, tar.TypeReg)
 		add(strings.TrimSuffix(rel, ".json")+".dyad", []byte("6.5:abc:6.8:def\n"), tar.TypeReg)
 	}
+	for _, f := range extra {
+		add(f.name, f.body, tar.TypeReg)
+	}
 	add("cve/rejected/2024/CVE-2024-99999.json", []byte(`{"cveMetadata":{"cveId":"CVE-2024-99999","state":"PUBLISHED"}}`), tar.TypeReg)
 	add("cve/testing/published/2024/CVE-2024-1.json", []byte(`not even json`), tar.TypeReg)
 	add("cve/published/2024/CVE-2024-0000.json", nil, tar.TypeSymlink)
 	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+func unpack(t *testing.T, snapshot []byte) []byte {
+	t.Helper()
+	zr, err := gzip.NewReader(bytes.NewReader(snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// cutBefore packs a snapshot again without its entries from the nth on: a download cut at a file
+// boundary, with a valid gzip stream around it.
+func cutBefore(t *testing.T, snapshot []byte, n int) []byte {
+	t.Helper()
+	raw := unpack(t, snapshot)
+	br := bytes.NewReader(raw)
+	tr := tar.NewReader(br)
+	for range n {
+		if _, err := tr.Next(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cut := len(raw) - br.Len() - 512 // the nth header's block; the names need no PAX header
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	gz.Write(raw[:cut])
 	gz.Close()
 	return buf.Bytes()
 }
@@ -154,23 +197,131 @@ func TestLoadWhenKernelOrgFails(t *testing.T) {
 	if d, err := s.Load(context.Background(), t0.Add(47*time.Hour), 48*time.Hour); err != nil || d.Commit != commitA {
 		t.Fatalf("data checked within maxAge must be used: %v", err)
 	}
-	if _, err := s.Load(context.Background(), t0.Add(49*time.Hour), 48*time.Hour); err == nil || !strings.Contains(err.Error(), "last checked 49 hours ago") {
+	if _, err := s.Load(context.Background(), t0.Add(49*time.Hour), 48*time.Hour); err == nil || !strings.Contains(err.Error(), "last checked 49.0 hours ago") {
 		t.Fatalf("stale: %v", err)
+	}
+	if _, err := s.Load(context.Background(), t0.Add(48*time.Hour+time.Second), 48*time.Hour); err == nil || !strings.Contains(err.Error(), "last checked 48.1 hours ago, which is older than audit.maxDatabaseAgeHours (48)") {
+		t.Fatalf("just stale: %v", err)
+	}
+}
+
+func TestLoadDistrustsCheckTimeInFuture(t *testing.T) {
+	// Data checked while the clock was a year ahead is not fresh once the clock is right.
+	s, k := newSource(t)
+	if _, err := s.Load(context.Background(), t0.AddDate(1, 0, 0), 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	k.down.Store(true)
+	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err == nil || !strings.Contains(err.Error(), "last checked at 2027-11-14T06:00:00Z, which is in the future") {
+		t.Fatalf("future check time: %v", err)
+	}
+	k.down.Store(false)
+	if d, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil || !d.Checked.Equal(t0) {
+		t.Fatalf("checked again: %v", err)
+	}
+}
+
+func TestLoadIgnoresCorruptCache(t *testing.T) {
+	s, k := newSource(t)
+	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(s.CacheDir, "kernel-cna.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, data[:len(data)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	k.down.Store(true)
+	if _, err := s.Load(context.Background(), t0.Add(time.Hour), 48*time.Hour); err == nil || !strings.Contains(err.Error(), "cannot be fetched") {
+		t.Fatalf("a corrupt cache must count as none: %v", err)
+	}
+}
+
+func TestLoadCancelled(t *testing.T) {
+	s, _ := newSource(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.Load(ctx, t0, 48*time.Hour); err != context.Canceled {
+		t.Fatalf("no cache: %v", err)
+	}
+	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(ctx, t0.Add(25*time.Hour), 48*time.Hour); err != context.Canceled {
+		t.Fatalf("data within maxAge: %v", err)
+	}
+}
+
+func TestLoadWhenCacheUnwritable(t *testing.T) {
+	// The cache only saves work: what was checked or downloaded is used even when it cannot be saved.
+	if os.Geteuid() == 0 {
+		t.Skip("root writes anyway")
+	}
+	s, k := newSource(t)
+	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(s.CacheDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(s.CacheDir, 0o700) })
+	if d, err := s.Load(context.Background(), t0.Add(25*time.Hour), 48*time.Hour); err != nil || !d.Checked.Equal(t0.Add(25*time.Hour)) {
+		t.Fatalf("checked: %v", err)
+	}
+	k.commit.Store(commitB)
+	k.snapshot.Store(snapshotOf(t, commitB))
+	if d, err := s.Load(context.Background(), t0.Add(26*time.Hour), 48*time.Hour); err != nil || d.Commit != commitB || k.snaps.Load() != 2 {
+		t.Fatalf("downloaded: %v", err)
+	}
+}
+
+func TestSaveRemovesLeftovers(t *testing.T) {
+	// A run killed between creating and renaming its temporary file leaves it behind.
+	s, _ := newSource(t)
+	leftover := filepath.Join(s.CacheDir, ".kernel-cna-123")
+	if err := os.MkdirAll(s.CacheDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leftover, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("leftover: %v", err)
 	}
 }
 
 func TestLoadRejectsBrokenSnapshots(t *testing.T) {
-	for name, body := range map[string][]byte{
-		"empty body":   {}, // what kernel.org's cache once served for a snapshot
-		"not gzip":     []byte("<html>"),
-		"cut short":    snapshotOf(t, commitA)[:2000],
-		"other commit": snapshotOf(t, commitB),
+	good := snapshotOf(t, commitA)
+	badCRC := bytes.Clone(good)
+	for i := len(badCRC) - 8; i < len(badCRC)-4; i++ {
+		badCRC[i] ^= 0xff
+	}
+	for name, c := range map[string]struct {
+		body []byte
+		want string
+	}{
+		"empty body":             {[]byte{}, "not a gzip archive"}, // what kernel.org's cache once served for a snapshot
+		"not gzip":               {[]byte("<html>"), "not a gzip archive"},
+		"cut short":              {good[:2000], "damaged: unexpected EOF"},
+		"cut at a file boundary": {cutBefore(t, good, 45), "ends early"}, // 22 of the 29 records
+		"gzip checksum wrong":    {badCRC, "damaged: gzip: invalid checksum"},
+		"gzip trailer missing":   {good[:len(good)-8], "damaged: unexpected EOF"},
+		"other commit":           {snapshotOf(t, commitB), "holds 0 published records"},
+		"record too large": {snapshotOf(t, commitA, file{"cve/published/2024/CVE-2024-99998.json", bytes.Repeat([]byte(" "), maxRecordBytes+1)}),
+			"CVE-2024-99998.json is unexpectedly large"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, k := newSource(t)
-			k.snapshot.Store(body)
-			if _, err := s.Load(context.Background(), t0, 48*time.Hour); err == nil {
-				t.Fatal("a broken snapshot was accepted")
+			s.MinRecords = 1 // rejected for what is wrong, not for the count
+			k.snapshot.Store(c.body)
+			if _, err := s.Load(context.Background(), t0, 48*time.Hour); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want %q", err, c.want)
 			}
 			if _, err := os.Stat(filepath.Join(s.CacheDir, "kernel-cna.json")); !os.IsNotExist(err) {
 				t.Fatal("a broken snapshot reached the cache")
@@ -181,5 +332,51 @@ func TestLoadRejectsBrokenSnapshots(t *testing.T) {
 	s.MinRecords = 30
 	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err == nil || !strings.Contains(err.Error(), "holds 29 published records, fewer than the 30 expected") {
 		t.Fatalf("too few records: %v", err)
+	}
+}
+
+func TestLoadKeepsOldDataWhenSnapshotMalformed(t *testing.T) {
+	// A snapshot with a malformed record is rejected whole, and the old data stays in use until it
+	// is too old.
+	s, k := newSource(t)
+	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	k.commit.Store(commitB)
+	k.snapshot.Store(snapshotOf(t, commitB, file{"cve/published/2024/CVE-2024-99997.json", []byte(`{"cveMetadata":`)}))
+	if d, err := s.Load(context.Background(), t0.Add(25*time.Hour), 48*time.Hour); err != nil || d.Commit != commitA || !d.Checked.Equal(t0) {
+		t.Fatalf("old data within maxAge: %v", err)
+	}
+	if _, err := s.Load(context.Background(), t0.Add(49*time.Hour), 48*time.Hour); err == nil || !strings.Contains(err.Error(), "last checked 49.0 hours ago") || !strings.Contains(err.Error(), "CVE-2024-99997.json") {
+		t.Fatalf("old data after maxAge: %v", err)
+	}
+}
+
+func TestLoadLimits(t *testing.T) {
+	body := snapshotOf(t, commitA)
+	t.Cleanup(func() { snapshotCap, snapshotTarCap, recordsCap = maxSnapshotBytes, maxSnapshotTarBytes, maxRecords })
+	snapshotCap, snapshotTarCap, recordsCap = int64(len(body)), int64(len(unpack(t, body))), 29
+	load := func() error {
+		s, k := newSource(t)
+		k.snapshot.Store(body)
+		_, err := s.Load(context.Background(), t0, 48*time.Hour)
+		return err
+	}
+	if err := load(); err != nil {
+		t.Fatalf("a snapshot at every limit: %v", err)
+	}
+	snapshotCap--
+	if err := load(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("cannot be fetched: the snapshot is larger than %d bytes", snapshotCap)) {
+		t.Fatalf("compressed: %v", err)
+	}
+	snapshotCap++
+	snapshotTarCap--
+	if err := load(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("cannot be fetched: the unpacked snapshot is larger than %d bytes", snapshotTarCap)) {
+		t.Fatalf("unpacked: %v", err)
+	}
+	snapshotTarCap++
+	recordsCap--
+	if err := load(); err == nil || !strings.Contains(err.Error(), "the snapshot holds more than 28 records") {
+		t.Fatalf("records: %v", err)
 	}
 }
