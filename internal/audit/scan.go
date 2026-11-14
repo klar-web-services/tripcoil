@@ -304,7 +304,8 @@ func (au *auditor) eachOpener(o inventory.Origin, try func(func() (*os.File, err
 }
 
 // procOpener opens a file that process pid runs (exe) or maps, or is nil when it does neither. A
-// process's mappings are read once per Audit: a library is shared by many processes.
+// process's mappings are read once per Audit: a library is shared by many processes. A mapping of
+// a file replaced since the Inventory (deleted) is read too: the copy is verified by its SHA-256.
 func (au *auditor) procOpener(pid int, exe, path string) func() (*os.File, error) {
 	if path == exe {
 		return func() (*os.File, error) { return asFile(au.d.Proc.OpenExe(pid)) }
@@ -315,7 +316,7 @@ func (au *auditor) procOpener(pid int, exe, path string) func() (*os.File, error
 		au.maps[pid] = maps
 	}
 	for _, m := range maps {
-		if m.Path == path && !m.Deleted {
+		if m.Path == path {
 			return func() (*os.File, error) { return asFile(au.d.Proc.OpenMapFile(pid, m)) }
 		}
 	}

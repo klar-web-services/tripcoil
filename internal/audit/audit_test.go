@@ -494,6 +494,26 @@ func TestAuditReadsBinariesThroughTheProcess(t *testing.T) {
 	}
 }
 
+// A library replaced on disk after the Inventory is still mapped, as deleted, by the process: its
+// map_files entry holds the content the Inventory identified.
+func TestAuditReadsDeletedMappings(t *testing.T) {
+	root, cache, inv := host(t)
+	running := files(t, map[string]string{"lib": "netty v1"})
+	libO := inventory.BinaryOriginID(sumOf("netty v1"))
+	inv.Items = append(inv.Items, inventory.Item{ID: "proc:java2", Kind: inventory.KindProcess, Name: "java", Exe: "/usr/bin/java",
+		Processes: []inventory.Process{{PID: 42}}, Origins: []string{libO}})
+	inv.Origins = append(inv.Origins, inventory.Origin{ID: libO, Kind: inventory.OriginBinary, SHA256: sumOf("netty v1"), Paths: []string{"/opt/lib/libnetty.so"}})
+	g := hostScanner(root, cache)
+	g.sboms["file:"+filepath.Join(cache, "scan", sumOf("netty v1"), "libnetty.so")] = []grype.Component{{Name: "netty", Version: "4.1.0", PURL: "pkg:maven/io.netty/netty@4.1.0"}}
+	d := deps(root, cache, t.TempDir(), g, fakeKernel{})
+	d.Proc = fakeProc{maps: map[int][]procfs.Mapping{42: {{Start: "1000", End: "2000", Path: "/opt/lib/libnetty.so", Deleted: true}}},
+		mapped: map[string]string{"/opt/lib/libnetty.so": filepath.Join(running, "lib")}}
+	a := Run(context.Background(), d, inv)
+	if st := statuses(a); st[libO] != Scanned || a.Status != Complete {
+		t.Fatalf("audit %s %+v: %v", a.Status, a.Errors, st)
+	}
+}
+
 func TestAuditKernelVersionThatDoesNotParse(t *testing.T) {
 	up := inventory.KernelUpstreamOriginID("5.15.0-91-generic~custom")
 	inv := &inventory.Inventory{
