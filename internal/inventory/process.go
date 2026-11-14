@@ -305,6 +305,9 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 	c.linkFile(ctx, b, d, p.exe, p.exeDeleted, owners, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) })
 	for _, m := range p.libs {
 		if found && !dir.Jar && within(m.Path, dir.Path) {
+			if m.Deleted && c.existsOnHost(m.Path) {
+				d.restartNeeded(m.Path) // the Audit scans the newer file on disk
+			}
 			continue // covered by the app directory
 		}
 		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) })

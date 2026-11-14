@@ -404,3 +404,19 @@ func TestProcessCollectorKeysFilesByIdentity(t *testing.T) {
 		t.Fatalf("cache holds %v, want one copy", entries)
 	}
 }
+
+func TestProcessCollectorRestartForReplacedLibraryInAppDir(t *testing.T) {
+	lib := "/srv/api/.venv/lib/python3.12/site-packages/cryptography/hazmat/bindings/_rust.abi3.so"
+	root := files(t, map[string]string{"srv/api/requirements.txt": "", "srv/api/app.py": "", lib[1:]: "42.0.5"})
+	src := fakeSource{7: {cmdline: []string{"python3", "app.py"}, exe: "/usr/bin/python3.12", cwd: "/srv/api",
+		maps: []procfs.Mapping{{Start: "1", End: "2", Path: lib, Deleted: true}}}} // pip install -U ran
+	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := byName(res.items, "python3.12")
+	if it.AppDir != "/srv/api" || !slices.Equal(it.RestartNeeded, []string{lib}) {
+		t.Fatalf("appDir %q restartNeeded %v: the workers run the old %s", it.AppDir, it.RestartNeeded, filepath.Base(lib))
+	}
+}
