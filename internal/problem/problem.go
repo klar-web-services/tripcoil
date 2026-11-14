@@ -27,6 +27,17 @@ const (
 	ImageOnly           = "IMAGE_ONLY"
 )
 
+// Codes of the Audit (spec sections 6 and 12).
+const (
+	GrypeUnavailable   = "GRYPE_UNAVAILABLE"   // Grype or its database cannot be obtained
+	DBStale            = "DB_STALE"            // the database is older than audit.maxDatabaseAgeHours
+	OriginScanFailed   = "ORIGIN_SCAN_FAILED"  // one origin could not be scanned
+	KernelDataStale    = "KERNEL_DATA_STALE"   // the kernel CNA data is too old, so the kernel is not audited
+	OriginUnresolved   = "ORIGIN_UNRESOLVED"   // gap: the Inventory could not resolve an origin
+	OriginUnidentified = "ORIGIN_UNIDENTIFIED" // gap: Grype found no packages in an origin
+	DBUpdateFailed     = "DB_UPDATE_FAILED"    // warning: the database could not be updated, but is fresh enough
+)
+
 // Problem is one recorded error, warning, notice or coverage gap.
 type Problem struct {
 	Code    string `json:"code"`

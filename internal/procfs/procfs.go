@@ -179,8 +179,18 @@ func ParseMaps(data []byte) []Mapping {
 	return out
 }
 
-// ErrNotRegular is returned for a running file that is not a regular file.
+// ErrNotRegular is returned for a file that is not a regular file.
 var ErrNotRegular = errors.New("not a regular file")
+
+// ErrPseudoFile is returned for a file of a kernel file system, such as /proc/kmsg: it looks like a
+// regular file, but reading it can block forever or never end.
+var ErrPseudoFile = errors.New("a file of a kernel file system")
+
+// pseudoFS are the kernel file systems whose regular files are not file contents (statfs magic
+// numbers): proc, sysfs, tracefs, debugfs, securityfs, cgroup, cgroup2, bpf, configfs, efivarfs
+// and pstore.
+var pseudoFS = map[int64]bool{0x9fa0: true, 0x62656572: true, 0x74726163: true, 0x64626720: true, 0x73636673: true,
+	0x27e0eb: true, 0x63677270: true, 0xcafe4a11: true, 0x62656570: true, 0xde5e81e4: true, 0x6165676c: true}
 
 // FileID identifies a file by device and inode.
 type FileID struct{ Dev, Ino uint64 }
@@ -252,21 +262,22 @@ func (f FS) mapFile(pid int, m Mapping) string {
 
 // OpenExe opens the running executable, even when it was replaced on disk.
 func (f FS) OpenExe(pid int) (io.ReadCloser, error) {
-	return openRegular(f.proc(pid, "exe"))
+	return OpenRegular(f.proc(pid, "exe"))
 }
 
 // OpenMapFile opens a mapped file through /proc/<pid>/map_files, even when it was replaced.
 func (f FS) OpenMapFile(pid int, m Mapping) (io.ReadCloser, error) {
-	return openRegular(f.mapFile(pid, m))
+	return OpenRegular(f.mapFile(pid, m))
 }
 
 // oPath is O_PATH, which package syscall defines only on some architectures.
 const oPath = 0x200000
 
-// openRegular opens a file for reading only if it is a regular file. A process can map a FIFO or
-// a device, which are never opened: an O_PATH descriptor only names the file, and only a regular
-// file is reopened for reading through it.
-func openRegular(path string) (*os.File, error) {
+// OpenRegular opens a file for reading only if it is a regular file of a real file system. A
+// process can map a FIFO or a device, and anyone may have put one, or a link to /proc/kmsg, at a
+// path. None of them is ever opened for reading: an O_PATH descriptor only names the file, and only
+// a regular file outside the kernel's file systems is reopened for reading through it.
+func OpenRegular(path string) (*os.File, error) {
 	fd, err := syscall.Open(path, oPath|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
@@ -278,6 +289,13 @@ func openRegular(path string) (*os.File, error) {
 	}
 	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: ErrNotRegular}
+	}
+	var sfs syscall.Statfs_t
+	if err := syscall.Fstatfs(fd, &sfs); err != nil {
+		return nil, &fs.PathError{Op: "fstatfs", Path: path, Err: err}
+	}
+	if pseudoFS[int64(sfs.Type)] {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: ErrPseudoFile}
 	}
 	return os.OpenFile("/proc/self/fd/"+strconv.Itoa(fd), os.O_RDONLY|syscall.O_NOCTTY, 0)
 }

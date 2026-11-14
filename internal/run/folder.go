@@ -84,18 +84,41 @@ func CreateFolder(stateDir, id string) (string, error) {
 	return dir, nil
 }
 
+// CreateSubfolder makes dir/name, such as a run's raw/, with mode 0750 and the agent group.
+func CreateSubfolder(dir, name string) (string, error) {
+	p := filepath.Join(dir, name)
+	if err := os.Mkdir(p, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	return p, Share(p, 0o750)
+}
+
+// Share gives a file in a run folder its mode and the agent group, for files that another
+// program wrote, such as Grype's raw output.
+func Share(path string, mode fs.FileMode) error {
+	if err := os.Chmod(path, mode); err != nil {
+		return err
+	}
+	return shareWithAgent(path)
+}
+
 // WriteJSON writes v as indented JSON with the given mode and the agent group, atomically.
 func WriteJSON(path string, v any, mode fs.FileMode) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
+	return WriteFile(path, append(data, '\n'), mode)
+}
+
+// WriteFile writes data with the given mode and the agent group, atomically.
+func WriteFile(path string, data []byte, mode fs.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
 	}

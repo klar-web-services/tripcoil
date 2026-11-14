@@ -101,3 +101,38 @@ func TestFolderJSONAndLatest(t *testing.T) {
 		t.Fatalf("latest -> %q %v", target, err)
 	}
 }
+
+func TestSubfolderShareAndWriteFile(t *testing.T) {
+	gid := os.Getgid()
+	old := AgentGID
+	AgentGID = func() (int, bool) { return gid, true } // our own group, which chown always allows
+	t.Cleanup(func() { AgentGID = old })
+	dir := t.TempDir()
+	raw, err := CreateSubfolder(dir, "raw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := CreateSubfolder(dir, "raw"); err != nil || again != raw {
+		t.Fatalf("a second call: %s %v", again, err)
+	}
+	p := filepath.Join(raw, "a.grype.json")
+	if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil { // as Grype writes it
+		t.Fatal(err)
+	}
+	if err := Share(p, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	md := filepath.Join(dir, "report.md")
+	if err := WriteFile(md, []byte("# r\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	for path, mode := range map[string]os.FileMode{raw: 0o750, p: 0o640, md: 0o640} {
+		fi, err := os.Stat(path)
+		if err != nil || fi.Mode().Perm() != mode || int(fi.Sys().(*syscall.Stat_t).Gid) != gid {
+			t.Errorf("%s: %v %v", path, fi.Mode(), err)
+		}
+	}
+	if data, _ := os.ReadFile(md); string(data) != "# r\n" {
+		t.Fatalf("report.md %q", data)
+	}
+}

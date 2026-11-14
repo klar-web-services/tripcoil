@@ -396,3 +396,23 @@ func TestRootFileID(t *testing.T) {
 		t.Fatalf("%+v, want %+v", got, want)
 	}
 }
+
+func TestOpenRegularRefusesKernelFiles(t *testing.T) {
+	for _, path := range []string{"/proc/self/status", "/sys/kernel/mm/transparent_hugepage/enabled"} {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if f, err := OpenRegular(path); !errors.Is(err, ErrPseudoFile) {
+			if f != nil {
+				f.Close()
+			}
+			t.Errorf("%s: %v, want ErrPseudoFile", path, err)
+		}
+	}
+	// A link through /proc to a real file is the file: the Inventory reads running files this way.
+	f, err := OpenRegular("/proc/self/exe")
+	if err != nil {
+		t.Fatalf("/proc/self/exe: %v", err)
+	}
+	f.Close()
+}
