@@ -187,10 +187,24 @@ var ErrNotRegular = errors.New("not a regular file")
 var ErrPseudoFile = errors.New("a file of a kernel file system")
 
 // pseudoFS are the kernel file systems whose regular files are not file contents (statfs magic
-// numbers): proc, sysfs, tracefs, debugfs, securityfs, cgroup, cgroup2, bpf, configfs, efivarfs
-// and pstore.
-var pseudoFS = map[int64]bool{0x9fa0: true, 0x62656572: true, 0x74726163: true, 0x64626720: true, 0x73636673: true,
-	0x27e0eb: true, 0x63677270: true, 0xcafe4a11: true, 0x62656570: true, 0xde5e81e4: true, 0x6165676c: true}
+// numbers): proc, sysfs, tracefs, debugfs, securityfs, cgroup, cgroup2, bpf, configfs, efivarfs,
+// pstore, xenfs (/proc/xen/xenbus waits forever) and rpc_pipefs (opening an NFS upcall pipe
+// registers a reader).
+var pseudoFS = map[int64]bool{
+	0x9fa0:     true, // proc
+	0x62656572: true, // sysfs
+	0x74726163: true, // tracefs
+	0x64626720: true, // debugfs
+	0x73636673: true, // securityfs
+	0x27e0eb:   true, // cgroup
+	0x63677270: true, // cgroup2
+	0xcafe4a11: true, // bpf
+	0x62656570: true, // configfs
+	0xde5e81e4: true, // efivarfs
+	0x6165676c: true, // pstore
+	0xabba1974: true, // xenfs
+	0x67596969: true, // rpc_pipefs
+}
 
 // FileID identifies a file by device and inode.
 type FileID struct{ Dev, Ino uint64 }

@@ -103,10 +103,25 @@ func TestFolderJSONAndLatest(t *testing.T) {
 }
 
 func TestSubfolderShareAndWriteFile(t *testing.T) {
-	gid := os.Getgid()
-	old := AgentGID
-	AgentGID = func() (int, bool) { return gid, true } // our own group, which chown always allows
-	t.Cleanup(func() { AgentGID = old })
+	old := syscall.Umask(0o077) // the modes must come from the code, not the umask
+	defer syscall.Umask(old)
+	gid := 12345
+	if os.Geteuid() != 0 {
+		gid = -1
+		groups, _ := os.Getgroups()
+		for _, g := range groups {
+			if g != os.Getegid() {
+				gid = g
+				break
+			}
+		}
+		if gid < 0 {
+			t.Skip("needs a supplementary group or root to tell the agent group from the primary group")
+		}
+	}
+	oldGID := AgentGID
+	AgentGID = func() (int, bool) { return gid, true }
+	t.Cleanup(func() { AgentGID = oldGID })
 	dir := t.TempDir()
 	raw, err := CreateSubfolder(dir, "raw")
 	if err != nil {
@@ -128,8 +143,12 @@ func TestSubfolderShareAndWriteFile(t *testing.T) {
 	}
 	for path, mode := range map[string]os.FileMode{raw: 0o750, p: 0o640, md: 0o640} {
 		fi, err := os.Stat(path)
-		if err != nil || fi.Mode().Perm() != mode || int(fi.Sys().(*syscall.Stat_t).Gid) != gid {
-			t.Errorf("%s: %v %v", path, fi.Mode(), err)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		if fi.Mode().Perm() != mode || int(fi.Sys().(*syscall.Stat_t).Gid) != gid {
+			t.Errorf("%s: mode %v gid %d, want %v gid %d", path, fi.Mode().Perm(), fi.Sys().(*syscall.Stat_t).Gid, mode, gid)
 		}
 	}
 	if data, _ := os.ReadFile(md); string(data) != "# r\n" {
