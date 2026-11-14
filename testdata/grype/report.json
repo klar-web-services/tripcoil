@@ -1,0 +1,1012 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "GHSA-jfh8-c2jp-5v3q",
+        "dataSource": "https://github.com/advisories/GHSA-jfh8-c2jp-5v3q",
+        "namespace": "github:language:java",
+        "severity": "Critical",
+        "urls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+          "https://github.com/apache/logging-log4j2/pull/608",
+          "https://github.com/tangxiaofeng7/apache-log4j-poc"
+        ],
+        "description": "Remote code injection in Log4j",
+        "cvss": [
+          {
+            "type": "Secondary",
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:H",
+            "metrics": {
+              "baseScore": 10,
+              "exploitabilityScore": 3.9,
+              "impactScore": 6.1
+            },
+            "vendorMetadata": {}
+          }
+        ],
+        "knownExploited": [
+          {
+            "cve": "CVE-2021-44228",
+            "vendorProject": "Apache",
+            "product": "Log4j2",
+            "dateAdded": "2021-12-10",
+            "requiredAction": "For all affected software assets for which updates exist, the only acceptable remediation actions are: 1) Apply updates; OR 2) remove affected assets from agency networks. Temporary mitigations using one of the measures provided at https://www.cisa.gov/uscert/ed-22-02-apache-log4j-recommended-mitigation-measures are only acceptable until updates are available.",
+            "dueDate": "2021-12-24",
+            "knownRansomwareCampaignUse": "known",
+            "urls": [
+              "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+            ],
+            "cwes": [
+              "CWE-20",
+              "CWE-400",
+              "CWE-502"
+            ]
+          }
+        ],
+        "epss": [
+          {
+            "cve": "CVE-2021-44228",
+            "epss": 0.99999,
+            "percentile": 1,
+            "date": "2026-11-13"
+          }
+        ],
+        "cwes": [
+          {
+            "cve": "CVE-2021-44228",
+            "cwe": "CWE-20",
+            "source": "security@apache.org",
+            "type": "Secondary"
+          },
+          {
+            "cve": "CVE-2021-44228",
+            "cwe": "CWE-400",
+            "source": "security@apache.org",
+            "type": "Secondary"
+          },
+          {
+            "cve": "CVE-2021-44228",
+            "cwe": "CWE-502",
+            "source": "security@apache.org",
+            "type": "Secondary"
+          },
+          {
+            "cve": "CVE-2021-44228",
+            "cwe": "CWE-917",
+            "source": "nvd@nist.gov",
+            "type": "Secondary"
+          }
+        ],
+        "fix": {
+          "versions": [
+            "2.15.0"
+          ],
+          "state": "fixed",
+          "available": [
+            {
+              "version": "2.15.0",
+              "date": "2021-12-10",
+              "kind": "first-observed"
+            }
+          ]
+        },
+        "advisories": [],
+        "risk": 100
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2021-44228",
+          "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+          "namespace": "nvd:cpe",
+          "severity": "Critical",
+          "urls": [
+            "http://packetstormsecurity.com/files/165225/Apache-Log4j2-2.14.1-Remote-Code-Execution.html",
+            "http://packetstormsecurity.com/files/165260/VMware-Security-Advisory-2021-0028.html",
+            "http://packetstormsecurity.com/files/165261/Apache-Log4j2-2.14.1-Information-Disclosure.html"
+          ],
+          "description": "Apache Log4j2 2.0-beta9 through 2.15.0 (excluding security releases 2.12.2, 2.12.3, and 2.3.1) JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP and other JNDI related endpoints. An attacker who can control log messages or log message parameters can execute arbitrary code loaded from LDAP servers when message lookup substitution is enabled. From log4j 2.15.0, this behavior has been disabled by default. From version 2.16.0 (along with 2.12.2, 2.12.3, and 2.3.1), this functionality has been completely removed. Note that this vulnerability is specific to log4j-core and does not affect log4net, log4cxx, or other Apache Logging Services projects.",
+          "cvss": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "3.1",
+              "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+              "metrics": {
+                "baseScore": 10,
+                "exploitabilityScore": 3.9,
+                "impactScore": 6.1
+              },
+              "vendorMetadata": {}
+            },
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "2.0",
+              "vector": "AV:N/AC:M/Au:N/C:C/I:C/A:C",
+              "metrics": {
+                "baseScore": 9.3,
+                "exploitabilityScore": 8.6,
+                "impactScore": 10.1
+              },
+              "vendorMetadata": {}
+            },
+            {
+              "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+              "type": "Secondary",
+              "version": "3.1",
+              "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+              "metrics": {
+                "baseScore": 10,
+                "exploitabilityScore": 3.9,
+                "impactScore": 6.1
+              },
+              "vendorMetadata": {}
+            }
+          ],
+          "knownExploited": [
+            {
+              "cve": "CVE-2021-44228",
+              "vendorProject": "Apache",
+              "product": "Log4j2",
+              "dateAdded": "2021-12-10",
+              "requiredAction": "For all affected software assets for which updates exist, the only acceptable remediation actions are: 1) Apply updates; OR 2) remove affected assets from agency networks. Temporary mitigations using one of the measures provided at https://www.cisa.gov/uscert/ed-22-02-apache-log4j-recommended-mitigation-measures are only acceptable until updates are available.",
+              "dueDate": "2021-12-24",
+              "knownRansomwareCampaignUse": "known",
+              "urls": [
+                "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+              ],
+              "cwes": [
+                "CWE-20",
+                "CWE-400",
+                "CWE-502"
+              ]
+            }
+          ],
+          "epss": [
+            {
+              "cve": "CVE-2021-44228",
+              "epss": 0.99999,
+              "percentile": 1,
+              "date": "2026-11-13"
+            }
+          ],
+          "cwes": [
+            {
+              "cve": "CVE-2021-44228",
+              "cwe": "CWE-20",
+              "source": "security@apache.org",
+              "type": "Secondary"
+            },
+            {
+              "cve": "CVE-2021-44228",
+              "cwe": "CWE-400",
+              "source": "security@apache.org",
+              "type": "Secondary"
+            },
+            {
+              "cve": "CVE-2021-44228",
+              "cwe": "CWE-502",
+              "source": "security@apache.org",
+              "type": "Secondary"
+            },
+            {
+              "cve": "CVE-2021-44228",
+              "cwe": "CWE-917",
+              "source": "nvd@nist.gov",
+              "type": "Secondary"
+            }
+          ]
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "java-matcher",
+          "searchedBy": {
+            "language": "java",
+            "namespace": "github:language:java",
+            "package": {
+              "name": "org.apache.logging.log4j:log4j-core",
+              "version": "2.14.1"
+            }
+          },
+          "found": {
+            "vulnerabilityID": "GHSA-jfh8-c2jp-5v3q",
+            "versionConstraint": ">=2.13.0,<2.15.0 (unknown)"
+          },
+          "fix": {
+            "suggestedVersion": "2.15.0"
+          }
+        }
+      ],
+      "artifact": {
+        "id": "bcd32e84e45a5f7a",
+        "name": "log4j-core",
+        "version": "2.14.1",
+        "type": "java-archive",
+        "locations": [
+          {
+            "path": "/log4j-core-2.14.1.jar",
+            "accessPath": "/log4j-core-2.14.1.jar",
+            "annotations": {
+              "evidence": "primary"
+            }
+          }
+        ],
+        "language": "java",
+        "licenses": [
+          "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        ],
+        "cpes": [
+          "cpe:2.3:a:apache:log4j-core:2.14.1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:apache:log4j_core:2.14.1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:apache:core:2.14.1:*:*:*:*:*:*:*"
+        ],
+        "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+        "upstreams": [],
+        "metadataType": "JavaMetadata",
+        "metadata": {
+          "virtualPath": "/log4j-core-2.14.1.jar",
+          "pomArtifactID": "log4j-core",
+          "pomGroupID": "org.apache.logging.log4j",
+          "manifestName": "",
+          "archiveDigests": [
+            {
+              "algorithm": "sha1",
+              "value": "9141212b8507ab50a45525b545b39d224614528b"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2018-20796",
+        "dataSource": "https://security-tracker.debian.org/tracker/CVE-2018-20796",
+        "namespace": "debian:distro:debian:12",
+        "severity": "Negligible",
+        "urls": [],
+        "description": "In the GNU C Library (aka glibc or libc6) through 2.29, check_dst_limits_calc_pos_1 in posix/regexec.c has Uncontrolled Recursion, as demonstrated by '(\\227|)(\\\\1\\\\1|t1|\\\\\\2537)+' in grep.",
+        "cvss": [],
+        "epss": [
+          {
+            "cve": "CVE-2018-20796",
+            "epss": 0.05804,
+            "percentile": 0.93243,
+            "date": "2026-11-13"
+          }
+        ],
+        "cwes": [
+          {
+            "cve": "CVE-2018-20796",
+            "cwe": "CWE-674",
+            "source": "nvd@nist.gov",
+            "type": "Primary"
+          }
+        ],
+        "fix": {
+          "versions": [],
+          "state": "not-fixed"
+        },
+        "advisories": [],
+        "risk": 0.2902
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2018-20796",
+          "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2018-20796",
+          "namespace": "nvd:cpe",
+          "severity": "High",
+          "urls": [
+            "http://www.securityfocus.com/bid/107160",
+            "https://debbugs.gnu.org/cgi/bugreport.cgi?bug=34141",
+            "https://lists.gnu.org/archive/html/bug-gnulib/2019-01/msg00108.html"
+          ],
+          "description": "In the GNU C Library (aka glibc or libc6) through 2.29, check_dst_limits_calc_pos_1 in posix/regexec.c has Uncontrolled Recursion, as demonstrated by '(\\227|)(\\\\1\\\\1|t1|\\\\\\2537)+' in grep.",
+          "cvss": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "3.0",
+              "vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "metrics": {
+                "baseScore": 7.5,
+                "exploitabilityScore": 3.9,
+                "impactScore": 3.6
+              },
+              "vendorMetadata": {}
+            },
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "2.0",
+              "vector": "AV:N/AC:L/Au:N/C:N/I:N/A:P",
+              "metrics": {
+                "baseScore": 5,
+                "exploitabilityScore": 10,
+                "impactScore": 2.9
+              },
+              "vendorMetadata": {}
+            }
+          ],
+          "epss": [
+            {
+              "cve": "CVE-2018-20796",
+              "epss": 0.05804,
+              "percentile": 0.93243,
+              "date": "2026-11-13"
+            }
+          ],
+          "cwes": [
+            {
+              "cve": "CVE-2018-20796",
+              "cwe": "CWE-674",
+              "source": "nvd@nist.gov",
+              "type": "Primary"
+            }
+          ]
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-indirect-match",
+          "matcher": "dpkg-matcher",
+          "searchedBy": {
+            "distro": {
+              "type": "debian",
+              "version": "12.15"
+            },
+            "package": {
+              "name": "glibc",
+              "version": "2.36-9+deb12u14"
+            },
+            "namespace": "debian:distro:debian:12"
+          },
+          "found": {
+            "vulnerabilityID": "CVE-2018-20796",
+            "versionConstraint": "none (unknown)"
+          }
+        }
+      ],
+      "artifact": {
+        "id": "d5cfab4d2af88102",
+        "name": "libc6",
+        "version": "2.36-9+deb12u14",
+        "type": "deb",
+        "locations": [
+          {
+            "path": "/var/lib/dpkg/status",
+            "accessPath": "/var/lib/dpkg/status",
+            "annotations": {
+              "evidence": "primary"
+            }
+          }
+        ],
+        "language": "",
+        "licenses": [],
+        "cpes": [
+          "cpe:2.3:a:libc6:libc6:2.36-9\\+deb12u14:*:*:*:*:*:*:*"
+        ],
+        "purl": "pkg:deb/debian/libc6@2.36-9%2Bdeb12u14?arch=amd64&distro=debian-12.15&upstream=glibc",
+        "upstreams": [
+          {
+            "name": "glibc"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2020-11023",
+        "dataSource": "https://access.redhat.com/security/cve/CVE-2020-11023",
+        "namespace": "redhat:distro:redhat:9",
+        "severity": "Medium",
+        "urls": [],
+        "description": "A flaw was found in jQuery. HTML containing \\<option\\> elements from untrusted sources are passed, even after sanitizing, to one of jQuery's DOM manipulation methods, which may execute untrusted code. The highest threat from this vulnerability is to data confidentiality and integrity.",
+        "cvss": [
+          {
+            "type": "Secondary",
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+            "metrics": {
+              "baseScore": 6.1,
+              "exploitabilityScore": 2.9,
+              "impactScore": 2.8
+            },
+            "vendorMetadata": {}
+          }
+        ],
+        "knownExploited": [
+          {
+            "cve": "CVE-2020-11023",
+            "vendorProject": "JQuery",
+            "product": "JQuery",
+            "dateAdded": "2025-01-23",
+            "requiredAction": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
+            "dueDate": "2025-02-13",
+            "knownRansomwareCampaignUse": "unknown",
+            "notes": "This vulnerability could affect an open-source component, third-party library, protocol, or proprietary implementation that could be used by different products. For more information, please see: https://github.com/jquery/jquery/security/advisories/GHSA-jpcq-cgw6-v4j6",
+            "urls": [
+              "https://blog.jquery.com/2020/04/10/jquery-3-5-0-released/",
+              "https://nvd.nist.gov/vuln/detail/CVE-2020-11023"
+            ],
+            "cwes": [
+              "CWE-79"
+            ]
+          }
+        ],
+        "epss": [
+          {
+            "cve": "CVE-2020-11023",
+            "epss": 0.84887,
+            "percentile": 0.99716,
+            "date": "2026-11-13"
+          }
+        ],
+        "cwes": [
+          {
+            "cve": "CVE-2020-11023",
+            "cwe": "CWE-79",
+            "source": "security-advisories@github.com",
+            "type": "Secondary"
+          },
+          {
+            "cve": "CVE-2020-11023",
+            "cwe": "CWE-79",
+            "source": "nvd@nist.gov",
+            "type": "Primary"
+          }
+        ],
+        "fix": {
+          "versions": [
+            "0:11.5.0-5.el9_5"
+          ],
+          "state": "fixed",
+          "available": [
+            {
+              "version": "0:11.5.0-5.el9_5",
+              "date": "2025-02-13",
+              "kind": "first-observed"
+            }
+          ]
+        },
+        "advisories": [
+          {
+            "id": "RHSA-2025:1346",
+            "link": "https://access.redhat.com/errata/RHSA-2025:1346"
+          }
+        ],
+        "risk": 58.275
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2020-11023",
+          "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2020-11023",
+          "namespace": "nvd:cpe",
+          "severity": "Medium",
+          "urls": [
+            "http://lists.opensuse.org/opensuse-security-announce/2020-07/msg00067.html",
+            "http://lists.opensuse.org/opensuse-security-announce/2020-07/msg00085.html",
+            "http://lists.opensuse.org/opensuse-security-announce/2020-11/msg00039.html"
+          ],
+          "description": "In jQuery versions greater than or equal to 1.0.3 and before 3.5.0, passing HTML containing <option> elements from untrusted sources - even after sanitizing it - to one of jQuery's DOM manipulation methods (i.e. .html(), .append(), and others) may execute untrusted code. This problem is patched in jQuery 3.5.0.",
+          "cvss": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "3.1",
+              "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+              "metrics": {
+                "baseScore": 6.1,
+                "exploitabilityScore": 2.9,
+                "impactScore": 2.8
+              },
+              "vendorMetadata": {}
+            },
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "2.0",
+              "vector": "AV:N/AC:M/Au:N/C:N/I:P/A:N",
+              "metrics": {
+                "baseScore": 4.3,
+                "exploitabilityScore": 8.6,
+                "impactScore": 2.9
+              },
+              "vendorMetadata": {}
+            },
+            {
+              "source": "security-advisories@github.com",
+              "type": "Secondary",
+              "version": "3.1",
+              "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:L/A:N",
+              "metrics": {
+                "baseScore": 6.9,
+                "exploitabilityScore": 1.7,
+                "impactScore": 4.8
+              },
+              "vendorMetadata": {}
+            }
+          ],
+          "knownExploited": [
+            {
+              "cve": "CVE-2020-11023",
+              "vendorProject": "JQuery",
+              "product": "JQuery",
+              "dateAdded": "2025-01-23",
+              "requiredAction": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
+              "dueDate": "2025-02-13",
+              "knownRansomwareCampaignUse": "unknown",
+              "notes": "This vulnerability could affect an open-source component, third-party library, protocol, or proprietary implementation that could be used by different products. For more information, please see: https://github.com/jquery/jquery/security/advisories/GHSA-jpcq-cgw6-v4j6",
+              "urls": [
+                "https://blog.jquery.com/2020/04/10/jquery-3-5-0-released/",
+                "https://nvd.nist.gov/vuln/detail/CVE-2020-11023"
+              ],
+              "cwes": [
+                "CWE-79"
+              ]
+            }
+          ],
+          "epss": [
+            {
+              "cve": "CVE-2020-11023",
+              "epss": 0.84887,
+              "percentile": 0.99716,
+              "date": "2026-11-13"
+            }
+          ],
+          "cwes": [
+            {
+              "cve": "CVE-2020-11023",
+              "cwe": "CWE-79",
+              "source": "security-advisories@github.com",
+              "type": "Secondary"
+            },
+            {
+              "cve": "CVE-2020-11023",
+              "cwe": "CWE-79",
+              "source": "nvd@nist.gov",
+              "type": "Primary"
+            }
+          ]
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-indirect-match",
+          "matcher": "rpm-matcher",
+          "searchedBy": {
+            "distro": {
+              "type": "rockylinux",
+              "version": "9.3"
+            },
+            "package": {
+              "name": "gcc",
+              "version": "11.4.1-2.1.el9"
+            },
+            "namespace": "redhat:distro:redhat:9"
+          },
+          "found": {
+            "vulnerabilityID": "CVE-2020-11023",
+            "versionConstraint": "< 0:11.5.0-5.el9_5 (rpm)"
+          },
+          "fix": {
+            "suggestedVersion": "0:11.5.0-5.el9_5"
+          }
+        }
+      ],
+      "artifact": {
+        "id": "e5f9248cb14602d9",
+        "name": "libgcc",
+        "version": "11.4.1-2.1.el9",
+        "type": "rpm",
+        "locations": [
+          {
+            "path": "/var/lib/rpm/rpmdb.sqlite",
+            "accessPath": "/var/lib/rpm/rpmdb.sqlite",
+            "annotations": {
+              "evidence": "primary"
+            }
+          }
+        ],
+        "language": "",
+        "licenses": [
+          "GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD"
+        ],
+        "cpes": [
+          "cpe:2.3:a:rockyenterprisesoftwarefoundation:libgcc:11.4.1-2.1.el9:*:*:*:*:*:*:*",
+          "cpe:2.3:a:libgcc:libgcc:11.4.1-2.1.el9:*:*:*:*:*:*:*"
+        ],
+        "purl": "pkg:rpm/rocky/libgcc@11.4.1-2.1.el9?arch=x86_64&distro=rocky-9.3&upstream=gcc-11.4.1-2.1.el9.src.rpm",
+        "upstreams": [
+          {
+            "name": "gcc",
+            "version": "11.4.1-2.1.el9"
+          }
+        ],
+        "metadataType": "RpmMetadata",
+        "metadata": {
+          "epoch": null,
+          "modularityLabel": "",
+          "architecture": "x86_64"
+        }
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2025-39682",
+        "dataSource": "https://security-tracker.debian.org/tracker/CVE-2025-39682",
+        "namespace": "debian:distro:debian:12",
+        "severity": "Critical",
+        "urls": [],
+        "description": "In the Linux kernel, the following vulnerability has been resolved:  tls: fix handling of zero-length records on the rx_list  Each recvmsg() call must process either  - only contiguous DATA records (any number of them)  - one non-DATA record  If the next record has different type than what has already been processed we break out of the main processing loop. If the record has already been decrypted (which may be the case for TLS 1.3 where we don't know type until decryption) we queue the pending record to the rx_list. Next recvmsg() will pick it up from there.  Queuing the skb to rx_list after zero-copy decrypt is not possible, since in that case we decrypted directly to the user space buffer, and we don't have an skb to queue (darg.skb points to the ciphertext skb for access to metadata like length).  Only data records are allowed zero-copy, and we break the processing loop after each non-data record. So we should never zero-copy and then find out that the record type has changed. The corner case we missed is when the initial record comes from rx_list, and it's zero length.",
+        "cvss": [
+          {
+            "source": "nvd@nist.gov",
+            "type": "Primary",
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "metrics": {
+              "baseScore": 9.8,
+              "exploitabilityScore": 3.9,
+              "impactScore": 5.9
+            },
+            "vendorMetadata": {}
+          }
+        ],
+        "knownExploited": [
+          {
+            "cve": "CVE-2025-39682",
+            "vendorProject": "Linux",
+            "product": "Kernel",
+            "dateAdded": "2026-09-18",
+            "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA\u2019s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA\u2019s \u201cForensics Triage Requirements\u201d (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+            "dueDate": "2026-09-21",
+            "knownRansomwareCampaignUse": "unknown",
+            "notes": "This vulnerability affects an open-source component, third-party library, protocol, or proprietary implementation that could be used by different products. For more information, please see:; BOD 26-04: https://www.cisa.gov/news-events/directives/bod-26-04-prioritizing-security-updates-based-risk; Forensics Triage Requirements: https://www.cisa.gov/news-events/directives/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk",
+            "urls": [
+              "https://git.kernel.org/stable/c/2902c3ebcca52ca845c03182000e8d71d3a5196f",
+              "https://git.kernel.org/stable/c/c09dd3773b5950e9cfb6c9b9a5f6e36d06c62677",
+              "https://git.kernel.org/stable/c/3439c15ae91a517cf3c650ea15a8987699416ad9",
+              "https://git.kernel.org/stable/c/29c0ce3c8cdb6dc5d61139c937f34cb888a6f42e",
+              "https://git.kernel.org/stable/c/62708b9452f8eb77513115b17c4f8d1a22ebf843",
+              "https://nvd.nist.gov/vuln/detail/CVE-2025-39682"
+            ],
+            "cwes": [
+              "CWE-754"
+            ]
+          }
+        ],
+        "epss": [
+          {
+            "cve": "CVE-2025-39682",
+            "epss": 0.03312,
+            "percentile": 0.88755,
+            "date": "2026-11-13"
+          }
+        ],
+        "cwes": [
+          {
+            "cve": "CVE-2025-39682",
+            "cwe": "NVD-CWE-Other",
+            "source": "nvd@nist.gov",
+            "type": "Primary"
+          },
+          {
+            "cve": "CVE-2025-39682",
+            "cwe": "CWE-754",
+            "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "type": "Secondary"
+          }
+        ],
+        "fix": {
+          "versions": [
+            "6.1.153-1"
+          ],
+          "state": "fixed",
+          "available": [
+            {
+              "version": "6.1.153-1",
+              "date": "2025-09-22",
+              "kind": "advisory"
+            }
+          ]
+        },
+        "advisories": [
+          {
+            "id": "DSA-6009-1",
+            "link": "https://security-tracker.debian.org/tracker/DSA-6009-1"
+          }
+        ],
+        "risk": 98.70000000000002
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2025-39682",
+          "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2025-39682",
+          "namespace": "nvd:cpe",
+          "severity": "Critical",
+          "urls": [
+            "https://git.kernel.org/stable/c/2902c3ebcca52ca845c03182000e8d71d3a5196f",
+            "https://git.kernel.org/stable/c/29c0ce3c8cdb6dc5d61139c937f34cb888a6f42e",
+            "https://git.kernel.org/stable/c/3439c15ae91a517cf3c650ea15a8987699416ad9",
+            "https://git.kernel.org/stable/c/62708b9452f8eb77513115b17c4f8d1a22ebf843",
+            "https://git.kernel.org/stable/c/c09dd3773b5950e9cfb6c9b9a5f6e36d06c62677",
+            "https://lists.debian.org/debian-lts-announce/2025/10/msg00008.html",
+            "https://cert-portal.siemens.com/productcert/html/ssa-032379.html",
+            "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?field_cve=CVE-2025-39682"
+          ],
+          "description": "In the Linux kernel, the following vulnerability has been resolved:\n\ntls: fix handling of zero-length records on the rx_list\n\nEach recvmsg() call must process either\n - only contiguous DATA records (any number of them)\n - one non-DATA record\n\nIf the next record has different type than what has already been\nprocessed we break out of the main processing loop. If the record\nhas already been decrypted (which may be the case for TLS 1.3 where\nwe don't know type until decryption) we queue the pending record\nto the rx_list. Next recvmsg() will pick it up from there.\n\nQueuing the skb to rx_list after zero-copy decrypt is not possible,\nsince in that case we decrypted directly to the user space buffer,\nand we don't have an skb to queue (darg.skb points to the ciphertext\nskb for access to metadata like length).\n\nOnly data records are allowed zero-copy, and we break the processing\nloop after each non-data record. So we should never zero-copy and\nthen find out that the record type has changed. The corner case\nwe missed is when the initial record comes from rx_list, and it's\nzero length.",
+          "cvss": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "version": "3.1",
+              "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "metrics": {
+                "baseScore": 9.8,
+                "exploitabilityScore": 3.9,
+                "impactScore": 5.9
+              },
+              "vendorMetadata": {}
+            },
+            {
+              "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+              "type": "Secondary",
+              "version": "3.1",
+              "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "metrics": {
+                "baseScore": 9.8,
+                "exploitabilityScore": 3.9,
+                "impactScore": 5.9
+              },
+              "vendorMetadata": {}
+            }
+          ],
+          "knownExploited": [
+            {
+              "cve": "CVE-2025-39682",
+              "vendorProject": "Linux",
+              "product": "Kernel",
+              "dateAdded": "2026-09-18",
+              "requiredAction": "Apply mitigations in accordance with vendor instructions, ensuring compliance with CISA\u2019s BOD 26-04 Prioritizing Security Updates Based on Risk (see URL in Notes) guidance and CISA\u2019s \u201cForensics Triage Requirements\u201d (see URL in Notes). Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.",
+              "dueDate": "2026-09-21",
+              "knownRansomwareCampaignUse": "unknown",
+              "notes": "This vulnerability affects an open-source component, third-party library, protocol, or proprietary implementation that could be used by different products. For more information, please see:; BOD 26-04: https://www.cisa.gov/news-events/directives/bod-26-04-prioritizing-security-updates-based-risk; Forensics Triage Requirements: https://www.cisa.gov/news-events/directives/bod-26-04-implementation-guidance-prioritizing-security-updates-based-risk",
+              "urls": [
+                "https://git.kernel.org/stable/c/2902c3ebcca52ca845c03182000e8d71d3a5196f",
+                "https://git.kernel.org/stable/c/c09dd3773b5950e9cfb6c9b9a5f6e36d06c62677",
+                "https://git.kernel.org/stable/c/3439c15ae91a517cf3c650ea15a8987699416ad9",
+                "https://git.kernel.org/stable/c/29c0ce3c8cdb6dc5d61139c937f34cb888a6f42e",
+                "https://git.kernel.org/stable/c/62708b9452f8eb77513115b17c4f8d1a22ebf843",
+                "https://nvd.nist.gov/vuln/detail/CVE-2025-39682"
+              ],
+              "cwes": [
+                "CWE-754"
+              ]
+            }
+          ],
+          "epss": [
+            {
+              "cve": "CVE-2025-39682",
+              "epss": 0.03312,
+              "percentile": 0.88755,
+              "date": "2026-11-13"
+            }
+          ],
+          "cwes": [
+            {
+              "cve": "CVE-2025-39682",
+              "cwe": "NVD-CWE-Other",
+              "source": "nvd@nist.gov",
+              "type": "Primary"
+            },
+            {
+              "cve": "CVE-2025-39682",
+              "cwe": "CWE-754",
+              "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+              "type": "Secondary"
+            }
+          ]
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-indirect-match",
+          "matcher": "dpkg-matcher",
+          "searchedBy": {
+            "distro": {
+              "type": "debian",
+              "version": "12.15"
+            },
+            "package": {
+              "name": "linux",
+              "version": "6.1.76-1"
+            },
+            "namespace": "debian:distro:debian:12"
+          },
+          "found": {
+            "vulnerabilityID": "CVE-2025-39682",
+            "versionConstraint": "< 6.1.153-1 (deb)"
+          },
+          "fix": {
+            "suggestedVersion": "6.1.153-1"
+          }
+        }
+      ],
+      "artifact": {
+        "id": "pkg:deb/debian/linux-image-6.1.0-54-amd64@6.1.76-1?arch=amd64&distro=debian-12.15&package-id=844aae489c2d8683&upstream=linux%406.1.76-1",
+        "name": "linux-image-6.1.0-54-amd64",
+        "version": "6.1.76-1",
+        "type": "deb",
+        "locations": [
+          {
+            "path": "/var/lib/dpkg/status",
+            "accessPath": ""
+          }
+        ],
+        "language": "",
+        "licenses": [],
+        "cpes": [
+          "cpe:2.3:a:linux-image-6.1.0-54-amd64:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image-6.1.0-54-amd64:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image_6.1.0_54_amd64:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image_6.1.0_54_amd64:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image-6.1.0-54:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image-6.1.0-54:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image_6.1.0_54:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image_6.1.0_54:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image-6.1.0:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image-6.1.0:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image_6.1.0:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image_6.1.0:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux-image:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux_image:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux:linux-image-6.1.0-54-amd64:6.1.190-1:*:*:*:*:*:*:*",
+          "cpe:2.3:a:linux:linux_image_6.1.0_54_amd64:6.1.190-1:*:*:*:*:*:*:*"
+        ],
+        "purl": "pkg:deb/debian/linux-image-6.1.0-54-amd64@6.1.76-1?arch=amd64&distro=debian-12.15&upstream=linux%406.1.76-1",
+        "upstreams": [
+          {
+            "name": "linux",
+            "version": "6.1.76-1"
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "type": "directory",
+    "target": "/var/lib/tripcoil/cache/staging"
+  },
+  "distro": {
+    "name": "debian",
+    "version": "12.15",
+    "idLike": []
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "0.121.2",
+    "configuration": "<trimmed>",
+    "db": {
+      "status": {
+        "schemaVersion": "v6.1.10",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-11-14T00:20:33Z_1794637165.tar.zst?checksum=sha256%3A762b01ba9c79e6a250bd73f11ef62fbf44539ee8e08e043d80df4aaad3afc2aa",
+        "built": "2026-11-14T06:19:25Z",
+        "path": "/var/lib/tripcoil/cache/grype-db/6/vulnerability.db",
+        "valid": true
+      },
+      "providers": {
+        "alma": {
+          "captured": "2026-11-14T00:21:54Z",
+          "input": "xxh64:38d2b2f79ee3cc47"
+        },
+        "alpine": {
+          "captured": "2026-11-14T00:20:37Z",
+          "input": "xxh64:38d86e5b2b43badc"
+        },
+        "amazon": {
+          "captured": "2026-11-14T00:20:38Z",
+          "input": "xxh64:5adfdbe496fe1339"
+        },
+        "arch": {
+          "captured": "2026-11-14T00:23:15Z",
+          "input": "xxh64:26c037ddaa6a55eb"
+        },
+        "bitnami": {
+          "captured": "2026-11-14T00:20:38Z",
+          "input": "xxh64:9c151427b662ef6c"
+        },
+        "chainguard": {
+          "captured": "2026-11-14T00:20:49Z",
+          "input": "xxh64:52a5193f9b77d279"
+        },
+        "chainguard-libraries": {
+          "captured": "2026-11-14T00:20:44Z",
+          "input": "xxh64:53ef7be0ac554dea"
+        },
+        "debian": {
+          "captured": "2026-11-14T00:20:44Z",
+          "input": "xxh64:99dc67dc19403527"
+        },
+        "echo": {
+          "captured": "2026-11-14T00:21:06Z",
+          "input": "xxh64:cbbfce7c7f6ab898"
+        },
+        "eol": {
+          "captured": "2026-11-14T00:21:30Z",
+          "input": "xxh64:ffde365b89c82e35"
+        },
+        "epss": {
+          "captured": "2026-11-14T00:21:17Z",
+          "input": "xxh64:87da1053039ef4e1"
+        },
+        "fedora": {
+          "captured": "2026-11-14T00:21:03Z",
+          "input": "xxh64:76294693cf12164a"
+        },
+        "github": {
+          "captured": "2026-11-14T00:21:30Z",
+          "input": "xxh64:1a744f357a2e25b0"
+        },
+        "govulndb": {
+          "captured": "2026-11-14T00:21:10Z",
+          "input": "xxh64:657df8c877a14193"
+        },
+        "hummingbird": {
+          "captured": "2026-11-14T00:22:56Z",
+          "input": "xxh64:001e94419c6e1f26"
+        },
+        "kev": {
+          "captured": "2026-11-14T00:20:57Z",
+          "input": "xxh64:4568728f33b4c2af"
+        },
+        "mariner": {
+          "captured": "2026-11-14T00:21:25Z",
+          "input": "xxh64:80fb2dc93cdb9d89"
+        },
+        "minimos": {
+          "captured": "2026-11-14T00:20:43Z",
+          "input": "xxh64:869e703849ba8479"
+        },
+        "nvd": {
+          "captured": "2026-11-14T00:21:35Z",
+          "input": "xxh64:92104e06c6cbc268"
+        },
+        "oracle": {
+          "captured": "2026-11-14T00:20:33Z",
+          "input": "xxh64:0719d876023dad58"
+        },
+        "photon": {
+          "captured": "2026-11-14T00:20:40Z",
+          "input": "xxh64:80e8b35f361eb0ca"
+        },
+        "rhel": {
+          "captured": "2026-11-14T00:22:02Z",
+          "input": "xxh64:37da11065e771859"
+        },
+        "secureos": {
+          "captured": "2026-11-14T00:20:41Z",
+          "input": "xxh64:0b63d7fb9a7c9254"
+        },
+        "sles": {
+          "captured": "2026-11-14T00:22:30Z",
+          "input": "xxh64:705a4a5d17a8b510"
+        },
+        "ubuntu": {
+          "captured": "2026-11-14T00:21:31Z",
+          "input": "xxh64:228874c27267483f"
+        },
+        "wolfi": {
+          "captured": "2026-11-14T00:20:37Z",
+          "input": "xxh64:b9b5b6e4366c5a78"
+        }
+      }
+    },
+    "timestamp": "2026-11-14T10:59:16.146794215+01:00"
+  }
+}

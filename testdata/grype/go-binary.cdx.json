@@ -1,0 +1,171 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:2da4f3c0-3f1f-4e16-9f5c-420ec2a8fdb9",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-14T11:05:33+01:00",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "author": "anchore",
+          "name": "grype",
+          "version": "0.121.2"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "68809a3020f1225a",
+      "type": "file",
+      "name": "vulnapp",
+      "version": "sha256:738ee2c85ede8b8ba0490534bd68fa5f8dbd38ec0589bb92826a1443a26a7d2e"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:golang/golang.org/x/text@v0.3.5?package-id=bc7b3947e3be93ff",
+      "type": "library",
+      "name": "golang.org/x/text",
+      "version": "v0.3.5",
+      "cpe": "cpe:2.3:a:golang:text:v0.3.5:*:*:*:*:*:*:*",
+      "purl": "pkg:golang/golang.org/x/text@v0.3.5",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/vulnapp"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.20.14"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:i6eZZ+zk0SOf0xgBpEpPD18qWcJda6q1sxt3S0kzyUQ="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "example.com/vulnapp"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/gopkg.in/yaml.v2@v2.2.2?package-id=53a0383675b1675f",
+      "type": "library",
+      "name": "gopkg.in/yaml.v2",
+      "version": "v2.2.2",
+      "purl": "pkg:golang/gopkg.in/yaml.v2@v2.2.2",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/vulnapp"
+        },
+        {
+          "name": "syft:metadata:architecture",
+          "value": "amd64"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.20.14"
+        },
+        {
+          "name": "syft:metadata:h1Digest",
+          "value": "h1:ZCJp+EgiOT7lHqUV2J862kp8Qj64Jo6az82+3Td9dZw="
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "example.com/vulnapp"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/stdlib@1.20.14?package-id=ea3c679d4a0a4bd1",
+      "type": "library",
+      "name": "stdlib",
+      "version": "go1.20.14",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "cpe": "cpe:2.3:a:golang:go:1.20.14:-:*:*:*:*:*:*",
+      "purl": "pkg:golang/stdlib@1.20.14",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "go-module-binary-cataloger"
+        },
+        {
+          "name": "syft:package:language",
+          "value": "go"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "go-module-buildinfo-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/vulnapp"
+        },
+        {
+          "name": "syft:metadata:goCompiledVersion",
+          "value": "go1.20.14"
+        }
+      ]
+    },
+    {
+      "bom-ref": "8d83777bf3cb8c9b",
+      "type": "file",
+      "name": "/vulnapp",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "738ee2c85ede8b8ba0490534bd68fa5f8dbd38ec0589bb92826a1443a26a7d2e"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,290 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:0627c9e6-8658-4a6f-b2ca-42c1d023c152",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-14T10:59:42+01:00",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "author": "anchore",
+          "name": "grype",
+          "version": "0.121.2"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "47f11d058c7f3bca",
+      "type": "file",
+      "name": "/var/lib/tripcoil/cache/staging"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:rpm/rocky/findutils@4.8.0-6.el9?arch=x86_64&distro=rocky-9.3&epoch=1&package-id=3834370e2b17c8c4&upstream=findutils-4.8.0-6.el9.src.rpm",
+      "type": "library",
+      "publisher": "Rocky Enterprise Software Foundation",
+      "name": "findutils",
+      "version": "1:4.8.0-6.el9",
+      "licenses": [
+        {
+          "license": {
+            "name": "GPLv3+"
+          }
+        }
+      ],
+      "cpe": "cpe:2.3:a:rockyenterprisesoftwarefoundation:findutils:1\\:4.8.0-6.el9:*:*:*:*:*:*:*",
+      "purl": "pkg:rpm/rocky/findutils@4.8.0-6.el9?arch=x86_64&distro=rocky-9.3&epoch=1&upstream=findutils-4.8.0-6.el9.src.rpm",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "rpm-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rpm"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "rpm-db-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:findutils:findutils:1\\:4.8.0-6.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/rpm/rpmdb.sqlite"
+        },
+        {
+          "name": "syft:metadata:epoch",
+          "value": "1"
+        },
+        {
+          "name": "syft:metadata:release",
+          "value": "6.el9"
+        },
+        {
+          "name": "syft:metadata:size",
+          "value": "1756590"
+        },
+        {
+          "name": "syft:metadata:sourceRpm",
+          "value": "findutils-4.8.0-6.el9.src.rpm"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/glibc@2.34-83.el9.7?arch=x86_64&distro=rocky-9.3&package-id=a977553ad352e2c0&upstream=glibc-2.34-83.el9.7.src.rpm",
+      "type": "library",
+      "publisher": "Rocky Enterprise Software Foundation",
+      "name": "glibc",
+      "version": "2.34-83.el9.7",
+      "licenses": [
+        {
+          "license": {
+            "name": "LGPLv2+ and LGPLv2+ with exceptions and GPLv2+ and GPLv2+ with exceptions and BSD and Inner-Net and ISC and Public Domain and GFDL"
+          }
+        }
+      ],
+      "cpe": "cpe:2.3:a:rockyenterprisesoftwarefoundation:glibc:2.34-83.el9.7:*:*:*:*:*:*:*",
+      "purl": "pkg:rpm/rocky/glibc@2.34-83.el9.7?arch=x86_64&distro=rocky-9.3&upstream=glibc-2.34-83.el9.7.src.rpm",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "rpm-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rpm"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "rpm-db-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:glibc:glibc:2.34-83.el9.7:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/rpm/rpmdb.sqlite"
+        },
+        {
+          "name": "syft:metadata:release",
+          "value": "83.el9.7"
+        },
+        {
+          "name": "syft:metadata:size",
+          "value": "6207891"
+        },
+        {
+          "name": "syft:metadata:sourceRpm",
+          "value": "glibc-2.34-83.el9.7.src.rpm"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:rpm/rocky/openssl-libs@3.0.7-24.el9?arch=x86_64&distro=rocky-9.3&epoch=1&package-id=6a6e18a79c6805bc&upstream=openssl-3.0.7-24.el9.src.rpm",
+      "type": "library",
+      "publisher": "Rocky Enterprise Software Foundation",
+      "name": "openssl-libs",
+      "version": "1:3.0.7-24.el9",
+      "licenses": [
+        {
+          "license": {
+            "name": "ASL 2.0"
+          }
+        }
+      ],
+      "cpe": "cpe:2.3:a:rockyenterprisesoftwarefoundation:openssl-libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*",
+      "purl": "pkg:rpm/rocky/openssl-libs@3.0.7-24.el9?arch=x86_64&distro=rocky-9.3&epoch=1&upstream=openssl-3.0.7-24.el9.src.rpm",
+      "externalReferences": [
+        {
+          "url": "pkg:rpm/rocky/openssl@3.0.7-24.el9?arch=src&distro=rocky-9.3&epoch=1",
+          "type": "source-distribution"
+        }
+      ],
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "rpm-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rpm"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "rpm-db-entry"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rockyenterprisesoftwarefoundation:openssl_libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:openssl-libs:openssl-libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:openssl-libs:openssl_libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:openssl_libs:openssl-libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:openssl_libs:openssl_libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:openssl:openssl-libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:openssl:openssl_libs:1\\:3.0.7-24.el9:*:*:*:*:*:*:*"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/rpm/rpmdb.sqlite"
+        },
+        {
+          "name": "syft:metadata:epoch",
+          "value": "1"
+        },
+        {
+          "name": "syft:metadata:release",
+          "value": "24.el9"
+        },
+        {
+          "name": "syft:metadata:size",
+          "value": "6771148"
+        },
+        {
+          "name": "syft:metadata:sourceRpm",
+          "value": "openssl-3.0.7-24.el9.src.rpm"
+        }
+      ]
+    },
+    {
+      "bom-ref": "os:rocky@9.3",
+      "type": "operating-system",
+      "name": "rocky",
+      "version": "9.3",
+      "description": "Rocky Linux 9.3 (Blue Onyx)",
+      "cpe": "cpe:2.3:o:rocky:rocky:9:*:baseos:*:*:*:*:*",
+      "swid": {
+        "tagId": "rocky",
+        "name": "rocky",
+        "version": "9.3"
+      },
+      "externalReferences": [
+        {
+          "url": "https://bugs.rockylinux.org/",
+          "type": "issue-tracker"
+        },
+        {
+          "url": "https://rockylinux.org/",
+          "type": "website"
+        }
+      ],
+      "properties": [
+        {
+          "name": "syft:distro:extendedSupport",
+          "value": "false"
+        },
+        {
+          "name": "syft:distro:id",
+          "value": "rocky"
+        },
+        {
+          "name": "syft:distro:idLike:0",
+          "value": "redhat"
+        },
+        {
+          "name": "syft:distro:idLike:1",
+          "value": "centos"
+        },
+        {
+          "name": "syft:distro:idLike:2",
+          "value": "fedora"
+        },
+        {
+          "name": "syft:distro:prettyName",
+          "value": "Rocky Linux 9.3 (Blue Onyx)"
+        },
+        {
+          "name": "syft:distro:versionID",
+          "value": "9.3"
+        }
+      ]
+    },
+    {
+      "bom-ref": "49ea8b12d47d3750",
+      "type": "file",
+      "name": "/etc/os-release",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "65980c380d8a41a9c70547b40c03cbda0eda1dc71174548bb5011fc7a66fe84d"
+        }
+      ]
+    },
+    {
+      "bom-ref": "6e7cbd3b924fc6a9",
+      "type": "file",
+      "name": "/var/lib/rpm/rpmdb.sqlite",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8613bbb3fd1677055c7a7a34bced3cf52130a5d64fd854c2d03ecd27e8f86885"
+        }
+      ]
+    }
+  ]
+}

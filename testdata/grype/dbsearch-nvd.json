@@ -1,0 +1,91 @@
+[
+  {
+    "id": "CVE-2024-1086",
+    "assigner": [
+      "cve-coordination@google.com"
+    ],
+    "description": "A use-after-free vulnerability in the Linux kernel's netfilter: nf_tables component can be exploited to achieve local privilege escalation.\n\n\n\nThe nft_verdict_init() function allows positive values as drop error within the hook verdict, and hence the nf_hook_slow() function can cause a double free vulnerability when NF_DROP is issued with a drop error which resembles NF_ACCEPT.\n\n\n\nWe recommend upgrading past commit f342de4e2f33e0e39165d8639387aa6c19dff660.",
+    "refs": [
+      {
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-1086"
+      },
+      {
+        "url": "http://www.openwall.com/lists/oss-security/2024/04/10/22",
+        "tags": [
+          "mailing-list",
+          "patch"
+        ]
+      },
+      {
+        "url": "http://www.openwall.com/lists/oss-security/2024/04/10/23",
+        "tags": [
+          "mailing-list",
+          "patch"
+        ]
+      }
+    ],
+    "severities": [
+      {
+        "scheme": "CVSS",
+        "value": {
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+          "version": "3.1",
+          "metrics": {
+            "baseScore": 7.8,
+            "exploitabilityScore": 1.9,
+            "impactScore": 5.9
+          }
+        },
+        "source": "nvd@nist.gov",
+        "rank": 1
+      },
+      {
+        "scheme": "CVSS",
+        "value": {
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+          "version": "3.1",
+          "metrics": {
+            "baseScore": 7.8,
+            "exploitabilityScore": 1.9,
+            "impactScore": 5.9
+          }
+        },
+        "source": "cve-coordination@google.com",
+        "rank": 2
+      }
+    ],
+    "severity": "high",
+    "provider": "nvd",
+    "status": "active",
+    "published_date": "2024-01-31T13:15:10.827Z",
+    "modified_date": "2026-08-07T19:59:58.823Z",
+    "known_exploited": [
+      {
+        "cve": "CVE-2024-1086",
+        "vendor_project": "Linux",
+        "product": "Kernel",
+        "date_added": "2024-05-30",
+        "required_action": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
+        "due_date": "2024-06-20",
+        "known_ransomware_campaign_use": "known",
+        "notes": "This vulnerability affects a common open-source component, third-party library, or a protocol used by different products. Please check with specific vendors for information on patching status. For more information, please see: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f342de4e2f33e0e39165d8639387aa6c19dff660",
+        "urls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2024-1086"
+        ],
+        "cwes": [
+          "CWE-416"
+        ]
+      }
+    ],
+    "epss": [
+      {
+        "cve": "CVE-2024-1086",
+        "epss": 0.28058,
+        "percentile": 0.98136,
+        "date": "2026-11-13"
+      }
+    ],
+    "operating_systems": null,
+    "affected_packages": 0
+  }
+]
