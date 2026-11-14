@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
 // maxRunningFileSize is the most read of one running file. The largest real libraries are about
@@ -46,7 +48,9 @@ func within(path, dir string) bool { return strings.HasPrefix(path, strings.Trim
 // runningFile is a running file opened through /proc.
 type runningFile struct {
 	io.ReadCloser
-	size int64 // -1 when unknown
+	size    int64 // -1 when unknown
+	id      procfs.FileID
+	idKnown bool
 }
 
 // openRunning opens a running file, refusing one larger than runningFileCap.
@@ -63,6 +67,7 @@ func openRunning(open func() (io.ReadCloser, error)) (runningFile, error) {
 			return runningFile{}, err
 		}
 		f.size = fi.Size()
+		f.id, f.idKnown = procfs.IDOf(fi)
 	}
 	if f.size > runningFileCap {
 		r.Close()

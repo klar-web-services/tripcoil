@@ -52,9 +52,16 @@ type processCollector struct {
 	cacheDir string
 
 	users    map[int]string
-	owned    map[string]bool   // package ownership of single paths (app directory markers), by path
-	hashed   map[string]Origin // origins of unpackaged files that were not replaced, by path
-	libPaths map[string]bool   // the distinct library paths taken in this run
+	owned    map[string]bool    // package ownership of single paths (app directory markers), by path
+	files    map[fileKey]Origin // origins of unpackaged running files
+	libPaths map[string]bool    // the distinct library paths taken in this run
+}
+
+// fileKey identifies a running file by path and by device and inode: another mount namespace
+// can put another file at the same path.
+type fileKey struct {
+	path string
+	id   procfs.FileID
 }
 
 type rawProcess struct {
@@ -79,7 +86,7 @@ type processResult struct {
 }
 
 func (c *processCollector) collect(ctx context.Context) (processResult, error) {
-	c.owned, c.hashed, c.libPaths = map[string]bool{}, map[string]Origin{}, map[string]bool{}
+	c.owned, c.files, c.libPaths = map[string]bool{}, map[fileKey]Origin{}, map[string]bool{}
 	pids, err := c.src.PIDs()
 	if err != nil {
 		return processResult{}, fmt.Errorf("cannot list processes: %w", err)
@@ -337,16 +344,15 @@ func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draf
 // it can never be a FIFO or device someone put at that path. A replaced file is also copied into
 // the cache, because the Audit cannot read it from the path.
 func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted bool, open func() (io.ReadCloser, error)) (Origin, error) {
-	if !deleted {
-		if o, ok := c.hashed[path]; ok {
-			return o, nil
-		}
-	}
 	f, err := openRunning(open)
 	if err != nil {
 		return Origin{}, err
 	}
 	defer f.Close()
+	key := fileKey{path, f.id}
+	if o, ok := c.files[key]; ok && f.idKnown {
+		return o, nil
+	}
 	var sha, copyPath string
 	if deleted {
 		sha, copyPath, err = copyToCache(ctx, f, c.cacheDir)
@@ -357,8 +363,8 @@ func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted 
 		return Origin{}, err
 	}
 	o := Origin{ID: BinaryOriginID(sha), Kind: OriginBinary, SHA256: sha, Paths: []string{path}, Copy: copyPath}
-	if !deleted {
-		c.hashed[path] = o
+	if f.idKnown {
+		c.files[key] = o
 	}
 	return o, nil
 }

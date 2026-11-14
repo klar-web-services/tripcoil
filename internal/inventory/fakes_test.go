@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -27,11 +28,13 @@ type fakeProc struct {
 	cgroup    string // /proc/<pid>/cgroup content
 	maps      []procfs.Mapping
 	otherRoot bool
-	exeData   string            // what /proc/<pid>/exe reads
-	mapData   map[string]string // path -> what map_files reads
-	size      int64             // the size an opened running file reports, if not its length
-	openErr   error             // what opening a running file returns
-	onRead    func()            // called on every read of a running file
+	exeData   string                   // what /proc/<pid>/exe reads
+	mapData   map[string]string        // path -> what map_files reads
+	mapIDs    map[string]procfs.FileID // path -> device and inode of the mapped file
+	size      int64                    // the size an opened running file reports, if not its length
+	openErr   error                    // what opening a running file returns
+	onRead    func()                   // called on every read of a running file
+	read      int                      // bytes read from running files
 }
 
 type fakeSource map[int]*fakeProc
@@ -69,12 +72,14 @@ func (s fakeSource) StartTime(pid int) (time.Time, error) {
 func (s fakeSource) Cgroup(pid int) (string, error)         { return s[pid].cgroup, nil }
 func (s fakeSource) Maps(pid int) ([]procfs.Mapping, error) { return s[pid].maps, nil }
 func (s fakeSource) SameRootAsInit(pid int) (bool, error)   { return !s[pid].otherRoot, nil }
-func (s fakeSource) OpenExe(pid int) (io.ReadCloser, error) { return s[pid].open(s[pid].exeData) }
+func (s fakeSource) OpenExe(pid int) (io.ReadCloser, error) {
+	return s[pid].open(s[pid].exeData, s[pid].exeID)
+}
 func (s fakeSource) OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error) {
-	return s[pid].open(s[pid].mapData[m.Path])
+	return s[pid].open(s[pid].mapData[m.Path], s[pid].mapIDs[m.Path])
 }
 
-func (p *fakeProc) open(data string) (io.ReadCloser, error) {
+func (p *fakeProc) open(data string, id procfs.FileID) (io.ReadCloser, error) {
 	if p.openErr != nil {
 		return nil, p.openErr
 	}
@@ -82,7 +87,7 @@ func (p *fakeProc) open(data string) (io.ReadCloser, error) {
 	if size == 0 {
 		size = int64(len(data))
 	}
-	return &fakeFile{p: p, r: strings.NewReader(data), info: fakeInfo{size: size}}, nil
+	return &fakeFile{p: p, r: strings.NewReader(data), info: fakeInfo{size: size, id: id}}, nil
 }
 
 // fakeFile is a running file opened through /proc.
@@ -96,19 +101,24 @@ func (f *fakeFile) Read(b []byte) (int, error) {
 	if f.p.onRead != nil {
 		f.p.onRead()
 	}
-	return f.r.Read(b)
+	n, err := f.r.Read(b)
+	f.p.read += n
+	return n, err
 }
 func (f *fakeFile) Close() error               { return nil }
 func (f *fakeFile) Stat() (fs.FileInfo, error) { return f.info, nil }
 
-type fakeInfo struct{ size int64 }
+type fakeInfo struct {
+	size int64
+	id   procfs.FileID
+}
 
 func (fakeInfo) Name() string       { return "" }
 func (i fakeInfo) Size() int64      { return i.size }
 func (fakeInfo) Mode() fs.FileMode  { return 0o755 }
 func (fakeInfo) ModTime() time.Time { return time.Time{} }
 func (fakeInfo) IsDir() bool        { return false }
-func (fakeInfo) Sys() any           { return nil }
+func (i fakeInfo) Sys() any         { return &syscall.Stat_t{Dev: i.id.Dev, Ino: i.id.Ino} }
 
 type fakeTool struct {
 	typ       string

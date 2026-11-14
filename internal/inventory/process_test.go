@@ -372,3 +372,35 @@ func TestProcessCollectorCapsLibraries(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessCollectorKeysFilesByIdentity(t *testing.T) {
+	replaced := procfs.FileID{Dev: 1, Ino: 300}
+	src := fakeSource{
+		// A user's process with a decoy bind-mounted over /opt/api/api in its own mount namespace.
+		5: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", uid: 1001, exeID: procfs.FileID{Dev: 1, Ino: 200}, exeData: "decoy"},
+		9: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeID: procfs.FileID{Dev: 1, Ino: 100}, exeData: "vulnerable v1"},
+		// Two workers of one replaced binary.
+		20: {cmdline: []string{"/opt/api/old"}, exe: "/opt/api/old", deleted: true, exeID: replaced, exeData: "go binary v0"},
+		21: {cmdline: []string{"/opt/api/old"}, exe: "/opt/api/old", deleted: true, exeID: replaced, exeData: "go binary v0"},
+	}
+	cache := t.TempDir()
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: cache}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{BinaryOriginID(sum("decoy")), BinaryOriginID(sum("vulnerable v1"))}
+	slices.Sort(want)
+	if got := byName(res.items, "api").Origins; !slices.Equal(got, want) {
+		t.Fatalf("api origins %v, want both running files %v", got, want)
+	}
+	if got := byName(res.items, "old").Origins; !slices.Equal(got, []string{BinaryOriginID(sum("go binary v0"))}) {
+		t.Fatalf("old origins %v", got)
+	}
+	if n := src[20].read + src[21].read; n != len("go binary v0") {
+		t.Fatalf("read %d bytes of the replaced binary, want one read", n)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(cache, "replaced")); len(entries) != 1 {
+		t.Fatalf("cache holds %v, want one copy", entries)
+	}
+}
