@@ -205,12 +205,14 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 // that file before it chrooted, so the file lies outside its root. Such a process is resolved
 // like a host process: its executable is the host's, and so are the libraries it maps that are
 // the host's files. So is a sandboxed Chromium or Electron process, whose root is an emptied
-// /proc/<pid>/fdinfo. A process in a plain chroot runs a file inside its root, whose packages the
-// host does not know, and a container that runs a bind-mounted host executable maps its own
+// /proc/<pid>/fdinfo, and a bubblewrap sandbox (glycin's image loaders, Steam's runtime) that
+// binds the host's file: its root is in another mount namespace and reads as "/", so only the
+// file's identity tells. A process in a plain chroot runs a file inside its root, whose packages
+// the host does not know, and a container that runs a bind-mounted host executable maps its own
 // libraries.
 func (c *processCollector) runsHostFile(pid int, exe string, deleted bool) bool {
 	root, err := c.src.RootDir(pid)
-	if err != nil || root == "/" || within(exe, root) {
+	if err != nil || root != "/" && within(exe, root) {
 		return false
 	}
 	if deleted {

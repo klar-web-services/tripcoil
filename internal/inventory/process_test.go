@@ -788,17 +788,26 @@ func TestProcessCollectorSkipsTheDynamicLinkerCache(t *testing.T) {
 }
 
 func TestProcessCollectorSandboxRunsHostFile(t *testing.T) {
-	root := files(t, map[string]string{"usr/lib/chromium/chromium": "chromium", "usr/lib/libc.so.6": "libc", "usr/sbin/sshd": "sshd", "run/sshd/.keep": ""})
+	root := files(t, map[string]string{"usr/lib/chromium/chromium": "chromium", "usr/lib/libc.so.6": "libc", "usr/sbin/sshd": "sshd", "run/sshd/.keep": "",
+		"usr/lib/glycin-loaders/2+/glycin-image-rs": "glycin", "usr/bin/bash": "bash"})
 	src := fakeSource{
 		// Chromium's zygote and renderers (and headless Chrome on servers) chroot into the emptied
 		// /proc/<pid>/fdinfo of a helper that has exited: not a host directory.
 		40: {cmdline: []string{"/usr/lib/chromium/chromium", "--type=zygote"}, exe: "/usr/lib/chromium/chromium", otherRoot: true, root: "/proc/38/fdinfo",
 			exeID: fileID(t, root, "usr/lib/chromium/chromium"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
+		// glycin's image loader runs in a bubblewrap sandbox, whose root is in another mount
+		// namespace and reads as "/", with the host's /usr bound into it.
+		50: {cmdline: []string{"/usr/lib/glycin-loaders/2+/glycin-image-rs", "--dbus-fd", "3"}, exe: "/usr/lib/glycin-loaders/2+/glycin-image-rs", otherRoot: true,
+			exeID: fileID(t, root, "usr/lib/glycin-loaders/2+/glycin-image-rs"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
+		// Containers whose roots also read as "/" run their own bash, and a bash replaced since.
+		60: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true, exeID: procfs.FileID{Dev: 99, Ino: 7}},
+		61: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", deleted: true, otherRoot: true, rootID: procfs.FileID{Dev: 99, Ino: 8}},
 		// sshd's chrooted child in an LXC container runs the container's own sshd.
 		90: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", rootID: procfs.FileID{Dev: 99, Ino: 5}, exeID: procfs.FileID{Dev: 99, Ino: 6}},
 	}
 	tool := hostTool()
 	tool.owners["/usr/lib/chromium/chromium"] = pkgtool.Package{Name: "chromium", Version: "131.0.6778.85-1", Arch: "amd64", Type: "deb"}
+	tool.owners["/usr/lib/glycin-loaders/2+/glycin-image-rs"] = pkgtool.Package{Name: "glycin-loaders", Version: "2.0.7-1", Arch: "amd64", Type: "deb"}
 	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: t.TempDir()}
 	res, err := c.collect(context.Background())
 	if err != nil {
@@ -810,9 +819,20 @@ func TestProcessCollectorSandboxRunsHostFile(t *testing.T) {
 	if !slices.Equal(chromium.Origins, want) {
 		t.Fatalf("chromium origins %v, want %v: it runs the host's own file", chromium.Origins, want)
 	}
-	sshd := byName(res.items, "sshd")
-	if o := originByID(res.origins, sshd.Origins[0]); len(sshd.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "another root") {
-		t.Fatalf("container sshd %+v, origin %+v", sshd, o)
+	glycin := byName(res.items, "glycin-image-rs")
+	want = []string{PackageOriginID(debian, tool.owners["/usr/lib/glycin-loaders/2+/glycin-image-rs"]), PackageOriginID(debian, pkgLibc)}
+	slices.Sort(want)
+	if !slices.Equal(glycin.Origins, want) {
+		t.Fatalf("glycin origins %v, want %v: it runs the host's own file", glycin.Origins, want)
+	}
+	for _, name := range []string{"sshd", "bash"} {
+		it := byName(res.items, name)
+		if o := originByID(res.origins, it.Origins[0]); len(it.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "another root") {
+			t.Fatalf("container %s %+v, origin %+v", name, it, o)
+		}
+	}
+	if bash := byName(res.items, "bash"); len(bash.Processes) != 2 {
+		t.Fatalf("bash processes %+v", bash.Processes)
 	}
 }
 
