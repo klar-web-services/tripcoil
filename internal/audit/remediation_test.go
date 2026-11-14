@@ -47,7 +47,7 @@ func TestRemediation(t *testing.T) {
 		want string
 	}{
 		{"package, with its units, and a running older copy", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "fixed", "3.0.16-1~deb12u1"),
-			"Upgrade libssl3 to 3.0.16-1~deb12u1 (apt-get update && apt-get install --only-upgrade libssl3), then restart nginx.service, php8.2-fpm.service, shop.service, api. Some of its processes still run an older copy from before the last upgrade; restart them either way."},
+			"Upgrade libssl3 to 3.0.16-1~deb12u1 or later (apt-get update && apt-get install --only-upgrade libssl3), then restart nginx.service, php8.2-fpm.service, shop.service, api. Some of its processes still run an older copy from before the last upgrade; restart them either way."},
 		{"no fix known", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "not-fixed"), "No fix is known for libssl3 3.0.15-1~deb12u1 yet."},
 		{"fixed without a version is no fix", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "fixed"), "No fix is known for libssl3 3.0.15-1~deb12u1 yet."},
 		{"wont-fix", f(libsslID, "libssl3", "3.0.15-1~deb12u1", "wont-fix"), "No fix will be released for libssl3 3.0.15-1~deb12u1 (wont-fix)."},
@@ -56,7 +56,7 @@ func TestRemediation(t *testing.T) {
 		{"kernel without a fix", f(kernelID, "linux-image-6.1.0-28-amd64", "6.1.119-1", "not-fixed"), "No fixed kernel version is known yet."},
 		{"kernel, wont-fix", f(kernelID, "linux-image-6.1.0-28-amd64", "6.1.119-1", "wont-fix"), "No fix will be released for this kernel (wont-fix)."},
 		{"binary", f(apiID, "golang.org/x/net", "v0.1.0", "fixed", "v0.17.0"), "Replace or rebuild /opt/api/api with golang.org/x/net v0.17.0 or later, then restart api."},
-		{"app directory, several fix versions", f("appdir:/srv/shop", "minimist", "1.2.5", "fixed", "0.2.4", "1.2.6"), "Upgrade minimist in /srv/shop to 0.2.4 or 1.2.6, then restart shop.service."},
+		{"app directory, several fix versions", f("appdir:/srv/shop", "minimist", "1.2.5", "fixed", "0.2.4", "1.2.6"), "Upgrade minimist in /srv/shop to 1.2.6 or later, then restart shop.service."},
 		{"image, with and without Compose", f(imageID, "libssl3", "3.0.11-1~deb12u2", "fixed", "3.0.16-1~deb12u1"),
 			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the containers cache, shop-web-1 (docker compose -p shop --project-directory /srv/shop -f /srv/shop/compose.yml up -d --force-recreate --no-deps web)."},
 	}
@@ -67,6 +67,89 @@ func TestRemediation(t *testing.T) {
 	}
 	if ids := r.itemIDs(imageID); !slices.Equal(ids, []string{"container:shop-web-1", "container:cache"}) {
 		t.Errorf("items %v", ids)
+	}
+}
+
+// A remediation line names the smallest fix version above the installed one. Grype lists the fixes
+// of every branch, some below the installed version.
+func TestRemediationSuggestsTheSmallestFixAboveTheInstalled(t *testing.T) {
+	inv := &inventory.Inventory{
+		Items: []inventory.Item{{ID: "proc:api", Kind: inventory.KindProcess, Name: "api", Origins: []string{apiID}}},
+		Origins: []inventory.Origin{
+			{ID: libsslID, Kind: inventory.OriginPackage},
+			{ID: apiID, Kind: inventory.OriginBinary, Paths: []string{"/opt/api/api"}},
+			{ID: "appdir:/srv/shop", Kind: inventory.OriginAppDir, Path: "/srv/shop"},
+			{ID: imageID, Kind: inventory.OriginImage, Ref: "acme/shop:1"},
+		},
+	}
+	r := newRemediation(osrel.Debian, inv)
+	f := func(origin, typ, pkg, version string, fixes ...string) Finding {
+		return Finding{Origin: origin, Package: Package{Name: pkg, Version: version, Type: typ}, Fix: Fix{State: "fixed", Versions: fixes}}
+	}
+	cases := []struct {
+		name string
+		f    Finding
+		want string
+	}{
+		{"node of another branch", f(apiID, "binary", "node", "24.15.0", "11.0.0", "22.23.4", "24.22.1", "26.12.1"),
+			"Replace or rebuild /opt/api/api with node 24.22.1 or later, then restart api."},
+		{"a Debian backport sorts below its release", f(libsslID, "deb", "libfoo", "1.2-3~deb12u1", "1.2-3~deb11u1", "1.2-4", "1.2-3"),
+			"Upgrade libfoo to 1.2-3 or later (apt-get update && apt-get install --only-upgrade libfoo)."},
+		{"an RPM epoch outranks the version", f(imageID, "rpm", "openssl", "1:3.0.7-27.el9", "3.2.0-1.el9", "1:3.0.7-28.el9", "1:3.0.7-27.el9_2"),
+			"Rebuild acme/shop:1 or pull a newer image with openssl 1:3.0.7-27.el9_2 or later, then recreate its containers."},
+		{"apk revisions compare as numbers", f(imageID, "apk", "brotli-libs", "1.2.0-r9", "1.2.0-r2", "1.2.0-r10", "1.2.1-r0"),
+			"Rebuild acme/shop:1 or pull a newer image with brotli-libs 1.2.0-r10 or later, then recreate its containers."},
+		{"every fix is below the installed version", f("appdir:/srv/shop", "npm", "minimist", "2.0.0", "0.2.4", "1.2.6"),
+			"Upgrade minimist in /srv/shop to 0.2.4 or 1.2.6."},
+		{"the installed version is unknown", f(apiID, "binary", "node", "", "22.23.4", "24.22.1"),
+			"Replace or rebuild /opt/api/api with node 22.23.4 or 24.22.1 or later, then restart api."},
+		{"a single fix", f("appdir:/srv/shop", "npm", "lodash", "4.17.20", "4.17.21"), "Upgrade lodash in /srv/shop to 4.17.21 or later."},
+		{"the Go standard library", f(apiID, "go-module", "stdlib", "go1.23.12", "1.24.9", "1.25.3"),
+			"Replace or rebuild /opt/api/api with stdlib 1.24.9 or later, then restart api."},
+	}
+	for _, c := range cases {
+		if got := r.line(c.f); got != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestCompareVersions(t *testing.T) {
+	cases := []struct {
+		typ, a, b string
+		want      int
+	}{
+		{"deb", "1.2-3~deb12u1", "1.2-3", -1},
+		{"deb", "1:1.0-1", "2.0-1", 1},
+		{"deb", "1.0.9-2+b6", "1.0.9-2+deb12u1", -1},
+		{"deb", "3.0.16-1~deb12u1", "3.0.15-1~deb12u1", 1},
+		{"deb", "1.2.13.dfsg-1", "1.2.13.dfsg-1", 0},
+		{"deb", "1.2-01", "1.2-1", 0},
+		{"rpm", "1:3.0.7-27.el9", "3.2.0-1.el9", 1},
+		{"rpm", "3.0.7-27.el9", "3.0.7-27.el9_2", -1},
+		{"rpm", "0:3.0.7-27.el9", "3.0.7-27.el9", 0},
+		{"apk", "1.2.0-r10", "1.2.0-r9", 1},
+		{"apk", "10.2_p1-r0", "10.2-r0", 1},
+		{"apk", "1.0_rc1-r0", "1.0-r0", -1},
+		{"apk", "1.0_alpha1-r0", "1.0_beta1-r0", -1},
+		{"alpm", "1:3.6.0-1", "3.7.0-1", 1},
+		{"npm", "1.0.0-beta.1", "1.0.0", -1},
+		{"npm", "1.0.0-beta.10", "1.0.0-beta.9", 1},
+		{"go-module", "v0.17.0", "0.1.0", 1},
+		{"go-module", "1.24.9", "go1.23.12", 1},
+		{"go-module", "1.26.0-rc.3", "go1.26.0", -1},
+		{"binary", "7.1", "7.1.1", -1},
+		{"binary", "24.22.1", "26.12.1", -1},
+		{"python", "3.10.13", "3.10.20", -1},
+		{"python", "1.26", "1.26.5", -1},
+	}
+	for _, c := range cases {
+		if got := compareVersions(c.typ, c.a, c.b); got != c.want {
+			t.Errorf("%s %s vs %s: %d, want %d", c.typ, c.a, c.b, got, c.want)
+		}
+		if got := compareVersions(c.typ, c.b, c.a); got != -c.want {
+			t.Errorf("%s %s vs %s: %d, want %d", c.typ, c.b, c.a, got, -c.want)
+		}
 	}
 }
 

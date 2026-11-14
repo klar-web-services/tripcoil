@@ -52,9 +52,9 @@ func (r remediation) itemIDs(origin string) []string {
 func (r remediation) line(f Finding) string {
 	o := r.origins[f.Origin]
 	fixed := f.Fix.State == "fixed" && len(f.Fix.Versions) > 0
-	to := strings.Join(f.Fix.Versions, " or ")
 	switch {
 	case r.kernel[f.Origin]:
+		to := strings.Join(f.Fix.Versions, " or ")
 		if f.Fix.State == "wont-fix" {
 			return "No fix will be released for this kernel (wont-fix)."
 		}
@@ -72,9 +72,14 @@ func (r remediation) line(f Finding) string {
 	case !fixed:
 		return noFix(f)
 	}
+	to, above := fixVersion(f)
+	upgradeTo := to
+	if above {
+		upgradeTo += " or later"
+	}
 	switch o.Kind {
 	case inventory.OriginPackage:
-		line := fmt.Sprintf("Upgrade %s to %s", f.Package.Name, to)
+		line := fmt.Sprintf("Upgrade %s to %s", f.Package.Name, upgradeTo)
 		if c := r.packageUpgrade(f.Package.Name); c != "" {
 			line += " (" + c + ")"
 		}
@@ -86,11 +91,26 @@ func (r remediation) line(f Finding) string {
 	case inventory.OriginBinary:
 		return fmt.Sprintf("Replace or rebuild %s with %s %s or later%s.", named(o.Paths, "the binary"), f.Package.Name, to, r.restart(f.Origin))
 	case inventory.OriginAppDir:
-		return fmt.Sprintf("Upgrade %s in %s to %s%s.", f.Package.Name, o.Path, to, r.restart(f.Origin))
+		return fmt.Sprintf("Upgrade %s in %s to %s%s.", f.Package.Name, o.Path, upgradeTo, r.restart(f.Origin))
 	case inventory.OriginImage:
 		return fmt.Sprintf("Rebuild %s or pull a newer image with %s %s or later, then recreate %s.", imageName(o), f.Package.Name, to, r.recreate(f.Origin))
 	}
-	return fmt.Sprintf("Upgrade %s to %s.", f.Package.Name, to)
+	return fmt.Sprintf("Upgrade %s to %s.", f.Package.Name, upgradeTo)
+}
+
+// fixVersion is the smallest fix version above the installed one, and true. When none is above
+// it, or the installed version is unknown, it is every fix version, as Grype lists them.
+func fixVersion(f Finding) (string, bool) {
+	best := ""
+	for _, v := range f.Fix.Versions {
+		if f.Package.Version != "" && compareVersions(f.Package.Type, v, f.Package.Version) > 0 && (best == "" || compareVersions(f.Package.Type, v, best) < 0) {
+			best = v
+		}
+	}
+	if best == "" {
+		return strings.Join(f.Fix.Versions, " or "), false
+	}
+	return best, true
 }
 
 func noFix(f Finding) string {
