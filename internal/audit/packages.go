@@ -129,7 +129,7 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	if err != nil {
 		return nil, nil, err
 	}
-	data, err := grype.ReadOutput(out, "Grype's SBOM", maxSBOMSize)
+	data, err := grype.ReadSBOM(out, maxSBOMSize)
 	if err == nil {
 		data, err = grype.StripSBOM(data)
 	}

@@ -2,6 +2,8 @@ package grype
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -36,6 +38,48 @@ func TestSBOMPackages(t *testing.T) {
 	}
 	if _, err := SBOMPackages([]byte(`{"components": []}`)); err == nil {
 		t.Fatal("a document that is not CycloneDX was accepted")
+	}
+}
+
+// The package database's and images' SBOMs are read without their vulnerabilities, which repeat the
+// report's matches: tens of thousands on hosts with Ubuntu's kernel headers. The rest is capped.
+func TestReadSBOMReadsPastVulnerabilities(t *testing.T) {
+	vuln := `{"bom-ref":"urn:uuid:1","id":"CVE-2026-1","description":"` + strings.Repeat("x", 5000) + `","affects":[{"ref":"pkg:deb/ubuntu/linux-modules"}]}`
+	sbom := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"metadata":{"component":{"type":"file","name":"/stage"}},` +
+		`"components":[{"type":"library","name":"linux-modules-5.15.0-131-generic","version":"5.15.0-131.141"}],` +
+		`"vulnerabilities":[` + strings.Repeat(vuln+",", 199) + vuln + `],"dependencies":[{"ref":"a","dependsOn":["b"]}]}`
+	path := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(path, []byte(sbom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadSBOM(path, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	json.Unmarshal([]byte(sbom), &want)
+	delete(want, "vulnerabilities")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("read %s", data)
+	}
+	if _, err := ReadSBOM(path, 200); err == nil || err.Error() != "Grype's SBOM is larger than 200 bytes without its vulnerabilities" {
+		t.Errorf("above the cap: %v", err)
+	}
+	old := maxSystemReportSize
+	maxSystemReportSize = 64 << 10
+	defer func() { maxSystemReportSize = old }()
+	if _, err := ReadSBOM(path, 4096); err == nil || err.Error() != "Grype's SBOM is larger than 65536 bytes" {
+		t.Errorf("a file above the cap on the package database's and images' outputs: %v", err)
+	}
+	maxSystemReportSize = old
+	for _, bad := range []string{`{"components":[}`, `{"components":[]} x`, `[]`, ``} {
+		os.WriteFile(path, []byte(bad), 0o600)
+		if _, err := ReadSBOM(path, 4096); err == nil {
+			t.Errorf("%q read", bad)
+		}
 	}
 }
 

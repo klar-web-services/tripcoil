@@ -202,6 +202,28 @@ func TestSBOMsAboveTheCapFailTheOrigin(t *testing.T) {
 	}
 }
 
+// The package database's and images' SBOMs are capped without their vulnerabilities, which repeat
+// the report's matches: an Ubuntu 22.04 host with two kernels gives an SBOM of 34 MB, 1 MB of it
+// packages. The SBOMs of what users control are capped whole.
+func TestSystemSBOMsAreCappedWithoutTheirVulnerabilities(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.sbomVulns = 10
+	old := maxSBOMSize
+	maxSBOMSize = 16 << 10
+	defer func() { maxSBOMSize = old }()
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	for _, o := range a.Origins {
+		users := o.Kind == inventory.OriginBinary || o.Kind == inventory.OriginAppDir
+		switch {
+		case users && o.Error != "Grype's SBOM is larger than 16384 bytes":
+			t.Errorf("%s: %s %q", o.ID, o.Status, o.Error)
+		case !users && o.Status == ScanFailed:
+			t.Errorf("%s failed: %s", o.ID, o.Error)
+		}
+	}
+}
+
 // The SBOMs written to the run folder leave its file system the floor, and so do cache entries
 // the cache's: Grype's outputs depend on files that users control.
 func TestRawFilesAndCacheEntriesKeepTheFloor(t *testing.T) {

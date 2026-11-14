@@ -44,6 +44,7 @@ type fakeScanner struct {
 	scanning   func(source string)
 	matching   func(*grype.Report) // changes what matching an SBOM gives, as against scanning its source
 	asUsers    map[string][]bool   // by package name: what each Match of an SBOM that holds it said users control; nil: not kept
+	sbomVulns  int                 // how many vulnerabilities of 5 KB the SBOMs Scan writes hold, as Grype's repeat its matches
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -98,6 +99,9 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 		Components      []comp `json:"components"`
 		Vulnerabilities []any  `json:"vulnerabilities"`
 	}{"CycloneDX", source, []comp{{Type: "operating-system", Name: "debian", Version: f.osVersion}, {Type: "file", Name: "/etc/os-release"}}, []any{"x"}}
+	for range f.sbomVulns {
+		doc.Vulnerabilities = append(doc.Vulnerabilities, strings.Repeat("x", 5000))
+	}
 	for _, c := range comps {
 		cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL, CPE: f.cpes[c.Name]}
 		if typ, _, ok := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/"); ok { // Syft's type is the purl's for deb, rpm, apk, alpm and nix

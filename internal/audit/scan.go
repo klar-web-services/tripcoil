@@ -113,7 +113,12 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if err := run.Share(rawPath, 0o640); err != nil {
 		return nil, counts{}, err
 	}
-	data, err := grype.ReadOutput(tmp, "Grype's SBOM", maxSBOMSize)
+	var data []byte
+	if users {
+		data, err = grype.ReadOutput(tmp, "Grype's SBOM", maxSBOMSize)
+	} else {
+		data, err = grype.ReadSBOM(tmp, maxSBOMSize)
+	}
 	if err == nil {
 		data, err = grype.StripSBOM(data)
 	}
@@ -140,6 +145,8 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 // maxSBOMSize is the largest SBOM that the Audit reads. Users control what some SBOMs hold, such
 // as an app directory's lockfile, and reading one takes up to 13 times its size: a package-lock.json
 // of 50,000 packages gives a 72 MB SBOM. The largest real SBOMs are about 15 MB, of a 5 GB image.
+// The package database's and images' SBOMs are capped without their vulnerabilities (see
+// grype.ReadSBOM): they repeat the report's matches, 28,000 on an Ubuntu host with two kernels.
 var maxSBOMSize int64 = 32 << 20 // lowered by tests
 
 // writeRaw writes an SBOM to the run folder as name, leaving the run folder's file system the floor

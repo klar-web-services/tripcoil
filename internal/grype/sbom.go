@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -40,6 +41,51 @@ func parseSBOM(data []byte) (cdxDocument, error) {
 		return doc, errors.New("unparseable SBOM from Grype: not a CycloneDX document")
 	}
 	return doc, nil
+}
+
+// ReadSBOM reads the SBOM that Grype wrote to path of the package database or an image without its
+// vulnerabilities, which it reads past an element at a time: they repeat the report's matches. An
+// Ubuntu 22.04 host with two kernels gives 28,000 of them, in an SBOM of 34 MB of which 1 MB is
+// packages. A file larger than maxSystemReportSize is not read, and what is left must be at most
+// limit bytes.
+func ReadSBOM(path string, limit int64) ([]byte, error) {
+	f, err := openOutput(path, "Grype's SBOM", maxSystemReportSize)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	tooLarge := fmt.Errorf("Grype's SBOM is larger than %d bytes without its vulnerabilities", limit)
+	out := []byte{'{'}
+	dec := json.NewDecoder(io.LimitReader(f, maxSystemReportSize))
+	err = members(dec, func(key string) error {
+		if key == "vulnerabilities" {
+			return skip(dec)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return err
+		}
+		name, _ := json.Marshal(key)
+		if len(out) > 1 {
+			out = append(out, ',')
+		}
+		if out = append(append(append(out, name...), ':'), value...); int64(len(out)) >= limit {
+			return tooLarge
+		}
+		return nil
+	})
+	if err == nil {
+		if _, end := dec.Token(); end != io.EOF {
+			err = errors.New("more follows the SBOM")
+		}
+	}
+	switch {
+	case err == tooLarge:
+		return nil, err
+	case err != nil:
+		return nil, fmt.Errorf("unparseable SBOM from Grype: %w", err)
+	}
+	return append(out, '}'), nil
 }
 
 // sbomPackages returns the packages in an SBOM: its components that are neither files nor the
