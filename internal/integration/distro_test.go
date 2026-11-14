@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,12 +76,16 @@ func TestDistros(t *testing.T) {
 			// data). The container is removed however the test ends, before what the run added to
 			// the cache is given to the cache's owner.
 			name := fmt.Sprintf("tripcoil-it-%d-%d", os.Getpid(), i)
+			var cmd *exec.Cmd
 			t.Cleanup(func() {
 				if out, err := exec.Command("docker", "rm", "-f", name).CombinedOutput(); err != nil {
 					t.Errorf("docker rm: %v\n%s", err, out)
 				}
+				if cmd.Process == nil {
+					return // docker run never started
+				}
 				chown := `chown -R "$(stat -c %u:%g /var/lib/tripcoil/cache)" /var/lib/tripcoil/cache`
-				if out, err := exec.Command("docker", "run", "--rm", "-v", cache+":/var/lib/tripcoil/cache", tc.image,
+				if out, err := exec.Command("docker", "run", "--rm", "--pull=never", "-v", cache+":/var/lib/tripcoil/cache", tc.image,
 					"sh", "-c", chown).CombinedOutput(); err != nil {
 					t.Errorf("give the cache back: %v\n%s", err, out)
 				}
@@ -93,7 +98,7 @@ func TestDistros(t *testing.T) {
 			ctx, cancel := context.WithTimeout(interrupt, 5*time.Minute)
 			defer cancel()
 			var stdout, stderr bytes.Buffer
-			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--name", name, "-v", bin+":/usr/local/bin/tripcoil:ro",
+			cmd = exec.CommandContext(ctx, "docker", "run", "--rm", "--name", name, "-v", bin+":/usr/local/bin/tripcoil:ro",
 				"-v", cache+":/var/lib/tripcoil/cache", tc.image, "sh", "-c", script)
 			// Killing the docker client would leave the container running.
 			cmd.Cancel = func() error { return exec.Command("docker", "rm", "-f", name).Run() }
@@ -171,7 +176,10 @@ func TestDistros(t *testing.T) {
 						continue
 					}
 					v := f.Vulnerability
-					matched = matched || (v.ID == tc.cve || slices.Contains(v.Aliases, tc.cve)) && slices.Contains(f.Fix.Versions, tc.fix)
+					fixed := slices.ContainsFunc(f.Fix.Versions, func(fix string) bool {
+						return strings.TrimPrefix(fix, "0:") == strings.TrimPrefix(tc.fix, "0:")
+					})
+					matched = matched || (v.ID == tc.cve || slices.Contains(v.Aliases, tc.cve)) && fixed
 					libcFindings = append(libcFindings, fmt.Sprintf("%s%v %s %v", v.ID, v.Aliases, f.Package.Version, f.Fix.Versions))
 				}
 				if !matched {
