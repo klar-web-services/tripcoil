@@ -50,6 +50,7 @@ func TestFindAppDir(t *testing.T) {
 		"home/deploy/package.json", "home/deploy/.npm-global/lib/node_modules/node-red/package.json", "home/deploy/.npm-global/lib/node_modules/node-red/red.js",
 		"home/deploy/.local/bin/gunicorn", "root/package.json", "root/.local/bin/celery", "srv/app/requirements.txt",
 		"home/app/package.json", "home/app/src/server.js",
+		"srv/mono/package.json",
 	)
 	const nvm = "/home/n8n/.nvm/versions/node/v20.11.0"
 	for link, target := range map[string]string{
@@ -88,6 +89,7 @@ func TestFindAppDir(t *testing.T) {
 		{"pip --user script does not reach /root", []string{"python3", "/root/.local/bin/celery", "-A", "proj", "worker"}, "/srv/app", appDir{Path: "/srv/app"}, true},
 		{"app rooted in a home directory", []string{"node", "/home/app/src/server.js"}, "/", appDir{Path: "/home/app"}, true},
 		{"distribution-packaged module is not an app", []string{"node", "/usr/share/nodejs/yarn/bin/yarn.js"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
+		{"deleted cwd is not a start point", []string{"node", "server.js"}, "/srv/mono/apps/old (deleted)", appDir{}, false},
 		{"python -m uses cwd", []string{"python3", "-m", "http.server"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
 		{"no marker", []string{"python3", "main.py"}, "/srv/plain", appDir{}, false},
 		{"root cwd", []string{"php-fpm: master process (/etc/php/8.2/fpm/php-fpm.conf)"}, "/", appDir{}, false},

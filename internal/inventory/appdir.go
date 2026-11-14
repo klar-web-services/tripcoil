@@ -68,7 +68,9 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 			starts = append(starts, venv)
 		}
 	}
-	if cwd != "" {
+	// A removed working directory reads as "<path> (deleted)": its code is no longer on disk, and
+	// walking up from it would find a project above it.
+	if cwd != "" && !strings.HasSuffix(cwd, " (deleted)") {
 		starts = append(starts, cwd)
 	}
 	for _, s := range starts {
