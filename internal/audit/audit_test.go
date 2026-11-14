@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -873,6 +874,45 @@ func TestAuditInterruptedWhileScanning(t *testing.T) {
 				t.Errorf("errors %+v, statuses %v", a.Errors, statuses(a))
 			}
 		})
+	}
+}
+
+// Grype lists a package's locations in another order when it matches the cached SBOM than when it
+// scans, as for every package of a Debian image: the findings keep their IDs.
+func TestAuditFindingIDsDoNotDependOnLocationOrder(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	image := "docker:sha256:1111"
+	g.sboms[image] = append(g.sboms[image], grype.Component{Name: "setuptools", Version: "39.2.0", PURL: "pkg:pypi/setuptools@39.2.0"})
+	g.vulns["setuptools@39.2.0"] = []grype.Vulnerability{vuln("GHSA-r9hx-vwmv-q579", "High", "fixed", "65.5.1")}
+	dist := "/usr/lib/python3.6/site-packages/setuptools-39.2.0.dist-info/"
+	g.found = map[string][]string{
+		"zlib1g":     {"/var/lib/dpkg/status", "/usr/share/doc/zlib1g/copyright", "/var/lib/dpkg/info/zlib1g:amd64.md5sums"},
+		"setuptools": {dist + "top_level.txt", dist + "METADATA", dist + "RECORD"},
+	}
+	g.matching = func(r *grype.Report) { // as Grype 0.121.2 lists them for an SBOM: sorted
+		for i := range r.Matches {
+			slices.Sort(r.Matches[i].Artifact.Locations)
+		}
+	}
+	locations := func(a *Audit) map[string]string {
+		m := map[string]string{}
+		for _, f := range a.Findings {
+			if f.Origin == imageO {
+				m[f.ID] = f.Package.Location
+			}
+		}
+		return m
+	}
+	first := locations(Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv))
+	g.catalogs = nil
+	second := locations(Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv))
+	if slices.Contains(g.catalogs, image) {
+		t.Fatalf("the image was scanned again: %q", g.catalogs)
+	}
+	want := []string{"/var/lib/dpkg/status", dist + "METADATA"}
+	if got := slices.Sorted(maps.Values(first)); !maps.Equal(first, second) || !slices.Equal(got, slices.Sorted(slices.Values(want))) {
+		t.Fatalf("first run %v, second run %v: the package database, else the first path in sort order", first, second)
 	}
 }
 

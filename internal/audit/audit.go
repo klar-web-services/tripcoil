@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
@@ -246,11 +248,32 @@ func (au *auditor) addFindings(matches []grype.Match, raw string, owner func(gry
 			Source:        m.Vulnerability.Namespace,
 			Raw:           raw,
 		}
-		if len(m.Artifact.Locations) > 0 {
-			f.Package.Location = m.Artifact.Locations[0]
-		}
+		f.Package.Location = findingLocation(m.Artifact.Locations)
 		au.add(f)
 	}
+}
+
+// packageDB matches the package databases Syft reads a distribution's packages from, as its
+// catalogers name them: dpkg's status, the RPM database, apk's installed and pacman's local db.
+var packageDB = regexp.MustCompile(`(^|/)(lib/dpkg/(status|status\.d/[^/]+)|(var/lib|usr/share|usr/lib/sysimage)/rpm/(Packages|Packages\.db|rpmdb\.sqlite)|lib/apk/db/installed|var/lib/pacman/local/[^/]+/desc)$`)
+
+// findingLocation is the one of a package's locations that its findings name: the package
+// database when it is one of them, else the first path in sort order. The finding ID hashes it,
+// and Grype lists the locations in another order when it matches an SBOM than when it scans: for
+// a Debian image, the package's copyright file first instead of /var/lib/dpkg/status.
+func findingLocation(locations []string) string {
+	if len(locations) == 0 {
+		return ""
+	}
+	return slices.MinFunc(locations, func(a, b string) int {
+		if x, y := packageDB.MatchString(a), packageDB.MatchString(b); x != y {
+			if x {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
 }
 
 // add completes a finding with its ID, items, risk and remediation, once per ID.

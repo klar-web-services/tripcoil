@@ -29,6 +29,7 @@ type fakeScanner struct {
 	osVersion  string                       // the version of the SBOMs' operating system; Arch has none
 	distro     string                       // the distribution Grype reports; "" when it saw none
 	locations  map[string]string            // the file each package (by name) was read from
+	found      map[string][]string          // the locations Match reports for a package, by name; else /where/<name>
 	catalogErr map[string]error             // by source prefix
 	vulns      map[string][]grype.Vulnerability
 	lookups    map[string]grype.Vulnerability
@@ -145,9 +146,13 @@ func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Repor
 		if p, ok := f.purlAs[purl]; ok {
 			purl = p
 		}
+		locations := []string{"/where/" + c.Name}
+		if l, ok := f.found[c.Name]; ok {
+			locations = l
+		}
 		for _, v := range slices.Concat(f.vulns[c.Name+"@"+c.Version], f.vulns[c.PURL]) {
 			rep.Matches = append(rep.Matches, grype.Match{Vulnerability: v,
-				Artifact: grype.Artifact{Name: c.Name, Version: c.Version, Type: typ, PURL: purl, Locations: []string{"/where/" + c.Name}}})
+				Artifact: grype.Artifact{Name: c.Name, Version: c.Version, Type: typ, PURL: purl, Locations: slices.Clone(locations)}})
 		}
 	}
 	return rep, os.WriteFile(raw, []byte(`{"matches":[]}`), 0o600)
