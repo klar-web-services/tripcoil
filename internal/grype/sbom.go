@@ -134,7 +134,7 @@ func StripSBOM(data []byte) ([]byte, error) {
 			}
 			for _, k := range []string{"purl", "bom-ref"} {
 				if s, ok := m[k].(string); ok {
-					m[k] = withoutDistro(s)
+					m[k] = WithoutDistro(s)
 				}
 			}
 			kept = append(kept, c)
@@ -146,20 +146,20 @@ func StripSBOM(data []byte) ([]byte, error) {
 	for _, d := range deps {
 		m, _ := d.(map[string]any)
 		if s, ok := m["ref"].(string); ok {
-			m["ref"] = withoutDistro(s)
+			m["ref"] = WithoutDistro(s)
 		}
 		on, _ := m["dependsOn"].([]any)
 		for i, r := range on {
 			if s, ok := r.(string); ok {
-				on[i] = withoutDistro(s)
+				on[i] = WithoutDistro(s)
 			}
 		}
 	}
 	return json.Marshal(doc)
 }
 
-// withoutDistro returns s without its distro qualifier when s is a purl, and s otherwise.
-func withoutDistro(s string) string {
+// WithoutDistro returns s without its distro qualifier when s is a purl, and s otherwise.
+func WithoutDistro(s string) string {
 	rest, subpath, hasSubpath := strings.Cut(s, "#")
 	base, query, ok := strings.Cut(rest, "?")
 	if !strings.HasPrefix(s, "pkg:") || !ok {

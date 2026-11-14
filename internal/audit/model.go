@@ -114,7 +114,7 @@ type Package struct {
 	Name     string   `json:"name"`
 	Version  string   `json:"version"`
 	Type     string   `json:"type"`
-	PURL     string   `json:"purl,omitempty"` // as Grype reports it; kernel findings have none
+	PURL     string   `json:"purl,omitempty"` // as Grype reports it, without the distro qualifier; kernel findings have none
 	CPEs     []string `json:"cpes,omitempty"` // as Grype reports them
 	Location string   `json:"location,omitempty"`
 }

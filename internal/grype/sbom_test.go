@@ -139,8 +139,8 @@ func TestWithoutDistro(t *testing.T) {
 		"os:pop@22.04":                                                                "os:pop@22.04",
 		"e3b0c44298fc1c14?distro=x":                                                   "e3b0c44298fc1c14?distro=x",
 	} {
-		if got := withoutDistro(in); got != want {
-			t.Errorf("withoutDistro(%q) = %q, want %q", in, got, want)
+		if got := WithoutDistro(in); got != want {
+			t.Errorf("WithoutDistro(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

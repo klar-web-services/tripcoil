@@ -2,11 +2,13 @@ package audit
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
+	"github.com/klar-web-services/tripcoil/internal/osrel"
 )
 
 // On Debian the running kernel's package is changed in the package SBOM at every run. When matching
@@ -56,5 +58,36 @@ func TestAuditDebianSBOMMatchedWithoutTheDistribution(t *testing.T) {
 		if _, ok := f[id]; ok {
 			t.Errorf("findings %+v: the kernel package has no matches at its running version", a.Findings)
 		}
+	}
+}
+
+// A finding's purl is the same whether the SBOM was cataloged or matched from the cache, where
+// StripSBOM dropped its distro qualifier: audit.json changes only when the host does.
+func TestAuditPURLWithoutTheDistroQualifier(t *testing.T) {
+	root, cache, inv := host(t)
+	inv.Items[0].RunningVersion = "6.1.123-1" // no package SBOM is changed: the scan's report is used
+	g := hostScanner(root, cache)
+	d := deps(root, cache, t.TempDir(), g, fakeKernel{})
+	d.Family = osrel.Ubuntu
+	purls := func(a *Audit) map[string]string {
+		m := map[string]string{}
+		for _, f := range a.Findings {
+			m[f.ID] = f.Package.PURL
+		}
+		return m
+	}
+	miss := purls(Run(context.Background(), d, inv))
+	d.RunDir = t.TempDir()
+	hit := purls(Run(context.Background(), d, inv))
+	if !maps.Equal(miss, hit) {
+		t.Fatalf("purls on a cache miss %v, on a hit %v", miss, hit)
+	}
+	for _, p := range miss {
+		if strings.Contains(p, "distro=") {
+			t.Errorf("purl %q", p)
+		}
+	}
+	if len(miss) != 8 {
+		t.Errorf("%d findings", len(miss))
 	}
 }
