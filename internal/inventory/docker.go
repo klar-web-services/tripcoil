@@ -33,7 +33,19 @@ func dockerSocket(dockerHost string) (string, error) {
 	return "", fmt.Errorf("DOCKER_HOST=%s is not a unix socket; Tripcoil only reads the local Docker daemon through its unix socket", dockerHost)
 }
 
-func collectDocker(ctx context.Context, dockerHost string, connect func(string) DockerAPI, containerPIDs map[string][]int) ([]Item, []Origin, []problem.Problem) {
+// collectDocker inventories the running containers. Without a running dockerd it never connects:
+// with docker.socket active, a connection would start dockerd and every container with a restart
+// policy.
+func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, connect func(string) DockerAPI, containerPIDs map[string][]int) ([]Item, []Origin, []problem.Problem) {
+	if !dockerdRunning {
+		// dockerd stopped with live-restore keeps its containers running.
+		if len(containerPIDs) > 0 {
+			return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
+				"%d container(s) have running processes, but no Docker daemon (dockerd) is running, so they are not inventoried; start Docker to inventory them",
+				len(containerPIDs))}
+		}
+		return nil, nil, []problem.Problem{problem.New(problem.Notice, problem.DockerAbsent, "inventory", "no Docker daemon is running, so there are no containers to inventory")}
+	}
 	socket, err := dockerSocket(dockerHost)
 	if err != nil {
 		return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory", "%v", err)}

@@ -55,3 +55,17 @@ func TestSystemdUnit(t *testing.T) {
 		}
 	}
 }
+
+func TestUserManaged(t *testing.T) {
+	cases := map[string]bool{
+		"0::/system.slice/docker.service\n":                                                        false,
+		"0::/user.slice/user-1000.slice/user@1000.service/app.slice/docker.service\n":              true,
+		"12:memory:/user.slice/user-1000.slice/user@1000.service/app.slice/docker.service\n0::/\n": true,
+		"0::/user.slice/user-1000.slice/session-2.scope\n":                                         false,
+	}
+	for in, want := range cases {
+		if got := UserManaged(in); got != want {
+			t.Errorf("UserManaged(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

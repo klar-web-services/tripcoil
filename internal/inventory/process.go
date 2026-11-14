@@ -84,12 +84,14 @@ type rawProcess struct {
 	notHost    []string // libraries of a process in another root that are not the host's files
 	libLimit   string   // why some libraries were not taken, if some were not
 	unresolved string   // why the origin cannot be resolved, if it cannot
+	dockerd    bool     // it is the host's dockerd: not rootless, not in a container or another root
 }
 
 type processResult struct {
 	items         []Item
 	origins       []Origin
 	containerPIDs map[string][]int // Docker container ID -> its host PIDs
+	dockerd       bool             // the host's own dockerd runs
 	problems      []problem.Problem
 }
 
@@ -110,6 +112,7 @@ func (c *processCollector) collect(ctx context.Context) (processResult, error) {
 			res.containerPIDs[containerID] = append(res.containerPIDs[containerID], pid)
 		default:
 			procs = append(procs, p)
+			res.dockerd = res.dockerd || p.dockerd
 		}
 	}
 	owners, err := c.owners(ctx, procs)
@@ -160,6 +163,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 			}
 		}
 	}
+	p.dockerd = filepath.Base(exe) == "dockerd" && !p.otherRoot && !procfs.UserManaged(cgroup)
 	if p.unresolved != "" {
 		return p, "", true
 	}

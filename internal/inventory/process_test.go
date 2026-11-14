@@ -815,3 +815,32 @@ func TestProcessCollectorSandboxRunsHostFile(t *testing.T) {
 		t.Fatalf("container sshd %+v, origin %+v", sshd, o)
 	}
 }
+
+func TestProcessCollectorFindsDockerd(t *testing.T) {
+	dockerd := func(cgroup string, otherRoot bool) *fakeProc {
+		return &fakeProc{cmdline: []string{"/usr/bin/dockerd", "-H", "fd://"}, exe: "/usr/bin/dockerd", cgroup: cg(cgroup), otherRoot: otherRoot}
+	}
+	cases := map[string]struct {
+		proc *fakeProc
+		want bool
+	}{
+		"host":            {dockerd("/system.slice/docker.service", false), true},
+		"host, upgraded":  {&fakeProc{cmdline: []string{"/usr/bin/dockerd"}, exe: "/usr/bin/dockerd", deleted: true, cgroup: cg("/system.slice/docker.service")}, true},
+		"rootless":        {dockerd("/user.slice/user-1000.slice/user@1000.service/app.slice/docker.service", false), false},
+		"in a container":  {dockerd("/system.slice/docker-"+containerID+".scope", false), false},
+		"in another root": {dockerd("/lxc.payload.web/system.slice/docker.service", true), false},
+		"not dockerd":     {&fakeProc{cmdline: []string{"containerd"}, exe: "/usr/bin/containerd", cgroup: cg("/system.slice/containerd.service")}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := &processCollector{src: fakeSource{10: tc.proc}, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+			res, err := c.collect(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.dockerd != tc.want {
+				t.Fatalf("dockerd %v, want %v", res.dockerd, tc.want)
+			}
+		})
+	}
+}

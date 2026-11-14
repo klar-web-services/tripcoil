@@ -33,6 +33,10 @@ var dockerID = regexp.MustCompile(`(?m)(?:/docker-|/docker/)([0-9a-f]{64})(?:\.s
 // or a cgroup named like a container that anyone can create there.
 var userManager = regexp.MustCompile(`/user@[^/]*\.service/`)
 
+// UserManaged reports whether /proc/<pid>/cgroup content puts the process below a user's own
+// systemd tree.
+func UserManaged(cgroup string) bool { return userManager.MatchString(cgroup) }
+
 // DockerContainerID returns the Docker container ID in /proc/<pid>/cgroup content (systemd or
 // cgroupfs driver, any line, so hybrid hosts work too), or "". A Docker path
 // below a user's own systemd tree never counts.

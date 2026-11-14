@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -115,5 +116,22 @@ func TestCollectCannotListProcesses(t *testing.T) {
 	d.Proc = failingSource{}
 	if _, err := Collect(context.Background(), d); err == nil {
 		t.Fatal("an unreadable /proc must be an error")
+	}
+}
+
+func TestCollectContainersOfARunningDockerd(t *testing.T) {
+	d := collectDeps(t)
+	d.DockerHost = "unix://" + dockerServer(t, engine(http.StatusOK))
+	d.Proc = fakeSource{
+		10:   hostProcesses()[10],
+		15:   {cmdline: []string{"/usr/bin/dockerd", "-H", "fd://"}, exe: "/usr/bin/dockerd", exeData: "dockerd", cgroup: cg("/system.slice/docker.service")},
+		2201: {cmdline: []string{"node", "server.js"}, exe: "/usr/local/bin/node", cgroup: cg("/system.slice/docker-" + shopID + ".scope")},
+	}
+	inv, err := Collect(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := inv.Items[len(inv.Items)-1]; it.Kind != KindContainer || it.Name != "shop-web-1" || len(inv.Errors) != 0 || len(inv.Notices) != 0 {
+		t.Fatalf("items %+v errors %+v notices %+v", inv.Items, inv.Errors, inv.Notices)
 	}
 }
