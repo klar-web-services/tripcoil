@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
@@ -299,28 +300,48 @@ func sameMatches(a, b *grype.Report) bool {
 func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
-		return keyOf("binary", o.SHA256, fileName(o)), nil, nil
+		return keyOf("binary", o.SHA256, au.fileName(o)), nil, nil
 	case inventory.OriginImage:
 		return keyOf("image", o.ImageID), nil, nil
 	case inventory.OriginAppDir:
 		if o.Jar {
-			return keyOf("jar", o.SHA256, fileName(o)), nil, nil
+			return keyOf("jar", o.SHA256, au.fileName(o)), nil, nil
 		}
 		return appDirKey(ctx, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"), au.mountBelow)
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
 
-// fileName is the name of a binary's or jar's copy: a jar's own name, and the name of a binary's
-// first path, made a name that Syft never unpacks (see copyName).
-func fileName(o inventory.Origin) string {
+// fileName is the name of a binary's or jar's copy: a jar's own name, and of a binary, the name of
+// its first path whose file root owns, or else of its first path, made a name that Syft never
+// unpacks (see copyName). Syft's classifiers go by the name, and a user who runs a renamed copy of
+// root's file, such as ~/x of /opt/app/bin/python3.12, shares its origin with a path that may sort
+// first.
+func (au *auditor) fileName(o inventory.Origin) string {
 	switch {
 	case o.Kind == inventory.OriginAppDir:
 		return filepath.Base(o.Path)
 	case len(o.Paths) > 0:
-		return copyName(filepath.Base(o.Paths[0]))
+		name := o.Paths[0]
+		for _, p := range o.Paths {
+			if rootOwned(filepath.Join(au.d.Root, p)) {
+				name = p
+				break
+			}
+		}
+		return copyName(filepath.Base(name))
 	}
 	return o.SHA256
+}
+
+// rootOwned reports whether path is a regular file that root owns, as lstat sees it.
+func rootOwned(path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == 0
 }
 
 // archiveName matches the names for which Syft 1.57, in Grype 0.121.2, unpacks a file into the
@@ -353,7 +374,7 @@ func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func
 		return "local-directory:" + filepath.Join(au.d.Root, o.Path), none, nil
 	}
 	dir := filepath.Join(au.scanDir(), o.SHA256)
-	path := filepath.Join(dir, fileName(o))
+	path := filepath.Join(dir, au.fileName(o))
 	var err error
 	if o.Jar {
 		jar := filepath.Join(au.d.Root, o.Path)

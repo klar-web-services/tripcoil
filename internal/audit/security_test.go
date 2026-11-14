@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
+	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
 // A user can swap a FIFO in for a directory of an app directory, over and over, while the tree is
@@ -232,5 +233,48 @@ func TestRawFilesAndCacheEntriesKeepTheFloor(t *testing.T) {
 	}
 	if cached, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*")); len(cached) > 0 {
 		t.Errorf("cached below the floor: %q", cached)
+	}
+}
+
+// A user who runs a renamed copy of root's unpackaged binary shares its origin, and the user's path
+// may sort first: the copy Grype scans, and the cache key, take the name of root's file, which
+// Syft's classifiers go by.
+func TestCopyIsNamedAfterRootsFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("every file is root's")
+	}
+	var system string
+	for _, p := range []string{"/usr/bin/true", "/usr/bin/env", "/usr/bin/ls"} {
+		if rootOwned(p) {
+			system = p
+			break
+		}
+	}
+	if system == "" {
+		t.Skip("no file of root's to copy")
+	}
+	data, err := os.ReadFile(system)
+	if err != nil {
+		t.Skip(err)
+	}
+	mine := filepath.Join(t.TempDir(), "x")
+	write(t, mine, string(data))
+	o := inventory.Origin{ID: inventory.BinaryOriginID(sumOf(string(data))), Kind: inventory.OriginBinary, SHA256: sumOf(string(data)), Paths: []string{mine, system}}
+	cache := t.TempDir()
+	g := hostScanner("/", cache)
+	copied := "local-file:" + filepath.Join(cache, "scan", o.SHA256, filepath.Base(system))
+	g.sboms[copied] = []grype.Component{{Name: "coreutils", Version: "9.5", PURL: "pkg:generic/coreutils@9.5"}}
+	a := Run(context.Background(), deps("/", cache, t.TempDir(), g, fakeKernel{}), &inventory.Inventory{Origins: []inventory.Origin{o}})
+	if len(a.Origins) != 1 || a.Origins[0].Status != Scanned || !slices.Contains(g.catalogs, copied) {
+		t.Fatalf("cataloged %q: %+v", g.catalogs, a.Origins)
+	}
+	au := &auditor{d: Deps{Root: "/", Now: time.Now}}
+	if k, _, _ := au.cacheKey(context.Background(), o); k != keyOf("binary", o.SHA256, filepath.Base(system)) {
+		t.Errorf("cache key %s", k)
+	}
+	// Without a file of root's, the first path names the copy.
+	o.Paths = []string{mine}
+	if k, _, _ := au.cacheKey(context.Background(), o); k != keyOf("binary", o.SHA256, "x") {
+		t.Errorf("cache key %s", k)
 	}
 }
