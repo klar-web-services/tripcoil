@@ -136,6 +136,18 @@ func TestKernel(t *testing.T) {
 			origin: PackageOriginID(Distro{ID: "ubuntu", VersionID: "22.04"}, deb("linux-modules-5.15.0-91-generic", "5.15.0-91.101")),
 		},
 		{
+			name: "ubuntu upgraded in place", release: osrel.Release{ID: "ubuntu", VersionID: "22.04", IDLike: []string{"debian"}},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "5.15.0-91-generic", "Linux version 5.15.0-91-generic (buildd@lcy02) #101-Ubuntu SMP",
+					"Ubuntu 5.15.0-91.101-generic 5.15.131", "usr/lib/modules/5.15.0-91-generic")
+			},
+			tool: &fakeTool{typ: "deb",
+				owners:    map[string]pkgtool.Package{"/usr/lib/modules/5.15.0-91-generic/modules.builtin": deb("linux-modules-5.15.0-91-generic", "5.15.0-91.102")},
+				installed: map[string][]pkgtool.Package{"linux-modules-*": {deb("linux-modules-5.15.0-91-generic", "5.15.0-91.102")}}},
+			running: "5.15.0-91.101", upstream: "5.15.131", pendingContains: "now at 5.15.0-91.102",
+			origin: PackageOriginID(Distro{ID: "ubuntu", VersionID: "22.04"}, deb("linux-modules-5.15.0-91-generic", "5.15.0-91.102")),
+		},
+		{
 			name: "rocky with a newer kernel installed", release: rockyRel,
 			root: func(t *testing.T) string {
 				return kernelRoot(t, "5.14.0-427.13.1.el9_4.x86_64", "Linux version 5.14.0-427.13.1.el9_4.x86_64", "",
@@ -145,6 +157,18 @@ func TestKernel(t *testing.T) {
 				owners:    map[string]pkgtool.Package{"/usr/lib/modules/5.14.0-427.13.1.el9_4.x86_64/modules.builtin": rockyCore("5.14.0-427.13.1.el9_4")},
 				installed: map[string][]pkgtool.Package{"kernel-core": {rockyCore("5.14.0-427.13.1.el9_4"), rockyCore("5.14.0-503.11.1.el9_5")}}},
 			running: "5.14.0-427.13.1.el9_4", upstream: "5.14.0", pendingContains: "kernel-core 5.14.0-503.11.1.el9_5",
+			origin: PackageOriginID(Distro{ID: "rocky", VersionID: "9.4"}, rockyCore("5.14.0-427.13.1.el9_4")),
+		},
+		{
+			name: "rocky without a newer kernel", release: rockyRel,
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "5.14.0-427.13.1.el9_4.x86_64", "Linux version 5.14.0-427.13.1.el9_4.x86_64", "",
+					"usr/lib/modules/5.14.0-427.13.1.el9_4.x86_64", "usr/lib/modules/5.14.0-362.24.1.el9_3.x86_64")
+			},
+			tool: &fakeTool{typ: "rpm",
+				owners:    map[string]pkgtool.Package{"/usr/lib/modules/5.14.0-427.13.1.el9_4.x86_64/modules.builtin": rockyCore("5.14.0-427.13.1.el9_4")},
+				installed: map[string][]pkgtool.Package{"kernel-core": {rockyCore("5.14.0-362.24.1.el9_3"), rockyCore("5.14.0-427.13.1.el9_4")}}},
+			running: "5.14.0-427.13.1.el9_4", upstream: "5.14.0",
 			origin: PackageOriginID(Distro{ID: "rocky", VersionID: "9.4"}, rockyCore("5.14.0-427.13.1.el9_4")),
 		},
 		{
@@ -172,6 +196,16 @@ func TestKernel(t *testing.T) {
 			tool: &fakeTool{typ: "apk", owners: map[string]pkgtool.Package{
 				"/lib/modules/6.6.58-0-lts/modules.builtin": {Name: "linux-lts", Version: "6.6.58-r0", Type: "apk"}}},
 			running: "6.6.58-r0", upstream: "6.6.58",
+			origin: KernelUpstreamOriginID("6.6.58"),
+		},
+		{
+			name: "alpine after an upgrade", release: osrel.Release{ID: "alpine", VersionID: "3.21.0"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.6.58-0-lts", "Linux version 6.6.58-0-lts", "", "lib/modules/6.6.62-0-lts")
+			},
+			tool: &fakeTool{typ: "apk", owners: map[string]pkgtool.Package{
+				"/lib/modules/6.6.62-0-lts/modules.builtin": {Name: "linux-lts", Version: "6.6.62-r0", Type: "apk"}}},
+			running: "6.6.58-0-lts", upstream: "6.6.58", pendingContains: "/lib/modules/6.6.58-0-lts is gone",
 			origin: KernelUpstreamOriginID("6.6.58"),
 		},
 		{
@@ -311,7 +345,7 @@ func TestKernel(t *testing.T) {
 			} else if !it.RebootPending || !strings.Contains(strings.Join(it.RebootReasons, "; "), tc.pendingContains) {
 				t.Fatalf("reboot reasons %v, want one containing %q", it.RebootReasons, tc.pendingContains)
 			}
-			for _, other := range []string{"cloud", "rpi-2712"} {
+			for _, other := range []string{"cloud", "lowlatency", "rpi-2712"} {
 				if strings.Contains(strings.Join(it.RebootReasons, "; "), other) {
 					t.Fatal("another flavor must not count")
 				}
