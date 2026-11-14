@@ -30,7 +30,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -o)
       case "$2" in
-        json=*) printf '%s' "${FAKE_GRYPE_JSON:-$default_json}" > "${2#json=}" ;;
+        json=*)
+          if [ -n "$FAKE_GRYPE_JSON_FILE" ]; then cp "$FAKE_GRYPE_JSON_FILE" "${2#json=}"
+          else printf '%s' "${FAKE_GRYPE_JSON:-$default_json}" > "${2#json=}"; fi ;;
         cyclonedx-json=*) printf '%s' "${FAKE_GRYPE_SBOM:-$default_sbom}" > "${2#cyclonedx-json=}" ;;
       esac
       shift ;;
@@ -50,7 +52,7 @@ exit "${FAKE_GRYPE_EXIT:-0}"
 // FAKE_GRYPE_LOG receives the arguments ("<log>.env", ".pwd" and ".cfg" get the environment,
 // working directory and config; ".calls" collects the arguments of every call, each followed by
 // an empty line). FAKE_GRYPE_JSON and FAKE_GRYPE_SBOM are written for -o json= and
-// -o cyclonedx-json=. FAKE_GRYPE_STATUS and FAKE_GRYPE_STATUS_EXIT are the output and exit code
+// -o cyclonedx-json=; the file FAKE_GRYPE_JSON_FILE, when set, is copied for -o json=. FAKE_GRYPE_STATUS and FAKE_GRYPE_STATUS_EXIT are the output and exit code
 // of "db status", FAKE_GRYPE_SEARCH the output of "db search". FAKE_GRYPE_DB is the database
 // directory: "db update" lists it to "<log>.db" and leaves a half-unpacked grype-db-download2 in
 // it. FAKE_GRYPE_EXIT, FAKE_GRYPE_STDERR and FAKE_GRYPE_SLEEP apply to every other command, and

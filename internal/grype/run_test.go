@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,7 +89,7 @@ func TestScanRunsGrypeIsolated(t *testing.T) {
 func TestMatchParsesTheReport(t *testing.T) {
 	r, dir, log := newRunner(t)
 	raw := filepath.Join(dir, "raw.json")
-	rep, err := r.Match(context.Background(), "relative/a.cdx.json", raw)
+	rep, err := r.Match(context.Background(), "relative/a.cdx.json", raw, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,21 +242,66 @@ func TestScanTakesPlainSourcesByAbsolutePath(t *testing.T) {
 	}
 }
 
-// A report larger than the cap is not read: users control what some reports hold.
+// A report of what users control that is larger than the cap is not read: users control how many
+// matches it holds.
 func TestReportsAboveTheCapAreNotRead(t *testing.T) {
 	old := maxReportSize
 	maxReportSize = 100
 	defer func() { maxReportSize = old }()
 	r, dir, _ := newRunner(t) // the fake's report is longer than 100 bytes
-	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
-		t.Fatalf("scan: %v", err)
+	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	for _, source := range []string{"local-file:/x", "local-directory:/srv/shop"} {
+		if _, err := r.Scan(context.Background(), source, a, b); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
+			t.Fatalf("scan of %s: %v", source, err)
+		}
 	}
-	if _, err := r.Match(context.Background(), filepath.Join(dir, "b"), filepath.Join(dir, "a")); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
+	if _, err := r.Match(context.Background(), b, a, true); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
 		t.Fatalf("match: %v", err)
 	}
 	maxReportSize = old
-	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+	if _, err := r.Scan(context.Background(), "local-file:/x", a, b); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The package database's and images' reports are read past the cap on what users control, up to
+// their own: Grype lists every match that its rules ignore, and Debian's and Ubuntu's kernel
+// headers give tens of thousands, about 5 KB each. The report stays in the run folder as Grype
+// wrote it.
+func TestSystemReportsAreReadPastTheUsersCap(t *testing.T) {
+	report, err := io.ReadAll(reportWithIgnored(200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, report, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, oldSystem := maxReportSize, maxSystemReportSize
+	maxReportSize = 64 << 10
+	defer func() { maxReportSize, maxSystemReportSize = old, oldSystem }()
+	r, dir, _ := newRunner(t, "FAKE_GRYPE_JSON_FILE="+path)
+	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	for _, source := range []string{"dir:/var/lib/tripcoil/cache/staging", "docker:sha256:1111"} {
+		if rep, err := r.Scan(context.Background(), source, a, b); err != nil || len(rep.Matches) != 1 {
+			t.Errorf("scan of %s: %+v %v", source, rep, err)
+		}
+	}
+	if rep, err := r.Match(context.Background(), b, a, false); err != nil || len(rep.Matches) != 1 {
+		t.Errorf("match: %+v %v", rep, err)
+	}
+	if read(t, a) != string(report) {
+		t.Error("the report left in place is not Grype's")
+	}
+	if _, err := r.Scan(context.Background(), "local-directory:/srv/shop", a, b); err == nil || err.Error() != "Grype's report is larger than 65536 bytes" {
+		t.Errorf("scan of what users control: %v", err)
+	}
+	if _, err := r.Match(context.Background(), b, a, true); err == nil || err.Error() != "Grype's report is larger than 65536 bytes" {
+		t.Errorf("match of what users control: %v", err)
+	}
+	maxSystemReportSize = 64 << 10
+	if _, err := r.Scan(context.Background(), "dir:/var/lib/tripcoil/cache/staging", a, b); err == nil || err.Error() != "Grype's report is larger than 65536 bytes" {
+		t.Errorf("above the cap on other reports: %v", err)
 	}
 }
 

@@ -319,3 +319,24 @@ func TestTheAuditsReadsHaveABudget(t *testing.T) {
 		}
 	}
 }
+
+// Only the reports of what users control are capped low: a binary's or jar's copy, an app
+// directory, and the SBOMs cataloged from them. The package database's and images' reports list
+// every match that Grype's rules ignore, tens of thousands on hosts with Debian's or Ubuntu's
+// kernel headers.
+func TestOnlyWhatUsersControlIsMatchedUnderTheirCap(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.asUsers = map[string][]bool{}
+	for range 2 { // then from the cache
+		if a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); a.Status != Complete {
+			t.Fatalf("audit %s: %v", a.Status, a.Errors)
+		}
+	}
+	for name, users := range map[string]bool{"libssl3": false, "linux-image-6.1.0-28-amd64": false, "zlib1g": false,
+		"lodash": true, "log4j-core": true} {
+		if len(g.asUsers[name]) < 2 || slices.Contains(g.asUsers[name], !users) {
+			t.Errorf("%s matched with users %v, want %v", name, g.asUsers[name], users)
+		}
+	}
+}

@@ -136,7 +136,7 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	if err != nil {
 		return nil, nil, err
 	}
-	verified := au.cacheIfVerified(ctx, key, nil, data, rep, packagesID+".verify")
+	verified := au.cacheIfVerified(ctx, key, nil, data, rep, packagesID+".verify", false)
 	running, kernel, err := au.runningKernel(data)
 	switch {
 	case err != nil:
@@ -197,7 +197,7 @@ func (au *auditor) match(ctx context.Context, data []byte, rawPath string) (*gry
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
 		return nil, err
 	}
-	rep, err := au.d.Grype.Match(ctx, sbom, rawPath)
+	rep, err := au.d.Grype.Match(ctx, sbom, rawPath, false)
 	if err != nil {
 		return nil, rejected(err)
 	}

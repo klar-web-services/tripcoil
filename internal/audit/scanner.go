@@ -38,8 +38,8 @@ func (g *grypeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gry
 	return g.runner.Scan(ctx, source, raw, sbom)
 }
 
-func (g *grypeScanner) Match(ctx context.Context, sbom, raw string) (*grype.Report, error) {
-	return g.runner.Match(ctx, sbom, raw)
+func (g *grypeScanner) Match(ctx context.Context, sbom, raw string, users bool) (*grype.Report, error) {
+	return g.runner.Match(ctx, sbom, raw, users)
 }
 
 func (g *grypeScanner) Lookup(ctx context.Context, ids []string) (map[string]grype.Vulnerability, error) {

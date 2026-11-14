@@ -43,6 +43,7 @@ type fakeScanner struct {
 	copiesLeft []string // copies of other files still in the scan folder when a file was scanned
 	scanning   func(source string)
 	matching   func(*grype.Report) // changes what matching an SBOM gives, as against scanning its source
+	asUsers    map[string][]bool   // by package name: what each Match of an SBOM that holds it said users control; nil: not kept
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -117,7 +118,15 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 	return f.match(ctx, sbom, raw)
 }
 
-func (f *fakeScanner) Match(ctx context.Context, sbom, raw string) (*grype.Report, error) {
+func (f *fakeScanner) Match(ctx context.Context, sbom, raw string, users bool) (*grype.Report, error) {
+	if f.asUsers != nil {
+		if data, err := os.ReadFile(sbom); err == nil {
+			comps, _ := grype.SBOMPackages(data)
+			for _, c := range comps {
+				f.asUsers[c.Name] = append(f.asUsers[c.Name], users)
+			}
+		}
+	}
 	rep, err := f.match(ctx, sbom, raw)
 	if err == nil && f.matching != nil {
 		f.matching(rep)

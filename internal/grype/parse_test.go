@@ -1,8 +1,12 @@
 package grype
 
 import (
+	"bytes"
+	"io"
 	"os"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,7 +21,7 @@ func load(t *testing.T, name string) []byte {
 }
 
 func TestParse(t *testing.T) {
-	rep, err := Parse(load(t, "report.json"))
+	rep, err := Parse(bytes.NewReader(load(t, "report.json")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,16 +60,69 @@ func TestParse(t *testing.T) {
 func TestParseRejectsGarbage(t *testing.T) {
 	for _, in := range []string{"not json", `{"matches": []}`, `{"descriptor": {"name": "grype", "db": {"status": {"built": ""}}}}`,
 		`{"matches": [{"vulnerability": {"id": ""}, "artifact": {"name": "x"}}], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`,
-		`{"descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`} {
-		if _, err := Parse([]byte(in)); err == nil {
+		`{"descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`,
+		`{"matches": [], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}} {}`,
+		`{"matches": [], "ignoredMatches": [{"x": }], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`,
+		`{"matches": [], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}`} {
+		if _, err := Parse(strings.NewReader(in)); err == nil {
 			t.Errorf("Parse(%q) succeeded", in)
 		}
 	}
 }
 
 func TestParseWithoutDistro(t *testing.T) {
-	rep, err := Parse([]byte(`{"matches": [], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`))
+	rep, err := Parse(strings.NewReader(`{"matches": [], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`))
 	if err != nil || rep.Distro != "" || rep.DistroVersion != "" || len(rep.Matches) != 0 {
 		t.Fatalf("%+v %v", rep, err)
+	}
+}
+
+// reportWithIgnored is a report of one match and n matches that Grype's rules ignore, each of about
+// 5 KB, as Grype lists Debian's and Ubuntu's kernel headers. It is read as it is generated.
+func reportWithIgnored(n int) io.Reader {
+	ignored := `{"vulnerability":{"id":"CVE-2026-1","description":"` + strings.Repeat("x", 5000) + `"},"artifact":{"name":"linux-headers-6.1.0-54-amd64"},` +
+		`"appliedIgnoreRules":[{"package":{"name":"linux(-.*)?-headers-.*","upstream-name":"linux.*"}}]}`
+	parts := []io.Reader{strings.NewReader(`{"matches":[{"vulnerability":{"id":"CVE-2026-2"},"artifact":{"name":"linux-image-6.1.0-54-amd64"}}],"ignoredMatches":[`)}
+	for i := range n {
+		if i > 0 {
+			parts = append(parts, strings.NewReader(","))
+		}
+		parts = append(parts, strings.NewReader(ignored))
+	}
+	parts = append(parts, strings.NewReader(`],"source":{"type":"directory","target":{"path":"/stage"}},"distro":{"name":"debian","version":"12"},`+
+		`"descriptor":{"name":"grype","db":{"status":{"built":"2026-11-14T06:19:25Z"}}}}`))
+	return io.MultiReader(parts...)
+}
+
+// heapWatch reads r and keeps the most heap in use while it is read, sampled at every 256th read.
+type heapWatch struct {
+	r     io.Reader
+	reads int
+	peak  uint64
+}
+
+func (h *heapWatch) Read(p []byte) (int, error) {
+	if h.reads++; h.reads%256 == 0 {
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		h.peak = max(h.peak, ms.HeapAlloc)
+	}
+	return h.r.Read(p)
+}
+
+// Parse reads past the matches that Grype's rules ignore without holding them: hosts with Debian's
+// or Ubuntu's kernel headers give tens of thousands, in reports of hundreds of MB.
+func TestParseReadsPastIgnoredMatches(t *testing.T) {
+	const n = 8000 // 40 MB
+	var base runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&base)
+	report := &heapWatch{r: reportWithIgnored(n)}
+	rep, err := Parse(report)
+	if err != nil || len(rep.Matches) != 1 || rep.Matches[0].Artifact.Name != "linux-image-6.1.0-54-amd64" || rep.Distro != "debian" {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	if report.peak > base.HeapAlloc+16<<20 {
+		t.Errorf("parsing a report of 40 MB, nearly all ignored matches, took %d MB of heap", (report.peak-base.HeapAlloc)>>20)
 	}
 }

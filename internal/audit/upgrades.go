@@ -272,7 +272,7 @@ func (au *auditor) matchUpgrades(ctx context.Context, comps []component) (*grype
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
 		return nil, err
 	}
-	return au.d.Grype.Match(ctx, sbom, filepath.Join(au.scanDir(), "upgrades.grype.json"))
+	return au.d.Grype.Match(ctx, sbom, filepath.Join(au.scanDir(), "upgrades.grype.json"), true)
 }
 
 // upgradeVersion is the highest fix version of one package's findings, if a line is allowed.

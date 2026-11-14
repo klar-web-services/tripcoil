@@ -85,9 +85,10 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if err != nil {
 		return nil, counts{}, err
 	}
+	users := o.Kind != inventory.OriginImage // a binary's or jar's copy, or an app directory
 	if key != "" {
 		if sbom, ok := au.cache.get(key); ok {
-			rep, n, err := au.matchCached(ctx, sbom, raw)
+			rep, n, err := au.matchCached(ctx, sbom, raw, users)
 			if !errors.As(err, new(badSBOM)) {
 				return rep, n, err
 			}
@@ -132,7 +133,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 			key = ""
 		}
 	}
-	au.cacheIfVerified(ctx, key, files, data, rep, rawName(o.ID, ".verify"))
+	au.cacheIfVerified(ctx, key, files, data, rep, rawName(o.ID, ".verify"), users)
 	return rep, n, nil
 }
 
@@ -173,13 +174,13 @@ func countPackages(data []byte) (counts, error) {
 	return n, nil
 }
 
-// matchCached matches a cached SBOM.
-func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw) (*grype.Report, counts, error) {
+// matchCached matches a cached SBOM; users says that users control what it holds.
+func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw, users bool) (*grype.Report, counts, error) {
 	data, n, err := readCached(sbom)
 	if err != nil {
 		return nil, counts{}, err
 	}
-	rep, err := au.matchSBOM(ctx, sbom, data, raw)
+	rep, err := au.matchSBOM(ctx, sbom, data, raw, users)
 	return rep, n, err
 }
 
@@ -219,8 +220,9 @@ func rejected(err error) error {
 // set, every package must have been read from one of them, the lockfiles and manifests whose
 // content an app directory's key hashes: the rest of its tree is fingerprinted by size, inode and
 // ctime only, which a file rewritten in place within one tick of a coarse file system clock keeps.
-// The cache only saves time, so a failed match or write is not an error.
-func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []string, data []byte, scan *grype.Report, name string) bool {
+// users says that users control what the SBOM holds. The cache only saves time, so a failed match
+// or write is not an error.
+func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []string, data []byte, scan *grype.Report, name string, users bool) bool {
 	if key == "" {
 		return false
 	}
@@ -253,7 +255,7 @@ func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []stri
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
 		return false
 	}
-	rep, err := au.d.Grype.Match(ctx, sbom, raw)
+	rep, err := au.d.Grype.Match(ctx, sbom, raw, users)
 	if err != nil || !sameMatches(rep, scan) {
 		return false
 	}
@@ -459,13 +461,14 @@ func asFile(rc io.ReadCloser, err error) (*os.File, error) {
 	return f, nil
 }
 
-// matchSBOM keeps a copy of an SBOM in the run folder and matches it.
-func (au *auditor) matchSBOM(ctx context.Context, sbom string, data []byte, raw *Raw) (*grype.Report, error) {
+// matchSBOM keeps a copy of an SBOM in the run folder and matches it; users says that users
+// control what it holds.
+func (au *auditor) matchSBOM(ctx context.Context, sbom string, data []byte, raw *Raw, users bool) (*grype.Report, error) {
 	if err := au.writeRaw(raw.SBOM, data); err != nil {
 		return nil, err
 	}
 	rawPath := filepath.Join(au.d.RunDir, raw.Grype)
-	rep, err := au.d.Grype.Match(ctx, sbom, rawPath)
+	rep, err := au.d.Grype.Match(ctx, sbom, rawPath, users)
 	if err != nil {
 		return nil, rejected(err)
 	}

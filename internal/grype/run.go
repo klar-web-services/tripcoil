@@ -23,11 +23,17 @@ var (
 	errLowSpace     = errors.New("the cache file system ran low on space while Grype ran")
 )
 
-// maxReportSize is the largest report that Scan and Match read. Users control what some reports
-// hold, such as an app directory's lockfile, and parsing one takes about twice its size. The
-// largest real reports are about 45 MB: an image with 3,000 matches, or a kernel package matched
-// years behind.
-var maxReportSize int64 = 128 << 20 // lowered by tests
+// The largest reports that Scan and Match read. Parse holds every match, and users control how
+// many a report of their files holds, such as of an app directory's lockfile: a report of a
+// local-file: or local-directory: source, or of an SBOM cataloged from one, is read up to
+// maxReportSize. Any other, of the package database or an image, is read up to
+// maxSystemReportSize: Grype also lists every match that its rules ignore, which Parse reads past,
+// and the default rules ignore Debian's and Ubuntu's kernel headers. An Ubuntu 22.04 host with two
+// kernels gives 35,000 such matches, in a report of 326 MB.
+var (
+	maxReportSize       int64 = 128 << 20 // lowered by tests
+	maxSystemReportSize int64 = 4 << 30   // lowered by tests
+)
 
 // spaceCheckEvery is how often HasRoom is asked while Grype runs.
 var spaceCheckEvery = 500 * time.Millisecond // lowered by tests
@@ -52,41 +58,62 @@ func (r *Runner) Scan(ctx context.Context, source, raw, sbom string) (*Report, e
 	if err := r.run(ctx, []string{source, "-o", "json=" + raw, "-o", "cyclonedx-json=" + sbom}, io.Discard); err != nil {
 		return nil, err
 	}
-	data, err := ReadOutput(raw, "Grype's report", maxReportSize)
-	if err != nil {
-		return nil, err
-	}
-	return Parse(data)
+	users := strings.HasPrefix(source, "local-file:") || strings.HasPrefix(source, "local-directory:")
+	return readReport(raw, users)
 }
 
 // Match matches an SBOM against the database, writes Grype's JSON report to raw and parses it.
-func (r *Runner) Match(ctx context.Context, sbom, raw string) (*Report, error) {
+// users says that users control what the SBOM holds: it was cataloged from a local-file: or
+// local-directory: source.
+func (r *Runner) Match(ctx context.Context, sbom, raw string, users bool) (*Report, error) {
 	if err := r.run(ctx, []string{"sbom:" + sbom, "-o", "json=" + raw}, io.Discard); err != nil {
 		return nil, err
 	}
-	data, err := ReadOutput(raw, "Grype's report", maxReportSize)
+	return readReport(raw, users)
+}
+
+// readReport parses the report at path, unless it is larger than its cap: then it is not read at
+// all.
+func readReport(path string, users bool) (*Report, error) {
+	limit := maxSystemReportSize
+	if users {
+		limit = maxReportSize
+	}
+	f, err := openOutput(path, "Grype's report", limit)
 	if err != nil {
 		return nil, err
 	}
-	return Parse(data)
+	defer f.Close()
+	return Parse(io.LimitReader(f, limit))
 }
 
 // ReadOutput reads a file that Grype wrote, named what in errors, unless it is larger than limit
 // bytes: then it is not read at all.
 func ReadOutput(path, what string, limit int64) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := openOutput(path, what, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
+	return io.ReadAll(io.LimitReader(f, limit))
+}
+
+// openOutput opens a file that Grype wrote, named what in errors, unless it is larger than limit
+// bytes.
+func openOutput(path, what string, limit int64) (*os.File, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if fi.Size() > limit {
-		return nil, fmt.Errorf("%s is larger than %d bytes", what, limit)
+	fi, err := f.Stat()
+	if err == nil && fi.Size() > limit {
+		err = fmt.Errorf("%s is larger than %d bytes", what, limit)
 	}
-	return io.ReadAll(io.LimitReader(f, limit))
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // dbUpdateTimeout bounds a database update: about 3 GB, at the idle IO class.

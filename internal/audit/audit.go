@@ -57,8 +57,9 @@ type Scanner interface {
 	Prepare(ctx context.Context) (st grype.DBStatus, updateErr, err error)
 	// Scan catalogs and matches a source, writing Grype's report to raw and the SBOM to sbom.
 	Scan(ctx context.Context, source, raw, sbom string) (*grype.Report, error)
-	// Match matches an SBOM, writing Grype's report to raw.
-	Match(ctx context.Context, sbom, raw string) (*grype.Report, error)
+	// Match matches an SBOM, writing Grype's report to raw. users says that users control what the
+	// SBOM holds, which caps the report (see grype.Runner.Match).
+	Match(ctx context.Context, sbom, raw string, users bool) (*grype.Report, error)
 	// Lookup returns what the database holds about vulnerabilities, by ID.
 	Lookup(ctx context.Context, ids []string) (map[string]grype.Vulnerability, error)
 }
