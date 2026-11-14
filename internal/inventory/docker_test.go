@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -59,7 +60,8 @@ func engine(ping int) http.Handler {
 	})
 	mux.HandleFunc("/containers/"+shopID+"/json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"Id":"` + shopID + `","Name":"/shop-web-1","Image":"sha256:abc","State":{"Running":true,"Pid":2201},` +
-			`"Config":{"User":"node","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/shop"}},` +
+			`"Config":{"User":"node","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/shop",` +
+			`"com.docker.compose.project.config_files":"/srv/shop/compose.yml,/srv/shop/compose.prod.yml"}},` +
 			`"HostConfig":{"Privileged":false,"NetworkMode":"shop_default"},` +
 			`"Mounts":[{"Type":"bind","Source":"/srv/shop/uploads","Destination":"/app/uploads","RW":true},` +
 			`{"Type":"volume","Source":"/var/lib/docker/volumes/shop_cache/_data","Destination":"/app/.cache","RW":true}]}`))
@@ -83,7 +85,7 @@ func TestDockerContainers(t *testing.T) {
 		it.Image != "ghcr.io/acme/shop:2026.11.3" || it.ImageID != "sha256:abc" || it.User != "node" || it.NetworkMode != "shop_default" {
 		t.Fatalf("item %+v", it)
 	}
-	if it.Compose == nil || *it.Compose != (Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop"}) {
+	if it.Compose == nil || !reflect.DeepEqual(*it.Compose, Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml", "/srv/shop/compose.prod.yml"}}) {
 		t.Fatalf("compose %+v", it.Compose)
 	}
 	// Docker builds both lists from maps, so they are sorted for identical runs to be identical.

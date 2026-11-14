@@ -18,13 +18,14 @@ const maxNamed = 5
 type remediation struct {
 	family  osrel.Family
 	version string // the distribution's VERSION_ID
+	init    string // the host's init system
 	origins map[string]inventory.Origin
 	users   map[string][]inventory.Item // the items of each origin
 	kernel  map[string]bool             // the kernel item's origins
 }
 
 func newRemediation(family osrel.Family, inv *inventory.Inventory) remediation {
-	r := remediation{family: family, version: inv.Host.Distro.VersionID, origins: map[string]inventory.Origin{}, users: map[string][]inventory.Item{}, kernel: map[string]bool{}}
+	r := remediation{family: family, version: inv.Host.Distro.VersionID, init: inv.Host.Init, origins: map[string]inventory.Origin{}, users: map[string][]inventory.Item{}, kernel: map[string]bool{}}
 	for _, o := range inv.Origins {
 		r.origins[o.ID] = o
 	}
@@ -115,7 +116,8 @@ func (r remediation) kernelPackaged() bool {
 
 // restart names the systemd units of an origin's processes, or the processes without a unit. A
 // user's own manager (user@1000.service) is never named: restarting it ends the user's session,
-// so a process below it is named instead. PID 1 is systemd, which re-executes itself instead.
+// so a process below it is named instead. systemd as PID 1 re-executes itself instead, and so do
+// the users' managers, which run the same executable. Another init, such as busybox, is named.
 func (r remediation) restart(origin string) string {
 	var units, names []string
 	for _, it := range r.users[origin] {
@@ -124,9 +126,14 @@ func (r remediation) restart(origin string) string {
 		}
 		own := slices.DeleteFunc(slices.Clone(it.Units), func(u string) bool { return strings.HasPrefix(u, "user@") })
 		units = append(units, own...)
+		pid1 := slices.ContainsFunc(it.Processes, func(p inventory.Process) bool { return p.PID == 1 })
 		switch {
-		case slices.ContainsFunc(it.Processes, func(p inventory.Process) bool { return p.PID == 1 }):
-			names = append(names, "systemd (systemctl daemon-reexec)")
+		case pid1 && (it.Name == "systemd" || r.init == "systemd"):
+			how := "systemctl daemon-reexec"
+			if len(it.Processes) > 1 {
+				how += "; each logged-in user: systemctl --user daemon-reexec"
+			}
+			names = append(names, "systemd ("+how+")")
 		case len(own) == 0:
 			names = append(names, it.Name)
 		}
@@ -163,23 +170,33 @@ func (r remediation) recreate(origin string) string {
 	return "the containers " + list(how)
 }
 
-// Compose's own name rules, and a directory without shell syntax.
+// Compose's own name rules, and an absolute path without shell syntax.
 var (
 	composeProject = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	composeService = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
-	plainDir       = regexp.MustCompile(`^/[A-Za-z0-9._/+-]*$`)
+	plainPath      = regexp.MustCompile(`^/[A-Za-z0-9._/+-]*$`)
 )
 
 // composeRecreate is the command that recreates a container's Compose service, or "". The Compose
 // labels it is built from can come from the image, and an admin may run the command as root, so
-// it is only written when every part follows the rules above.
+// it is only written when every part follows the rules above. When the directory or a file breaks
+// them, there is no command at all: without that part, the command would depend on where it is run.
 func composeRecreate(c *inventory.Compose) string {
 	if c == nil || !composeProject.MatchString(c.Project) || !composeService.MatchString(c.Service) {
 		return ""
 	}
 	cmd := "docker compose -p " + c.Project
-	if plainDir.MatchString(c.WorkingDir) {
+	if c.WorkingDir != "" {
+		if !plainPath.MatchString(c.WorkingDir) {
+			return ""
+		}
 		cmd += " --project-directory " + c.WorkingDir
+	}
+	for _, f := range c.ConfigFiles {
+		if !plainPath.MatchString(f) {
+			return ""
+		}
+		cmd += " -f " + f
 	}
 	return cmd + " up -d --force-recreate --no-deps " + c.Service
 }

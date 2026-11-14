@@ -106,14 +106,17 @@ func TestRemediationComposeUntrusted(t *testing.T) {
 		{"shell in the service", inventory.Compose{Project: "shop", Service: "web$(id)"}, "the container app"},
 		{"service starts with a dot", inventory.Compose{Project: "shop", Service: ".web"}, "the container app"},
 		{"no service", inventory.Compose{Project: "shop"}, "the container app"},
-		{"directory with a space", inventory.Compose{Project: "shop_2", Service: "Web.1", WorkingDir: "/srv/my shop"},
+		{"no directory", inventory.Compose{Project: "shop_2", Service: "Web.1"},
 			"the container app (docker compose -p shop_2 up -d --force-recreate --no-deps Web.1)"},
-		{"relative directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "srv/shop"},
-			"the container app (docker compose -p shop up -d --force-recreate --no-deps web)"},
-		{"directory with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/$(id)"},
-			"the container app (docker compose -p shop up -d --force-recreate --no-deps web)"},
+		{"directory with a space", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/my shop"}, "the container app"},
+		{"relative directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "srv/shop"}, "the container app"},
+		{"directory with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/$(id)"}, "the container app"},
 		{"plain directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop-2.0/c++_x"},
 			"the container app (docker compose -p shop --project-directory /srv/shop-2.0/c++_x up -d --force-recreate --no-deps web)"},
+		{"compose files", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml", "/srv/shop/compose.prod.yml"}},
+			"the container app (docker compose -p shop --project-directory /srv/shop -f /srv/shop/compose.yml -f /srv/shop/compose.prod.yml up -d --force-recreate --no-deps web)"},
+		{"compose file with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml", "/srv/shop/$(id).yml"}}, "the container app"},
+		{"relative compose file", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"compose.yml"}}, "the container app"},
 	}
 	for _, c := range cases {
 		inv := &inventory.Inventory{
@@ -170,16 +173,41 @@ func TestRemediationCommands(t *testing.T) {
 	}
 }
 
-func TestRemediationRestartsSystemd(t *testing.T) {
-	inv := &inventory.Inventory{
-		Items: []inventory.Item{
-			{ID: "proc:systemd", Kind: inventory.KindProcess, Name: "systemd", Processes: []inventory.Process{{PID: 1}, {PID: 1201}}, Origins: []string{libsslID}},
-			{ID: "proc:cron", Kind: inventory.KindProcess, Name: "cron", Processes: []inventory.Process{{PID: 610}}, Origins: []string{libsslID}},
-		},
-		Origins: []inventory.Origin{{ID: libsslID, Kind: inventory.OriginPackage}},
+// PID 1 is only told to re-execute itself when it is systemd; another init is named.
+func TestRemediationRestartsPID1(t *testing.T) {
+	cases := []struct {
+		name    string
+		family  osrel.Family
+		init    string
+		pid1    string
+		pids    []int
+		upgrade string
+		restart string
+	}{
+		{"systemd with user managers", osrel.Fedora, "systemd", "systemd", []int{1, 1201}, "dnf upgrade openssl",
+			"sshd, systemd (systemctl daemon-reexec; each logged-in user: systemctl --user daemon-reexec)"},
+		{"systemd alone", osrel.Fedora, "systemd", "systemd", []int{1}, "dnf upgrade openssl", "sshd, systemd (systemctl daemon-reexec)"},
+		{"systemd, init unknown", osrel.Fedora, "unknown", "systemd", []int{1}, "dnf upgrade openssl", "sshd, systemd (systemctl daemon-reexec)"},
+		{"systemd under another name", osrel.Fedora, "systemd", "init", []int{1}, "dnf upgrade openssl", "sshd, systemd (systemctl daemon-reexec)"},
+		{"alpine's busybox", osrel.Alpine, "openrc", "busybox", []int{1, 2010, 2105}, "apk upgrade -U openssl", "busybox, sshd"},
+		{"openrc-init", osrel.Alpine, "openrc", "openrc-init", []int{1}, "apk upgrade -U openssl", "openrc-init, sshd"},
 	}
-	got := newRemediation(osrel.Fedora, inv).line(Finding{Origin: libsslID, Package: Package{Name: "systemd-libs"}, Fix: Fix{State: "fixed", Versions: []string{"256.11-1.fc41"}}})
-	if want := "Upgrade systemd-libs to 256.11-1.fc41 (dnf upgrade systemd-libs), then restart cron, systemd (systemctl daemon-reexec)."; got != want {
-		t.Errorf("got %s\nwant %s", got, want)
+	for _, c := range cases {
+		var procs []inventory.Process
+		for _, pid := range c.pids {
+			procs = append(procs, inventory.Process{PID: pid})
+		}
+		inv := &inventory.Inventory{
+			Host: inventory.Host{Init: c.init},
+			Items: []inventory.Item{
+				{ID: "proc:init", Kind: inventory.KindProcess, Name: c.pid1, Processes: procs, Origins: []string{libsslID}},
+				{ID: "proc:sshd", Kind: inventory.KindProcess, Name: "sshd", Processes: []inventory.Process{{PID: 610}}, Origins: []string{libsslID}},
+			},
+			Origins: []inventory.Origin{{ID: libsslID, Kind: inventory.OriginPackage}},
+		}
+		got := newRemediation(c.family, inv).line(Finding{Origin: libsslID, Package: Package{Name: "openssl"}, Fix: Fix{State: "fixed", Versions: []string{"3.5.4"}}})
+		if want := "Upgrade openssl to 3.5.4 (" + c.upgrade + "), then restart " + c.restart + "."; got != want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, want)
+		}
 	}
 }

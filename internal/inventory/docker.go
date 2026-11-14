@@ -111,6 +111,9 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 		}
 		if project, service := d.Config.Labels["com.docker.compose.project"], d.Config.Labels["com.docker.compose.service"]; project != "" || service != "" {
 			it.Compose = &Compose{Project: project, Service: service, WorkingDir: d.Config.Labels["com.docker.compose.project.working_dir"]}
+			if files := d.Config.Labels["com.docker.compose.project.config_files"]; files != "" {
+				it.Compose.ConfigFiles = strings.Split(files, ",")
+			}
 		}
 		for _, p := range s.Ports {
 			if p.PublicPort != 0 {

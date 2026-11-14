@@ -102,6 +102,8 @@ type Compose struct {
 	Service string `json:"service,omitempty"`
 	// WorkingDir is the directory `docker compose` ran in.
 	WorkingDir string `json:"workingDir,omitempty"`
+	// ConfigFiles are the Compose files it read, in order.
+	ConfigFiles []string `json:"configFiles,omitempty"`
 }
 
 // Port is a published container port.
