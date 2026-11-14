@@ -146,6 +146,14 @@ func (f *fakeScanner) Lookup(_ context.Context, ids []string) (map[string]grype.
 	return f.lookups, f.lookupErr
 }
 
+// fakeImages is the images the Docker daemon has, or the error of asking it.
+type fakeImages struct {
+	ids map[string]bool
+	err error
+}
+
+func (f fakeImages) ImageExists(_ context.Context, id string) (bool, error) { return f.ids[id], f.err }
+
 // fakeKernel is kernel CNA data, or the error of loading it.
 type fakeKernel struct {
 	data *kernelcna.Data

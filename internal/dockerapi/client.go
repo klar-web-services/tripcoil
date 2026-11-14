@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// ErrNotFound is what a request for a container that no longer exists returns.
+// ErrNotFound is what a request for a container or image that no longer exists returns.
 var ErrNotFound = errors.New("not found")
 
 // Client talks to the Docker daemon over its unix socket.
@@ -69,4 +69,13 @@ func (c *Client) Inspect(ctx context.Context, id string) (Detail, error) {
 	var d Detail
 	err := c.get(ctx, "/containers/"+url.PathEscape(id)+"/json", &d)
 	return d, err
+}
+
+// ImageExists reports whether the daemon has an image, by ID. Inspecting an image never pulls it.
+func (c *Client) ImageExists(ctx context.Context, id string) (bool, error) {
+	err := c.get(ctx, "/images/"+url.PathEscape(id)+"/json", nil)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }

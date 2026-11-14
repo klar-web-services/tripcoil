@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -453,5 +455,31 @@ func TestRunInterruptedKeepsStageProblems(t *testing.T) {
 	if len(rec.Errors) != 2 || rec.Errors[0].Code != problem.Interrupted || rec.Errors[1].Code != "E_AUD" ||
 		len(rec.Warnings) != 1 || rec.Warnings[0].Code != "W_AUD" {
 		t.Fatalf("audit problems lost: %+v", rec)
+	}
+}
+
+// The Audit checks images at the Docker socket the Inventory reads.
+func TestDockerImages(t *testing.T) {
+	if dockerImages("tcp://10.0.0.5:2375") != nil {
+		t.Fatal("DOCKER_HOST is not a unix socket, so the Inventory found no containers")
+	}
+	if dockerImages("") == nil {
+		t.Fatal("the default socket")
+	}
+	dir, err := os.MkdirTemp("", "tc-docker") // short path: unix socket paths are limited to 108 bytes
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "docker.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.NotFoundHandler()}
+	go srv.Serve(l)
+	t.Cleanup(func() { srv.Close() })
+	if ok, err := dockerImages("unix://"+sock).ImageExists(context.Background(), "sha256:1111"); ok || err != nil {
+		t.Fatalf("%v %v", ok, err)
 	}
 }

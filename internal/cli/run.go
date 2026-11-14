@@ -214,7 +214,24 @@ func auditHost(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir s
 		Grype:    audit.NewGrype(cacheDir),
 		Kernel:   kernelcna.NewSource(cacheDir),
 		Proc:     procfs.FS{Root: "/"},
+		Images:   dockerImages(os.Getenv("DOCKER_HOST")),
 	}, inv)
+}
+
+// dockerImages is the Docker daemon at the socket the Inventory reads (DOCKER_HOST, or the
+// default), for the Audit to check that it still has an image before Grype scans it. It is nil
+// when DOCKER_HOST is not a unix socket: the Inventory then reads no containers, so there are no
+// images to scan.
+func dockerImages(dockerHost string) audit.Images {
+	socket := "/var/run/docker.sock"
+	if dockerHost != "" {
+		p, ok := strings.CutPrefix(dockerHost, "unix://")
+		if !ok {
+			return nil
+		}
+		socket = p
+	}
+	return dockerapi.New(socket)
 }
 
 func auditStage(status string) string {

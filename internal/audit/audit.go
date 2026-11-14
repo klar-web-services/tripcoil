@@ -32,6 +32,13 @@ type Deps struct {
 	Grype    Scanner
 	Kernel   KernelSource
 	Proc     ProcFiles // nil: unpackaged files are read at their paths only
+	Images   Images    // nil: an image is scanned without checking that the daemon still has it
+}
+
+// Images is what the Audit asks the local Docker daemon (dockerapi.Client in production).
+type Images interface {
+	// ImageExists reports whether the daemon still has an image, by ID.
+	ImageExists(ctx context.Context, id string) (bool, error)
 }
 
 // ProcFiles opens the files of running processes through /proc (procfs.FS in production).

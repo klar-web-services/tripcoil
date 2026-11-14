@@ -298,6 +298,37 @@ func TestAuditOriginFailuresArePartial(t *testing.T) {
 	}
 }
 
+// An image removed after the Inventory is never handed to Grype, for which the Docker daemon would
+// try a pull from Docker Hub, nor matched from its cached SBOM.
+func TestAuditImageRemovedSinceTheInventory(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	d := deps(root, cache, t.TempDir(), g, fakeKernel{})
+	d.Images = fakeImages{ids: map[string]bool{"sha256:1111": true}}
+	if a := Run(context.Background(), d, inv); statuses(a)[imageO] != Scanned {
+		t.Fatalf("statuses %v", statuses(a))
+	}
+	for _, tc := range []struct {
+		images fakeImages
+		msg    string
+	}{
+		{fakeImages{}, "image ghcr.io/acme/shop:2026.11.3: the image was removed after the inventory"},
+		{fakeImages{err: errors.New("dial unix /var/run/docker.sock: connect: connection refused")},
+			"image ghcr.io/acme/shop:2026.11.3: cannot check that the Docker daemon still has the image: dial unix /var/run/docker.sock: connect: connection refused"},
+	} {
+		g.catalogs, g.matched = nil, nil
+		d.Images, d.RunDir = tc.images, t.TempDir()
+		a := Run(context.Background(), d, inv)
+		if statuses(a)[imageO] != ScanFailed || a.Status != Partial || len(a.Errors) != 1 || a.Errors[0].Message != tc.msg {
+			t.Fatalf("audit %s, statuses %v, errors %+v", a.Status, statuses(a), a.Errors)
+		}
+		if slices.Contains(g.matched, keyOf("image", "sha256:1111")+".cdx.json") || slices.Contains(g.catalogs, "docker:sha256:1111") {
+			t.Fatalf("Grype was asked: scanned %q, matched %q", g.catalogs, g.matched)
+		}
+		os.RemoveAll(filepath.Join(cache, "sbom")) // the next one would catalog the image
+	}
+}
+
 func TestAuditPackageScanFailure(t *testing.T) {
 	root, cache, inv := host(t)
 	os.Remove(filepath.Join(root, "var/lib/dpkg/status"))

@@ -62,6 +62,16 @@ func (au *auditor) scanDir() string { return filepath.Join(au.d.CacheDir, "scan"
 // directly every run instead. A cached SBOM that is itself at fault (see badSBOM) is dropped and
 // the origin scanned again; on any other failure the origin fails, and the entry is kept.
 func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, counts, error) {
+	if o.Kind == inventory.OriginImage && au.d.Images != nil {
+		// For an image the daemon does not have, it would try a pull from Docker Hub.
+		ok, err := au.d.Images.ImageExists(ctx, o.ImageID)
+		switch {
+		case err != nil:
+			return nil, counts{}, fmt.Errorf("cannot check that the Docker daemon still has the image: %w", err)
+		case !ok:
+			return nil, counts{}, errors.New("the image was removed after the inventory")
+		}
+	}
 	if o.Kind == inventory.OriginAppDir && o.Jar {
 		sha, err := hashFile(ctx, filepath.Join(au.d.Root, o.Path))
 		if err != nil {
