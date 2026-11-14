@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/kernelcna"
@@ -24,6 +25,10 @@ func (au *auditor) kernel(ctx context.Context, o inventory.Origin) {
 		return
 	}
 	au.a.KernelData = &KernelData{Commit: data.Commit, Checked: data.Checked}
+	if data.RefreshErr != nil {
+		au.a.Warnings = append(au.a.Warnings, problem.New(problem.Warning, problem.KernelDataUpdateFailed, "audit",
+			"checking the kernel CNA data for news failed, so the data last checked at %s is used: %v", data.Checked.Format(time.RFC3339), data.RefreshErr))
+	}
 	switch {
 	case strings.HasSuffix(o.UpstreamVersion, "-rc0"): // such as Fedora rawhide's 6.14.0-0.rc0.20250203git...
 		au.failOrigin(o, fmt.Errorf("%s is a merge-window snapshot, which the kernel CNA data cannot match", o.UpstreamVersion))

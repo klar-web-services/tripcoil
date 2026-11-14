@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
+	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/osrel"
+	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
 // On Debian the running kernel's package is changed in the package SBOM at every run. When matching
@@ -166,5 +168,33 @@ func TestAuditRemovesWhatAKilledRunLeft(t *testing.T) {
 	}
 	if _, err := os.Stat(left); !os.IsNotExist(err) {
 		t.Fatalf("the copy is still there: %v", err)
+	}
+}
+
+// A failed check of the kernel CNA data while the data is still within maxAge is a warning, as for
+// Grype's database: the kernel is audited with the data there is.
+func TestAuditKernelDataUpdateFailed(t *testing.T) {
+	up := inventory.KernelUpstreamOriginID("6.1.119")
+	root := files(t, map[string]string{"etc/os-release": "ID=arch\n"})
+	inv := &inventory.Inventory{
+		Items:   []inventory.Item{{ID: "kernel", Kind: inventory.KindKernel, RunningVersion: "6.1.119-1", Origins: []string{up}}},
+		Origins: []inventory.Origin{{ID: up, Kind: inventory.OriginKernelUpstream, UpstreamVersion: "6.1.119"}},
+	}
+	data := kernelTestData(t)
+	data.RefreshErr = errors.New("https://git.kernel.org/pub/scm/linux/security/vulns.git/info/refs returned 503 Service Unavailable")
+	g := &fakeScanner{status: grype.DBStatus{Built: built, Valid: true}}
+	d := deps(root, t.TempDir(), t.TempDir(), g, fakeKernel{data: data})
+	d.Family = osrel.Arch
+	a := Run(context.Background(), d, inv)
+	if a.Status != Complete || len(a.Errors) != 0 || statuses(a)[up] != Scanned || len(a.Findings) != 8 {
+		t.Fatalf("audit %s, errors %+v, statuses %v, %d findings", a.Status, a.Errors, statuses(a), len(a.Findings))
+	}
+	if len(a.Warnings) != 1 || a.Warnings[0].Code != problem.KernelDataUpdateFailed || a.Warnings[0].Kind != problem.Warning ||
+		a.Warnings[0].Message != "checking the kernel CNA data for news failed, so the data last checked at 2026-11-14T05:15:00Z is used: https://git.kernel.org/pub/scm/linux/security/vulns.git/info/refs returned 503 Service Unavailable" {
+		t.Fatalf("warnings %+v", a.Warnings)
+	}
+	data.RefreshErr = nil
+	if a := Run(context.Background(), d, inv); len(a.Warnings) != 0 {
+		t.Fatalf("warnings %+v", a.Warnings)
 	}
 }

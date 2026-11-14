@@ -11,6 +11,8 @@ type Data struct {
 	Commit  string    `json:"commit"`  // the vulns repository commit
 	Checked time.Time `json:"checked"` // when that commit was last confirmed to be the newest
 	Records []Record  `json:"records"`
+
+	RefreshErr error `json:"-"` // set by Load when checking for newer data failed, but this data is within maxAge
 }
 
 // Match is one CVE that affects a kernel version.

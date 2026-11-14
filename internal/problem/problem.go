@@ -29,14 +29,15 @@ const (
 
 // Codes of the Audit (spec sections 6 and 12).
 const (
-	GrypeUnavailable   = "GRYPE_UNAVAILABLE"    // Grype or its database cannot be obtained
-	DBStale            = "DB_STALE"             // the database is older than audit.maxDatabaseAgeHours
-	OriginScanFailed   = "ORIGIN_SCAN_FAILED"   // one origin could not be scanned
-	KernelDataStale    = "KERNEL_DATA_STALE"    // the kernel CNA data is too old, so the kernel is not audited
-	OriginUnresolved   = "ORIGIN_UNRESOLVED"    // gap: the Inventory could not resolve an origin
-	OriginUnidentified = "ORIGIN_UNIDENTIFIED"  // gap: Grype found no packages in an origin, or no vulnerability data applies to them
-	DBUpdateFailed     = "DB_UPDATE_FAILED"     // warning: the database could not be updated, but is fresh enough
-	UpgradeCheckFailed = "UPGRADE_CHECK_FAILED" // warning: Grype could not check the upgrade lines, so none are given
+	GrypeUnavailable       = "GRYPE_UNAVAILABLE"         // Grype or its database cannot be obtained
+	DBStale                = "DB_STALE"                  // the database is older than audit.maxDatabaseAgeHours
+	OriginScanFailed       = "ORIGIN_SCAN_FAILED"        // one origin could not be scanned
+	KernelDataStale        = "KERNEL_DATA_STALE"         // the kernel CNA data is too old, so the kernel is not audited
+	OriginUnresolved       = "ORIGIN_UNRESOLVED"         // gap: the Inventory could not resolve an origin
+	OriginUnidentified     = "ORIGIN_UNIDENTIFIED"       // gap: Grype found no packages in an origin, or no vulnerability data applies to them
+	DBUpdateFailed         = "DB_UPDATE_FAILED"          // warning: the database could not be updated, but is fresh enough
+	KernelDataUpdateFailed = "KERNEL_DATA_UPDATE_FAILED" // warning: the kernel CNA data could not be checked for news, but is fresh enough
+	UpgradeCheckFailed     = "UPGRADE_CHECK_FAILED"      // warning: Grype could not check the upgrade lines, so none are given
 )
 
 // Problem is one recorded error, warning, notice or coverage gap.

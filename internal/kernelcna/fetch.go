@@ -60,7 +60,8 @@ func (s *Source) path() string { return filepath.Join(s.CacheDir, "kernel-cna.js
 
 // Load returns the data in the cache, first checking for newer data when it was last checked a
 // day ago, or maxAge ago when that is shorter. When the check fails, data checked within maxAge is
-// still used; older data, data checked at a time still to come, or none, is an error.
+// still used, with the failure as its RefreshErr; older data, data checked at a time still to
+// come, or none, is an error.
 func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) (*Data, error) {
 	old := s.read()
 	if old != nil && now.Sub(old.Checked) < min(refreshAfter, maxAge) && !old.Checked.After(now) {
@@ -78,6 +79,7 @@ func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) 
 		return nil, fmt.Errorf("the kernel CNA data was last checked at %s, which is in the future, and checking it again failed: %w",
 			old.Checked.Format(time.RFC3339), err)
 	case now.Sub(old.Checked) <= maxAge:
+		old.RefreshErr = err
 		return old, nil
 	}
 	// Rounded up to a tenth, so the age never prints as the limit it exceeds.

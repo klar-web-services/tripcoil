@@ -411,3 +411,38 @@ func TestLoadLimits(t *testing.T) {
 		t.Fatalf("text: %v", err)
 	}
 }
+
+func TestLoadReportsAFailedRefresh(t *testing.T) {
+	// Data still within maxAge is used when checking it again fails, and the failure comes with it.
+	s, k := newSource(t)
+	brief := func(d *Data) string {
+		if d == nil {
+			return "no data"
+		}
+		return d.Commit + " checked " + d.Checked.Format(time.RFC3339) + ", refresh error: " + fmt.Sprint(d.RefreshErr)
+	}
+	for _, at := range []time.Duration{0, 23 * time.Hour} { // fetched, then used as it is
+		if d, err := s.Load(context.Background(), t0.Add(at), 48*time.Hour); err != nil || d.RefreshErr != nil {
+			t.Fatalf("at %v: %s, %v", at, brief(d), err)
+		}
+	}
+	k.down.Store(true)
+	cached, _ := os.ReadFile(filepath.Join(s.CacheDir, "kernel-cna.json"))
+	d, err := s.Load(context.Background(), t0.Add(25*time.Hour), 48*time.Hour)
+	if err != nil || d.Commit != commitA || d.RefreshErr == nil || !strings.Contains(d.RefreshErr.Error(), "503") {
+		t.Fatalf("%s: %v", brief(d), err)
+	}
+	if again, _ := os.ReadFile(filepath.Join(s.CacheDir, "kernel-cna.json")); !bytes.Equal(again, cached) {
+		t.Fatal("the cache changed")
+	}
+	k.down.Store(false)
+	k.commit.Store(commitB)
+	k.snapshot.Store(snapshotOf(t, commitB, file{"cve/published/2024/CVE-2024-99997.json", []byte(`{"cveMetadata":`)}))
+	if d, err = s.Load(context.Background(), t0.Add(26*time.Hour), 48*time.Hour); err != nil || d.RefreshErr == nil || !strings.Contains(d.RefreshErr.Error(), "CVE-2024-99997.json") {
+		t.Fatalf("a broken snapshot: %s, %v", brief(d), err)
+	}
+	k.snapshot.Store(snapshotOf(t, commitB))
+	if d, err = s.Load(context.Background(), t0.Add(27*time.Hour), 48*time.Hour); err != nil || d.Commit != commitB || d.RefreshErr != nil {
+		t.Fatalf("refreshed: %s, %v", brief(d), err)
+	}
+}

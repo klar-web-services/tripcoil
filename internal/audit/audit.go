@@ -66,7 +66,7 @@ type Scanner interface {
 // KernelSource is the kernel CNA data, fetched at most daily.
 type KernelSource interface {
 	// Load returns the data, refreshing it when it is a day old. An error means there is no data
-	// younger than maxAge.
+	// younger than maxAge; the data's RefreshErr says why refreshing failed when it is used anyway.
 	Load(ctx context.Context, now time.Time, maxAge time.Duration) (*kernelcna.Data, error)
 }
 
