@@ -1,10 +1,12 @@
 package procfs
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -415,4 +417,58 @@ func TestOpenRegularRefusesKernelFiles(t *testing.T) {
 		t.Fatalf("/proc/self/exe: %v", err)
 	}
 	f.Close()
+}
+
+// fSetLease is F_SETLEASE, which package syscall does not define.
+const fSetLease = 1024
+
+const leaseChildEnv = "PROCFS_LEASE_CHILD"
+
+// TestOpenRegularLeaseChild is the child of TestOpenRegularLease: it opens the leased file.
+func TestOpenRegularLeaseChild(t *testing.T) {
+	path := os.Getenv(leaseChildEnv)
+	if path == "" {
+		t.Skip("runs only as the child of TestOpenRegularLease")
+	}
+	f, err := OpenRegular(path)
+	if err == nil {
+		f.Close()
+	}
+	t.Logf("CHILD DONE: %v", err)
+}
+
+// A write lease makes another process's open wait for the lease break time; OpenRegular must fail
+// at once instead.
+func TestOpenRegularLease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "leased")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, f.Fd(), fSetLease, syscall.F_WRLCK); errno != 0 {
+		t.Skipf("no write lease available: %v", errno)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOpenRegularLeaseChild$", "-test.v")
+	cmd.Env = append(os.Environ(), leaseChildEnv+"="+path)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil || !bytes.Contains(out.Bytes(), []byte("CHILD DONE")) {
+			t.Fatalf("child: %v\n%s", err, out.String())
+		}
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		<-done
+		t.Fatal("OpenRegular blocked on a file with a write lease")
+	}
 }

@@ -290,7 +290,8 @@ const oPath = 0x200000
 // OpenRegular opens a file for reading only if it is a regular file of a real file system. A
 // process can map a FIFO or a device, and anyone may have put one, or a link to /proc/kmsg, at a
 // path. None of them is ever opened for reading: an O_PATH descriptor only names the file, and only
-// a regular file outside the kernel's file systems is reopened for reading through it.
+// a regular file outside the kernel's file systems is reopened for reading through it, without
+// blocking: a user's write lease on the file makes the open fail at once instead of stalling it.
 func OpenRegular(path string) (*os.File, error) {
 	fd, err := syscall.Open(path, oPath|syscall.O_CLOEXEC, 0)
 	if err != nil {
@@ -311,5 +312,5 @@ func OpenRegular(path string) (*os.File, error) {
 	if pseudoFS[int64(sfs.Type)] {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: ErrPseudoFile}
 	}
-	return os.OpenFile("/proc/self/fd/"+strconv.Itoa(fd), os.O_RDONLY|syscall.O_NOCTTY, 0)
+	return os.OpenFile("/proc/self/fd/"+strconv.Itoa(fd), os.O_RDONLY|syscall.O_NOCTTY|syscall.O_NONBLOCK, 0)
 }
