@@ -7,14 +7,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
+
+// split separates inventory.json from audit.json in a container's output. The script prints it
+// from "@@@$((6*7))@@@", so its own command line, which the Inventory lists, does not hold it.
+const split = "@@@42@@@"
 
 func buildBinary(t *testing.T) string {
 	t.Helper()
@@ -44,6 +50,7 @@ func TestDistros(t *testing.T) {
 		t.Skip("docker is not installed")
 	}
 	bin := buildBinary(t)
+	cache := preparedCache(t)
 	cases := []struct{ image, family, pkgType, sleepExe, sleepPkg, libc string }{
 		{"debian:12", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6"},
 		{"debian:13", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6"},
@@ -55,21 +62,30 @@ func TestDistros(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.image, func(t *testing.T) {
+			// The cache is shared with the host (the pinned Grype, its database and the kernel CNA
+			// data); what the run adds to it is given back to the host's user.
 			script := "sleep 600 & sleep 1; /usr/local/bin/tripcoil run >/tmp/run.out 2>&1; code=$?; " +
-				"cat /var/lib/tripcoil/runs/latest/inventory.json || cat /tmp/run.out; exit $code"
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+				"chown -R " + fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()) + " /var/lib/tripcoil/cache; " +
+				"cat /var/lib/tripcoil/runs/latest/inventory.json || cat /tmp/run.out; echo; echo @@@$((6*7))@@@; " +
+				"cat /var/lib/tripcoil/runs/latest/audit.json; exit $code"
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			var stdout, stderr bytes.Buffer
-			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-v", bin+":/usr/local/bin/tripcoil:ro", tc.image, "sh", "-c", script)
+			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-v", bin+":/usr/local/bin/tripcoil:ro",
+				"-v", cache+":/var/lib/tripcoil/cache", tc.image, "sh", "-c", script)
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			runErr := cmd.Run()
-			out := stdout.Bytes()
+			invOut, audOut, _ := bytes.Cut(stdout.Bytes(), []byte(split))
 			var inv inventory.Inventory
-			if err := json.Unmarshal(out, &inv); err != nil {
-				t.Fatalf("no inventory.json (run: %v): %v\nstdout: %s\nstderr: %s", runErr, err, out, stderr.Bytes())
+			if err := json.Unmarshal(invOut, &inv); err != nil {
+				t.Fatalf("no inventory.json (run: %v): %v\nstdout: %s\nstderr: %s", runErr, err, stdout.Bytes(), stderr.Bytes())
+			}
+			var aud audit.Audit
+			if err := json.Unmarshal(audOut, &aud); err != nil {
+				t.Fatalf("no audit.json (run: %v): %v\nstdout: %s", runErr, err, audOut)
 			}
 			if runErr != nil {
-				t.Fatalf("tripcoil run failed: %v; errors %+v\nstderr: %s", runErr, inv.Errors, stderr.Bytes())
+				t.Fatalf("tripcoil run failed: %v; errors %+v %+v\nstderr: %s", runErr, inv.Errors, aud.Errors, stderr.Bytes())
 			}
 			if len(inv.Items) == 0 || inv.Items[0].Kind != inventory.KindKernel || inv.Items[0].Release == "" {
 				t.Fatalf("first item is not a kernel item with a release: %+v", inv.Items)
@@ -105,10 +121,29 @@ func TestDistros(t *testing.T) {
 			if !sleepPkg || !libc {
 				t.Fatalf("sleep's origins miss %s or %s: %v", tc.sleepPkg, tc.libc, sleep.Origins)
 			}
+			// The Audit read this distribution's package database: each of sleep's packages is
+			// one package of the staged database.
+			results := map[string]audit.OriginResult{}
+			for _, r := range aud.Origins {
+				results[r.ID] = r
+			}
+			for _, id := range sleep.Origins {
+				if r := results[id]; origins[id].Kind == inventory.OriginPackage && (r.Status != audit.Scanned || r.Packages != 1) {
+					t.Errorf("origin %s: %+v", id, r)
+				}
+			}
+			if aud.Status != audit.Complete || aud.Grype.DBBuilt.IsZero() || aud.KernelData == nil {
+				t.Fatalf("audit %s, errors %+v", aud.Status, aud.Errors)
+			}
 			self := false
 			for _, it := range inv.Items {
 				for _, id := range it.Origins {
-					self = self || (it.Exe == "/usr/local/bin/tripcoil" && origins[id].Kind == inventory.OriginBinary)
+					if it.Exe == "/usr/local/bin/tripcoil" && origins[id].Kind == inventory.OriginBinary {
+						self = true
+						if r := results[id]; r.Status != audit.Scanned || r.Packages == 0 {
+							t.Errorf("tripcoil's own binary: %+v", r) // Grype reads a Go binary's modules
+						}
+					}
 				}
 			}
 			if !self {
