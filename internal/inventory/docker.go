@@ -54,11 +54,14 @@ func collectDocker(ctx context.Context, dockerHost string, connect func(string) 
 	for _, s := range list {
 		d, err := api.Inspect(ctx, s.ID)
 		if errors.Is(err, dockerapi.ErrNotFound) {
-			continue // it stopped between the list and the inspect: it is no longer running
+			continue // it was removed between the list and the inspect: it is no longer running
 		}
 		if err != nil {
 			problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory", "cannot inspect container %.12s: %v", s.ID, err))
 			continue
+		}
+		if !d.State.Running {
+			continue // it stopped between the list and the inspect; paused and restarting ones still run
 		}
 		name := strings.TrimPrefix(d.Name, "/")
 		ref := s.Image

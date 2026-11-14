@@ -13,7 +13,10 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-const shopID = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+const (
+	shopID    = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+	stoppedID = "0000000000000000000000000000000000000000000000000000000000000002"
+)
 
 func dockerServer(t *testing.T, h http.Handler) string {
 	t.Helper()
@@ -40,11 +43,16 @@ func engine(ping int) http.Handler {
 		w.Write([]byte("OK"))
 	})
 	mux.HandleFunc("/containers/json", func(w http.ResponseWriter, _ *http.Request) {
-		// The second container stops before it is inspected: its inspect answers 404.
+		// The second container is removed before it is inspected: its inspect answers 404. The third
+		// stops before it is inspected: its inspect answers that it is not running.
 		w.Write([]byte(`[{"Id":"` + shopID + `","Names":["/shop-web-1"],"Image":"ghcr.io/acme/shop:2026.11.3","ImageID":"sha256:abc",` +
 			`"State":"running","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"},` +
 			`"Ports":[{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":9229,"Type":"tcp"}]},` +
-			`{"Id":"0000000000000000000000000000000000000000000000000000000000000001","Names":["/gone"],"Image":"busybox","ImageID":"sha256:def","State":"running"}]`))
+			`{"Id":"0000000000000000000000000000000000000000000000000000000000000001","Names":["/gone"],"Image":"busybox","ImageID":"sha256:def","State":"running"},` +
+			`{"Id":"` + stoppedID + `","Names":["/stopped"],"Image":"busybox","ImageID":"sha256:def","State":"running"}]`))
+	})
+	mux.HandleFunc("/containers/"+stoppedID+"/json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"Id":"` + stoppedID + `","Name":"/stopped","Image":"sha256:def","State":{"Running":false,"Pid":0},"Config":{},"HostConfig":{}}`))
 	})
 	mux.HandleFunc("/containers/"+shopID+"/json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"Id":"` + shopID + `","Name":"/shop-web-1","Image":"sha256:abc","State":{"Running":true,"Pid":2201},` +
