@@ -27,7 +27,8 @@ var (
 	// "... #1 SMP PREEMPT_DYNAMIC Debian 6.1.119-1 (2024-11-22)". Kernels Debian did not build
 	// (custom, Proxmox) end differently; their "gcc (Debian 12.2.0-14)" must not match.
 	debianRunning = regexp.MustCompile(`Debian (\S+) \(\d{4}-\d{2}-\d{2}\)\s*$`)
-	upstreamLead  = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?`)
+	// upstreamLead keeps a release candidate's -rcN: 7.4.0-rc1 in 7.4.0-rc1-1-mainline.
+	upstreamLead = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?(?:-rc\d+)?`)
 	// rpmKernelName matches the distributions' own kernel packages, as listed from the real
 	// repositories on 2026-11-14: RHEL family kernel, kernel-core, kernel-modules(-core),
 	// kernel-debug(-core), kernel-rt(-core), kernel-uki-virt, Oracle's kernel-uek(-core); Amazon
@@ -106,7 +107,8 @@ func runningVersions(family osrel.Family, rel, procVersion, signature string, pk
 	case osrel.Debian:
 		if m := debianRunning.FindStringSubmatch(procVersion); m != nil {
 			running = m[1]
-			upstream = upstreamLead.FindString(withoutEpoch(running))
+			// Debian versions a release candidate as 6.13~rc7.
+			upstream = upstreamLead.FindString(strings.Replace(withoutEpoch(running), "~rc", "-rc", 1))
 			distroBuild = true
 		}
 	case osrel.Ubuntu:

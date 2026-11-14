@@ -189,6 +189,24 @@ func TestKernel(t *testing.T) {
 			origin: KernelUpstreamOriginID("7.3.3"),
 		},
 		{
+			name: "arch mainline release candidate", release: osrel.Release{ID: "arch"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "7.4.0-rc1-1-mainline", "Linux version 7.4.0-rc1-1-mainline", "", "usr/lib/modules/7.4.0-rc1-1-mainline")
+			},
+			tool: &fakeTool{typ: "alpm", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/7.4.0-rc1-1-mainline/modules.builtin": {Name: "linux-mainline", Version: "7.4rc1-1", Type: "alpm"}}},
+			running: "7.4rc1-1", upstream: "7.4.0-rc1",
+			origin: KernelUpstreamOriginID("7.4.0-rc1"),
+		},
+		{
+			name: "release candidate built from git", release: osrel.Release{ID: "arch"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "7.4.0-rc2-00123-gabcdef012345", "Linux version 7.4.0-rc2-00123-gabcdef012345", "", "usr/lib/modules/7.4.0-rc2-00123-gabcdef012345")
+			},
+			running: "7.4.0-rc2-00123-gabcdef012345", upstream: "7.4.0-rc2",
+			origin: KernelUpstreamOriginID("7.4.0-rc2"),
+		},
+		{
 			name: "alpine", release: osrel.Release{ID: "alpine", VersionID: "3.21.0"},
 			root: func(t *testing.T) string {
 				return kernelRoot(t, "6.6.58-0-lts", "Linux version 6.6.58-0-lts", "", "lib/modules/6.6.58-0-lts")
@@ -207,6 +225,28 @@ func TestKernel(t *testing.T) {
 				"/lib/modules/6.6.62-0-lts/modules.builtin": {Name: "linux-lts", Version: "6.6.62-r0", Type: "apk"}}},
 			running: "6.6.58-0-lts", upstream: "6.6.58", pendingContains: "/lib/modules/6.6.58-0-lts is gone",
 			origin: KernelUpstreamOriginID("6.6.58"),
+		},
+		{
+			name: "debian backports kernel", release: debianRel,
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.12.12+bpo-amd64", "Linux version 6.12.12+bpo-amd64 (debian-kernel@lists.debian.org) (x86_64-linux-gnu-gcc-12 (Debian 12.2.0-14) 12.2.0, "+
+					"GNU ld (GNU Binutils for Debian) 2.40) #1 SMP PREEMPT_DYNAMIC Debian 6.12.12-1~bpo12+1 (2025-02-23)", "", "usr/lib/modules/6.12.12+bpo-amd64")
+			},
+			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/6.12.12+bpo-amd64/modules.builtin": deb("linux-image-6.12.12+bpo-amd64", "6.12.12-1~bpo12+1")}},
+			running: "6.12.12-1~bpo12+1", upstream: "6.12.12",
+			origin: PackageOriginID(Distro{ID: "debian", VersionID: "12"}, deb("linux-image-6.12.12+bpo-amd64", "6.12.12-1~bpo12+1")),
+		},
+		{
+			name: "debian experimental release candidate", release: osrel.Release{ID: "debian"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.13-rc7-amd64", "Linux version 6.13-rc7-amd64 (debian-kernel@lists.debian.org) (x86_64-linux-gnu-gcc-14 (Debian 14.2.0-12) 14.2.0, "+
+					"GNU ld (GNU Binutils for Debian) 2.43.50.20250108) #1 SMP PREEMPT_DYNAMIC Debian 6.13~rc7-1~exp1 (2025-01-14)", "", "usr/lib/modules/6.13-rc7-amd64")
+			},
+			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/6.13-rc7-amd64/modules.builtin": deb("linux-image-6.13-rc7-amd64", "6.13~rc7-1~exp1")}},
+			running: "6.13~rc7-1~exp1", upstream: "6.13-rc7",
+			origin: KernelUpstreamOriginID("6.13-rc7"),
 		},
 		{
 			name: "debian with a custom kernel", release: debianRel,
