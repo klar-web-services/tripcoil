@@ -316,7 +316,8 @@ func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func
 	path := filepath.Join(dir, fileName(o))
 	var err error
 	if o.Jar {
-		err = copyVerified(ctx, openPath(filepath.Join(au.d.Root, o.Path)), o.SHA256, path)
+		jar := filepath.Join(au.d.Root, o.Path)
+		err = copyVerified(ctx, jar, openPath(jar), o.SHA256, path)
 	} else {
 		err = au.binaryFile(ctx, o, path)
 	}
@@ -339,11 +340,11 @@ func (au *auditor) binaryFile(ctx context.Context, o inventory.Origin, path stri
 		if os.Link(o.Copy, path) == nil {
 			return nil
 		}
-		return copyVerified(ctx, openPath(o.Copy), o.SHA256, path)
+		return copyVerified(ctx, o.Copy, openPath(o.Copy), o.SHA256, path)
 	}
 	err := errors.New("it has no path")
-	au.eachOpener(o, func(open func() (*os.File, error)) bool {
-		err = copyVerified(ctx, open, o.SHA256, path)
+	au.eachOpener(o, func(name string, open func() (*os.File, error)) bool {
+		err = copyVerified(ctx, name, open, o.SHA256, path)
 		return err == nil || ctx.Err() != nil
 	})
 	switch {
@@ -355,14 +356,15 @@ func (au *auditor) binaryFile(ctx context.Context, o inventory.Origin, path stri
 	return fmt.Errorf("cannot read the file that ran: %w", err)
 }
 
-// eachOpener offers try the ways to open an unpackaged file, until try returns true: through each
-// process of the origin's items that runs or maps it, then at each of its paths on the host.
-func (au *auditor) eachOpener(o inventory.Origin, try func(func() (*os.File, error)) bool) {
+// eachOpener offers try the ways to open an unpackaged file, with its path, until try returns
+// true: through each process of the origin's items that runs or maps it, then at each of its paths
+// on the host.
+func (au *auditor) eachOpener(o inventory.Origin, try func(string, func() (*os.File, error)) bool) {
 	if au.d.Proc != nil {
 		for _, it := range au.rem.users[o.ID] {
 			for _, p := range it.Processes {
 				for _, path := range o.Paths {
-					if open := au.procOpener(p.PID, it.Exe, path); open != nil && try(open) {
+					if open := au.procOpener(p.PID, it.Exe, path); open != nil && try(path, open) {
 						return
 					}
 				}
@@ -370,7 +372,7 @@ func (au *auditor) eachOpener(o inventory.Origin, try func(func() (*os.File, err
 		}
 	}
 	for _, p := range o.Paths {
-		if try(openPath(filepath.Join(au.d.Root, p))) {
+		if host := filepath.Join(au.d.Root, p); try(host, openPath(host)) {
 			return
 		}
 	}

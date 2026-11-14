@@ -33,7 +33,8 @@ var releaseFiles = map[string][]string{"deb": {"etc/debian_version"}}
 
 // stagePackageDB copies os-release and the package database of the host below root into dst, a
 // staging root that holds nothing else, and returns the SBOM cache key: the hash of what it
-// copied. Only regular files are copied.
+// copied. Only regular files are copied: a package database file that is not one is left out,
+// and any other fails the copy. The copies must leave the cache file system its floor.
 func stagePackageDB(root string, family osrel.Family, dst string) (string, error) {
 	alternatives, ok := packageDBFiles[family.PackageType()]
 	if !ok {
@@ -58,6 +59,10 @@ func stagePackageDB(root string, family osrel.Family, dst string) (string, error
 	if len(files) == 0 {
 		return "", fmt.Errorf("no package database was found below %s", root)
 	}
+	database := map[string]bool{}
+	for _, f := range files {
+		database[f] = true
+	}
 	// Without os-release Grype matches nothing and says nothing, so a missing one fails the copy.
 	osRelease := "etc/os-release"
 	if _, err := os.Stat(filepath.Join(root, osRelease)); errors.Is(err, fs.ErrNotExist) {
@@ -70,8 +75,28 @@ func stagePackageDB(root string, family osrel.Family, dst string) (string, error
 		}
 	}
 	sort.Strings(files)
-	h := sha256.New()
+	var staged []string
+	var size int64
 	for _, rel := range files {
+		path := filepath.Join(root, rel)
+		f, n, err := openFile(path, openPath(path))
+		if errors.Is(err, procfs.ErrNotRegular) && database[rel] {
+			continue // such as a directory in /var/lib/rpm
+		}
+		if err != nil {
+			return "", err
+		}
+		f.Close()
+		staged, size = append(staged, rel), size+n
+	}
+	if err := os.MkdirAll(dst, 0o700); err != nil {
+		return "", err
+	}
+	if err := hasRoom(dst, size); err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	for _, rel := range staged {
 		target := rel
 		switch {
 		case rel == "usr/lib/os-release":
@@ -80,9 +105,6 @@ func stagePackageDB(root string, family osrel.Family, dst string) (string, error
 			target = "var/lib/rpm/" + strings.TrimPrefix(rel, "usr/lib/sysimage/rpm/")
 		}
 		n, err := copyRegular(filepath.Join(root, rel), filepath.Join(dst, target), h)
-		if errors.Is(err, procfs.ErrNotRegular) {
-			continue // such as a directory in /var/lib/rpm
-		}
 		if err != nil {
 			return "", err
 		}
@@ -110,7 +132,7 @@ func copyRegular(src, dst string, h io.Writer) (int64, error) {
 		err = cerr
 	}
 	if err == nil && n > scanFileCap {
-		err = errTooLarge()
+		err = errTooLarge(src)
 	}
 	return n, err
 }

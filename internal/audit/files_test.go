@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -31,13 +32,13 @@ func TestCopyVerified(t *testing.T) {
 	write(t, src, "go binary v1")
 	dir := filepath.Join(t.TempDir(), "scan", sumOf("go binary v1"))
 	dst := filepath.Join(dir, "api")
-	if err := copyVerified(context.Background(), openPath(src), sumOf("go binary v1"), dst); err != nil {
+	if err := copyVerified(context.Background(), src, openPath(src), sumOf("go binary v1"), dst); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(dst); string(data) != "go binary v1" {
 		t.Fatalf("copy %s: %q", dst, data)
 	}
-	if err := copyVerified(context.Background(), openPath(src), sumOf("go binary v0"), filepath.Join(dir, "old")); !errors.Is(err, errFileChanged) {
+	if err := copyVerified(context.Background(), src, openPath(src), sumOf("go binary v0"), filepath.Join(dir, "old")); !errors.Is(err, errFileChanged) {
 		t.Fatalf("a changed file: %v", err)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -62,7 +63,7 @@ func TestFileReadsNeverHang(t *testing.T) {
 	for _, path := range []string{fifo, "/dev/zero", zero, kernel, dir} {
 		done := make(chan error, 3)
 		go func() {
-			done <- copyVerified(context.Background(), openPath(path), sumOf(""), filepath.Join(dir, "scan", "copy"))
+			done <- copyVerified(context.Background(), path, openPath(path), sumOf(""), filepath.Join(dir, "scan", "copy"))
 			_, err := hashFile(context.Background(), path)
 			done <- err
 			_, err = readSmall(path, 1<<20)
@@ -90,21 +91,51 @@ func TestCopyVerifiedLimits(t *testing.T) {
 	old := scanFileCap
 	scanFileCap = 50
 	defer func() { scanFileCap = old }()
-	if err := copyVerified(context.Background(), openPath(src), sumOf(""), filepath.Join(t.TempDir(), "big")); err == nil {
-		t.Fatal("copied a file above the cap")
+	if err := copyVerified(context.Background(), src, openPath(src), sumOf(""), filepath.Join(t.TempDir(), "big")); err == nil || !strings.Contains(err.Error(), src) {
+		t.Fatalf("copied a file above the cap: %v", err)
 	}
-	if _, err := hashFile(context.Background(), src); err == nil {
-		t.Fatal("hashed a file above the cap")
+	if _, err := hashFile(context.Background(), src); err == nil || !strings.Contains(err.Error(), src) {
+		t.Fatalf("hashed a file above the cap: %v", err)
 	}
 	scanFileCap = old
 	oldSpace := cacheSpace
 	defer func() { cacheSpace = oldSpace }()
 	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + 50, 10000, nil } // floor 1000
-	if err := copyVerified(context.Background(), openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
+	if err := copyVerified(context.Background(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
 		t.Fatalf("copy into a full cache: %v", err)
+	}
+	// The floor is a tenth of the file system, but at most 4 GiB.
+	cacheSpace = func(string) (uint64, uint64, error) { return maxCacheFloor + 100, 1 << 50, nil }
+	if err := copyVerified(context.Background(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); err != nil {
+		t.Fatalf("copy above a 4 GiB floor: %v", err)
+	}
+	cacheSpace = func(string) (uint64, uint64, error) { return maxCacheFloor + 99, 1 << 50, nil }
+	if err := copyVerified(context.Background(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
+		t.Fatalf("copy into a 4 GiB floor: %v", err)
 	}
 	if _, err := readSmall(src, 99); err == nil {
 		t.Fatal("read a file above the limit")
+	}
+}
+
+// A file that shrinks after its size was read changed: what is left of it is never hashed or
+// read as the file.
+func TestFileShrinksWhileRead(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "package-lock.json")
+	real := openFile
+	defer func() { openFile = real }()
+	openFile = func(name string, open func() (*os.File, error)) (*os.File, int64, error) {
+		f, size, err := real(name, open)
+		os.Truncate(src, 4)
+		return f, size, err
+	}
+	write(t, src, "0123456789")
+	if sum, err := hashFile(context.Background(), src); !errors.Is(err, errFileChanged) {
+		t.Errorf("hashed %q: %v", sum, err)
+	}
+	write(t, src, "0123456789")
+	if data, err := readSmall(src, 1<<20); !errors.Is(err, errFileChanged) {
+		t.Errorf("read %q: %v", data, err)
 	}
 }
 

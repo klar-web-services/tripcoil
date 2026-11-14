@@ -1,6 +1,8 @@
 package audit
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/osrel"
+	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
 // tree lists the regular files below dir.
@@ -86,5 +89,46 @@ func TestStagePackageDBFailures(t *testing.T) {
 	}
 	if _, err := stagePackageDB(t.TempDir(), osrel.Unknown, t.TempDir()); err == nil {
 		t.Fatal("staged an unknown distribution")
+	}
+	// Nor with an os-release that is not a regular file: only such a package database file is
+	// left out.
+	root := files(t, map[string]string{"var/lib/dpkg/status": "Package: libc6\n"})
+	os.MkdirAll(filepath.Join(root, "etc"), 0o755)
+	syscall.Mkfifo(filepath.Join(root, "etc/os-release"), 0o600)
+	if _, err := stagePackageDB(root, osrel.Debian, t.TempDir()); !errors.Is(err, procfs.ErrNotRegular) {
+		t.Fatalf("a FIFO as os-release: %v", err)
+	}
+}
+
+// The copies leave the cache file system its floor, as copyVerified's do, and too large a file
+// is named.
+func TestStagePackageDBLimits(t *testing.T) {
+	root := files(t, map[string]string{"etc/os-release": "ID=debian\n", "var/lib/dpkg/status": "Package: libc6\n"})
+	size := uint64(len("ID=debian\n") + len("Package: libc6\n"))
+	old := cacheSpace
+	defer func() { cacheSpace = old }()
+	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + size - 1, 10000, nil } // floor 1000
+	dst := t.TempDir()
+	if _, err := stagePackageDB(root, osrel.Debian, dst); !errors.Is(err, errCacheFull) {
+		t.Fatalf("staged into a full cache: %v", err)
+	}
+	if got := tree(t, dst); len(got) != 0 {
+		t.Fatalf("staged %v into a full cache", got)
+	}
+	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + size, 10000, nil }
+	if _, err := stagePackageDB(root, osrel.Debian, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	cacheSpace = old
+
+	oldCap := scanFileCap
+	defer func() { scanFileCap = oldCap }()
+	scanFileCap = 10
+	status := filepath.Join(root, "var/lib/dpkg/status")
+	if _, err := stagePackageDB(root, osrel.Debian, t.TempDir()); err == nil || !strings.Contains(err.Error(), status) {
+		t.Fatalf("staged a file above the cap: %v", err)
+	}
+	if _, err := copyRegular(status, filepath.Join(t.TempDir(), "status"), io.Discard); err == nil || !strings.Contains(err.Error(), status) {
+		t.Fatalf("copied a file above the cap: %v", err)
 	}
 }

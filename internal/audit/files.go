@@ -25,7 +25,7 @@ var cacheSpace = func(dir string) (free, total uint64, err error) {
 	if err := syscall.Statfs(dir, &st); err != nil {
 		return 0, 0, err
 	}
-	return st.Bavail * uint64(st.Bsize), st.Blocks * uint64(st.Bsize), nil
+	return st.Bavail * uint64(st.Frsize), st.Blocks * uint64(st.Frsize), nil
 }
 
 // A copy leaves the cache file system a tenth free, but at most 4 GiB, as the Inventory's do.
@@ -39,7 +39,9 @@ var (
 	errFileChanged = errors.New("the file changed since the inventory")
 )
 
-func errTooLarge() error { return fmt.Errorf("it is larger than %d bytes", scanFileCap) }
+func errTooLarge(name string) error {
+	return fmt.Errorf("%s is larger than %d bytes", name, scanFileCap)
+}
 
 type ctxReader struct {
 	ctx context.Context
@@ -55,7 +57,8 @@ func (c ctxReader) Read(p []byte) (int, error) {
 
 // openFile opens a regular file of a real file system, never a FIFO, a device or a kernel file
 // such as /proc/kmsg, and returns it with its size. Reading it at most to that size cannot hang.
-func openFile(open func() (*os.File, error)) (*os.File, int64, error) {
+// name names the file in errors.
+var openFile = func(name string, open func() (*os.File, error)) (*os.File, int64, error) {
 	f, err := open()
 	if err != nil {
 		return nil, 0, err
@@ -67,7 +70,7 @@ func openFile(open func() (*os.File, error)) (*os.File, int64, error) {
 	}
 	if fi.Size() > scanFileCap {
 		f.Close()
-		return nil, 0, errTooLarge()
+		return nil, 0, errTooLarge(name)
 	}
 	return f, fi.Size(), nil
 }
@@ -78,36 +81,57 @@ func openPath(path string) func() (*os.File, error) {
 
 // hashFile returns the SHA-256 of the regular file at path.
 func hashFile(ctx context.Context, path string) (string, error) {
-	f, size, err := openFile(openPath(path))
+	f, size, err := openFile(path, openPath(path))
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, io.LimitReader(ctxReader{ctx, f}, size)); err != nil {
+	n, err := io.Copy(h, io.LimitReader(ctxReader{ctx, f}, size))
+	switch {
+	case err != nil:
 		return "", err
+	case n != size: // it shrank since
+		return "", errFileChanged
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// readSmall reads a small regular file, such as a lockfile, of at most max bytes.
-func readSmall(path string, max int64) ([]byte, error) {
-	f, size, err := openFile(openPath(path))
+// readSmall reads a small regular file, such as a lockfile, of at most limit bytes.
+func readSmall(path string, limit int64) ([]byte, error) {
+	f, size, err := openFile(path, openPath(path))
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	if size > max {
-		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
+	if size > limit {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, limit)
 	}
-	return io.ReadAll(io.LimitReader(f, size))
+	data, err := io.ReadAll(io.LimitReader(f, size))
+	if err == nil && int64(len(data)) != size {
+		err = errFileChanged // it shrank since
+	}
+	return data, err
 }
 
-// copyVerified copies the file that open opens to dst when its content has that SHA-256. Grype
-// then reads exactly the file the Inventory identified: never a FIFO, a device or a kernel file,
-// nor a file that changed since.
-func copyVerified(ctx context.Context, open func() (*os.File, error), sha, dst string) error {
-	f, size, err := openFile(open)
+// hasRoom checks that size bytes fit on the cache file system that holds dir, above its floor.
+func hasRoom(dir string, size int64) error {
+	free, total, err := cacheSpace(dir)
+	if err != nil {
+		return err
+	}
+	floor := min(total/100*cacheFloorPercent, maxCacheFloor)
+	if free <= floor || uint64(size) > free-floor {
+		return errCacheFull
+	}
+	return nil
+}
+
+// copyVerified copies the file that open opens, name, to dst when its content has that SHA-256.
+// Grype then reads exactly the file the Inventory identified: never a FIFO, a device or a kernel
+// file, nor a file that changed since.
+func copyVerified(ctx context.Context, name string, open func() (*os.File, error), sha, dst string) error {
+	f, size, err := openFile(name, open)
 	if err != nil {
 		return err
 	}
@@ -116,13 +140,8 @@ func copyVerified(ctx context.Context, open func() (*os.File, error), sha, dst s
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	free, total, err := cacheSpace(dir)
-	if err != nil {
+	if err := hasRoom(dir, size); err != nil {
 		return err
-	}
-	floor := min(total/100*cacheFloorPercent, maxCacheFloor)
-	if free <= floor || uint64(size) > free-floor {
-		return errCacheFull
 	}
 	tmp, err := os.CreateTemp(dir, ".copy-*")
 	if err != nil {

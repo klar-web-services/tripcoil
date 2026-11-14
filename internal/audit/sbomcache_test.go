@@ -141,6 +141,12 @@ func TestAppDirKeyWithoutKey(t *testing.T) {
 	if k, _, err := appDirKey(dir, "2026-11-14"); (k != "" && os.Geteuid() != 0) || err != nil {
 		t.Fatalf("an unreadable directory: %q %v", k, err)
 	}
+	// Nor has a directory with a lockfile too large to hash.
+	big := files(t, map[string]string{"package-lock.json": ""})
+	os.Truncate(filepath.Join(big, "package-lock.json"), maxLockfile+1)
+	if k, _, err := appDirKey(big, "2026-11-14"); k != "" || err != nil {
+		t.Fatalf("a lockfile above maxLockfile: %q %v", k, err)
+	}
 	// Nor has a link to a directory, which the walk would not follow.
 	link := filepath.Join(t.TempDir(), "app")
 	os.Symlink(files(t, map[string]string{"package-lock.json": lock}), link)
