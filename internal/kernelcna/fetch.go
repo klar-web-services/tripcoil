@@ -29,12 +29,14 @@ const (
 	maxSnapshotBytes    = 256 << 20 // compressed; about 35 MB in 2026
 	maxSnapshotTarBytes = 2 << 30   // unpacked; about 364 MB in 2026
 	maxRecordBytes      = 4 << 20
+	maxRanges           = 2000000 // version ranges kept across all records; about 180,000 in 2026
 )
 
 var (
 	snapshotCap    int64 = maxSnapshotBytes    // lowered by tests
 	snapshotTarCap int64 = maxSnapshotTarBytes // lowered by tests
 	recordsCap           = maxRecords          // lowered by tests
+	rangesCap            = maxRanges           // lowered by tests
 )
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -170,6 +172,7 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 	unpacked := &limited{r: gz, max: snapshotTarCap, what: "the unpacked snapshot"}
 	tr := tar.NewReader(unpacked)
 	var records []Record
+	ranges := 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -194,6 +197,12 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 		r, err := ParseRecord(data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", hdr.Name, err)
+		}
+		for _, e := range r.Affected {
+			ranges += len(e.Versions)
+		}
+		if ranges > rangesCap {
+			return nil, fmt.Errorf("the snapshot holds more than %d version ranges", rangesCap)
 		}
 		records = append(records, r)
 	}

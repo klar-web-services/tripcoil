@@ -354,14 +354,27 @@ func TestLoadKeepsOldDataWhenSnapshotMalformed(t *testing.T) {
 
 func TestLoadLimits(t *testing.T) {
 	body := snapshotOf(t, commitA)
-	t.Cleanup(func() { snapshotCap, snapshotTarCap, recordsCap = maxSnapshotBytes, maxSnapshotTarBytes, maxRecords })
-	snapshotCap, snapshotTarCap, recordsCap = int64(len(body)), int64(len(unpack(t, body))), 29
 	load := func() error {
 		s, k := newSource(t)
 		k.snapshot.Store(body)
 		_, err := s.Load(context.Background(), t0, 48*time.Hour)
 		return err
 	}
+	s, _ := newSource(t)
+	d, err := s.Load(context.Background(), t0, 48*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranges := 0
+	for _, r := range d.Records {
+		for _, e := range r.Affected {
+			ranges += len(e.Versions)
+		}
+	}
+	t.Cleanup(func() {
+		snapshotCap, snapshotTarCap, recordsCap, rangesCap = maxSnapshotBytes, maxSnapshotTarBytes, maxRecords, maxRanges
+	})
+	snapshotCap, snapshotTarCap, recordsCap, rangesCap = int64(len(body)), int64(len(unpack(t, body))), 29, ranges
 	if err := load(); err != nil {
 		t.Fatalf("a snapshot at every limit: %v", err)
 	}
@@ -378,5 +391,10 @@ func TestLoadLimits(t *testing.T) {
 	recordsCap--
 	if err := load(); err == nil || !strings.Contains(err.Error(), "the snapshot holds more than 28 records") {
 		t.Fatalf("records: %v", err)
+	}
+	recordsCap++
+	rangesCap--
+	if err := load(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("the snapshot holds more than %d version ranges", rangesCap)) {
+		t.Fatalf("version ranges: %v", err)
 	}
 }

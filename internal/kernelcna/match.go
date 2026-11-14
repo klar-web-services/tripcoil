@@ -111,10 +111,11 @@ func atMost(v version, upper string) bool {
 	return ok && compare(v, u) <= 0
 }
 
-// fixFor is the first version above v that the record does not mark affected, where it says the bug is fixed: the start of an
-// unaffected range that runs to the end of v's branch, the end of an affected range that covers v,
-// or the mainline fix ("X.Y <= *"). A fix in v's own branch wins over the mainline fix; a fix in
-// another stable branch does not help v and is not considered.
+// fixFor is the first version above v where the record says the bug is fixed. Such a fix is the
+// start of an unaffected range that runs to the end of v's branch, the end of an affected range
+// that covers v, or the mainline fix ("X.Y <= *"). A fix that the record still marks affected is
+// skipped. A fix in v's own branch wins over the mainline fix. A fix in another stable branch does
+// not help v and is not considered.
 func (r Record) fixFor(v version) string {
 	var best string
 	var bestV version
