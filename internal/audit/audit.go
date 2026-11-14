@@ -69,6 +69,7 @@ type auditor struct {
 	rem   remediation
 	cache sbomCache
 	maps  map[int][]procfs.Mapping // the mappings of processes, read once
+	seen  map[string]bool          // the IDs of the findings so far
 }
 
 // Run audits every origin of the Inventory. It always returns an Audit: one that could not match
@@ -80,6 +81,7 @@ func Run(ctx context.Context, d Deps, inv *inventory.Inventory) *Audit {
 		rem:   newRemediation(d.Family, inv),
 		cache: sbomCache{root: filepath.Join(d.CacheDir, "sbom"), now: d.Now},
 		maps:  map[int][]procfs.Mapping{},
+		seen:  map[string]bool{},
 	}
 	au.run(ctx)
 	if ctx.Err() != nil {
@@ -163,7 +165,7 @@ func (au *auditor) run(ctx context.Context) {
 	}
 	for _, o := range au.inv.Origins {
 		if ctx.Err() != nil {
-			return // interrupted() records what was not scanned
+			break // interrupted() records what was not scanned
 		}
 		switch o.Kind {
 		case inventory.OriginUnresolved:
@@ -179,13 +181,20 @@ func (au *auditor) run(ctx context.Context) {
 	slices.SortFunc(a.Findings, func(x, y Finding) int {
 		return cmp.Or(cmp.Compare(slices.Index(Tiers, x.Risk), slices.Index(Tiers, y.Risk)), cmp.Compare(x.Vulnerability.ID, y.Vulnerability.ID), cmp.Compare(x.ID, y.ID))
 	})
+	if ctx.Err() != nil {
+		return // no upgrade lines: they are checked with Grype
+	}
 	a.Upgrades = au.checkUpgrades(ctx, upgradeCandidates(a.Findings))
 	au.cache.prune()
 }
 
 // fail ends an Audit that cannot match anything: every origin is failed, except the unresolved.
 func (au *auditor) fail(code, format string, args ...any) {
-	p := problem.New(problem.Error, code, "audit", format, args...)
+	stage := "audit"
+	if code == problem.RunFolderUnwritable {
+		stage = "" // of no stage (spec section 12)
+	}
+	p := problem.New(problem.Error, code, stage, format, args...)
 	au.a.Status = Failed
 	au.a.Errors = append(au.a.Errors, p)
 	for _, o := range au.inv.Origins {
@@ -217,10 +226,6 @@ func rawName(id, ext string) string {
 }
 
 func (au *auditor) addFindings(matches []grype.Match, raw string, owner func(grype.Match) (string, bool)) {
-	seen := map[string]bool{}
-	for _, f := range au.a.Findings {
-		seen[f.ID] = true
-	}
 	for _, m := range matches {
 		origin, ok := owner(m)
 		if !ok {
@@ -237,17 +242,17 @@ func (au *auditor) addFindings(matches []grype.Match, raw string, owner func(gry
 		if len(m.Artifact.Locations) > 0 {
 			f.Package.Location = m.Artifact.Locations[0]
 		}
-		au.add(f, seen)
+		au.add(f)
 	}
 }
 
 // add completes a finding with its ID, items, risk and remediation, once per ID.
-func (au *auditor) add(f Finding, seen map[string]bool) {
+func (au *auditor) add(f Finding) {
 	f.ID = FindingID(f.Origin, f.Vulnerability.ID, f.Package)
-	if seen[f.ID] {
+	if au.seen[f.ID] {
 		return
 	}
-	seen[f.ID] = true
+	au.seen[f.ID] = true
 	f.Items = au.rem.itemIDs(f.Origin)
 	f.Risk = Risk(f.Vulnerability, f.Fix)
 	f.Remediation = au.rem.line(f)

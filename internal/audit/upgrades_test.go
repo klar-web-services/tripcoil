@@ -239,11 +239,11 @@ func TestCheckUpgrades(t *testing.T) {
 			t.Fatalf("lines %v, warnings %+v", ups, warns)
 		}
 	})
-	t.Run("no line when the run is stopped", func(t *testing.T) {
+	t.Run("no line and no warning when the run is stopped", func(t *testing.T) {
 		stopped, cancel := context.WithCancel(ctx)
 		cancel()
-		if ups, warns, _ := checked(stopped, t, &fakeScanner{}, lodash); len(ups) != 0 || len(warns) != 1 || warns[0].Code != problem.UpgradeCheckFailed {
-			t.Fatalf("lines %v, warnings %+v", ups, warns)
+		if ups, warns, _ := checked(stopped, t, &fakeScanner{}, lodash); len(ups) != 0 || ups == nil || len(warns) != 0 {
+			t.Fatalf("lines %v, warnings %+v: the run's INTERRUPTED error says why", ups, warns)
 		}
 	})
 }

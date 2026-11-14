@@ -40,7 +40,6 @@ func (au *auditor) kernel(ctx context.Context, o inventory.Origin) {
 		return
 	}
 	au.a.Origins = append(au.a.Origins, OriginResult{ID: o.ID, Kind: o.Kind, Status: Scanned, Packages: 1})
-	seen := map[string]bool{}
 	for _, m := range matches {
 		v, ok := info[m.CVE]
 		if !ok {
@@ -65,6 +64,6 @@ func (au *auditor) kernel(ctx context.Context, o inventory.Origin) {
 		if m.Fixed != "" {
 			f.Fix = Fix{State: "fixed", Versions: []string{m.Fixed}}
 		}
-		au.add(f, seen)
+		au.add(f)
 	}
 }

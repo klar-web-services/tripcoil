@@ -142,7 +142,7 @@ func purlWithVersion(purl, version string) (string, bool) {
 // the candidate version in one SBOM, and keeps a line only when none of them gets any match, so a
 // version still known to be vulnerable is never recommended. A match for a purl that is not in the
 // SBOM drops every candidate of that package type and name. When the matching fails, no line is
-// given, and a warning says why.
+// given, and a warning says why, unless the run was interrupted.
 func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) []Upgrade {
 	byPURL := map[string][]int{} // the candidates of each purl in the SBOM
 	var comps []grype.Component
@@ -159,10 +159,10 @@ func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) 
 		return out
 	}
 	rep, err := au.matchUpgrades(ctx, comps)
-	if err == nil {
-		err = ctx.Err()
-	}
-	if err != nil {
+	switch {
+	case ctx.Err() != nil:
+		return out
+	case err != nil:
 		au.a.Warnings = append(au.a.Warnings, problem.New(problem.Warning, problem.UpgradeCheckFailed, "audit",
 			"the upgrade lines could not be checked with Grype, so none are given: %v", err))
 		return out

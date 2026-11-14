@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -666,6 +667,61 @@ func TestAuditInterrupted(t *testing.T) {
 	g.prepareErr = context.Canceled
 	if a := Run(ctx, deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); a.Errors[0].Code != problem.Interrupted || a.Status != Failed {
 		t.Fatalf("audit %s %+v", a.Status, a.Errors)
+	}
+}
+
+// Interrupted while the origins are scanned: what was found is sorted as ever, and no upgrade line
+// is checked with Grype or given.
+func TestAuditInterruptedWhileScanning(t *testing.T) {
+	for _, tc := range []struct{ name, at string }{
+		{"in the middle", "/app.jar"},
+		{"at the last origin", "docker:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, cache, inv := host(t)
+			inv.Origins = slices.DeleteFunc(inv.Origins, func(o inventory.Origin) bool { return o.ID == snapO }) // the image is the last
+			g := hostScanner(root, cache)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			g.scanning = func(source string) {
+				if strings.Contains(source, tc.at) {
+					cancel()
+				}
+			}
+			a := Run(ctx, deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+			byRisk := func(x, y Finding) int { return cmp.Compare(slices.Index(Tiers, x.Risk), slices.Index(Tiers, y.Risk)) }
+			if len(a.Findings) < 2 || !slices.IsSortedFunc(a.Findings, byRisk) || !slices.IsSortedFunc(a.Origins, func(x, y OriginResult) int { return cmp.Compare(x.ID, y.ID) }) {
+				t.Errorf("findings %+v: not sorted", a.Findings)
+			}
+			if a.Upgrades == nil || len(a.Upgrades) != 0 || len(a.Warnings) != 0 || slices.Contains(g.matched, "upgrades.cdx.json") {
+				t.Errorf("upgrades %+v, warnings %+v, matched %v", a.Upgrades, a.Warnings, g.matched)
+			}
+			if len(a.Errors) != 1 || a.Errors[0].Code != problem.Interrupted || len(a.Origins) != len(inv.Origins) || statuses(a)[imageO] != ScanFailed {
+				t.Errorf("errors %+v, statuses %v", a.Errors, statuses(a))
+			}
+		})
+	}
+}
+
+// Grype can report a vulnerability of a package twice, such as by two matchers: it is one finding.
+func TestAuditOneFindingPerID(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	l := g.vulns["lodash@4.17.20"]
+	g.vulns["lodash@4.17.20"] = append(l, l...)
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if n := len(slices.DeleteFunc(slices.Clone(a.Findings), func(f Finding) bool { return f.Package.Name != "lodash" })); n != 2 {
+		t.Fatalf("%d lodash findings for its 2 vulnerabilities", n)
+	}
+}
+
+func TestAuditRunFolderUnwritable(t *testing.T) {
+	root, cache, inv := host(t)
+	runDir := filepath.Join(t.TempDir(), "run")
+	write(t, runDir, "a file, not a folder")
+	a := Run(context.Background(), deps(root, cache, runDir, hostScanner(root, cache), fakeKernel{}), inv)
+	if a.Status != Failed || len(a.Errors) != 1 || a.Errors[0].Code != problem.RunFolderUnwritable || a.Errors[0].Stage != "" {
+		t.Fatalf("audit %s %+v: a run folder error is of no stage (spec section 12)", a.Status, a.Errors)
 	}
 }
 

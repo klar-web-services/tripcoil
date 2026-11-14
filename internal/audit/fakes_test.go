@@ -39,6 +39,7 @@ type fakeScanner struct {
 	matched    []string          // the file names of the SBOMs matched, in order
 	lookedUp   []string
 	copiesLeft []string // copies of other files still in the scan folder when a file was scanned
+	scanning   func(source string)
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -47,6 +48,12 @@ func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
 
 func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*grype.Report, error) {
 	f.catalogs = append(f.catalogs, source)
+	if f.scanning != nil {
+		f.scanning(source)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	for prefix, err := range f.catalogErr {
 		if strings.HasPrefix(source, prefix) {
 			os.WriteFile(raw, nil, 0o600) // Grype empties its output files when it fails
@@ -103,8 +110,11 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 	return f.Match(ctx, sbom, raw)
 }
 
-func (f *fakeScanner) Match(_ context.Context, sbom, raw string) (*grype.Report, error) {
+func (f *fakeScanner) Match(ctx context.Context, sbom, raw string) (*grype.Report, error) {
 	f.matched = append(f.matched, filepath.Base(sbom))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := f.matchErr[filepath.Base(sbom)]; err != nil {
 		return nil, err
 	}
