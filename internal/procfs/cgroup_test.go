@@ -12,6 +12,10 @@ func TestParseCgroup(t *testing.T) {
 	if got := ParseCgroup([]byte(v1)); got != "/system.slice/nginx.service" {
 		t.Fatalf("v1: %q", got)
 	}
+	mounted := "1:name=systemd:/\n0::/system.slice/nginx.service\n"
+	if got := ParseCgroup([]byte(mounted)); got != "/system.slice/nginx.service" {
+		t.Fatalf("v2 with name=systemd mounted: %q", got)
+	}
 	legacy := "12:memory:/system.slice/nginx.service\n1:name=systemd:/system.slice/nginx.service\n0::/\n"
 	if got := ParseCgroup([]byte(legacy)); got != "/system.slice/nginx.service" {
 		t.Fatalf("legacy v1 with 0::: %q", got)
@@ -20,13 +24,14 @@ func TestParseCgroup(t *testing.T) {
 
 func TestDockerContainerID(t *testing.T) {
 	cases := map[string]string{
-		"0::/system.slice/docker-" + cid + ".scope\n":                                            cid,
-		"0::/docker/" + cid + "\n":                                                               cid,
-		"12:memory:/docker/" + cid + "\n0::/\n":                                                  cid, // hybrid host: Docker's path is on a v1 line
-		"0::/system.slice/docker.service\n":                                                      "",
-		"0::/user.slice/user-1000.slice/session-2.scope":                                         "",
-		"0::/user.slice/user-1000.slice/user@1000.service/docker/" + cid + "\n":                  "",
-		"0::/user.slice/user-1000.slice/user@1000.service/user.slice/docker-" + cid + ".scope\n": "",
+		"0::/system.slice/docker-" + cid + ".scope\n":    cid,
+		"0::/docker/" + cid + "\n":                       cid,
+		"12:memory:/docker/" + cid + "\n0::/\n":          cid, // hybrid host: Docker's path is on a v1 line
+		"0::/system.slice/docker.service\n":              "",
+		"0::/user.slice/user-1000.slice/session-2.scope": "",
+		"0::/system.slice/docker-" + cid + ".scope/user.slice/user-1000.slice/user@1000.service/init.scope\n": cid,
+		"0::/user.slice/user-1000.slice/user@1000.service/docker/" + cid + "\n":                               "",
+		"0::/user.slice/user-1000.slice/user@1000.service/user.slice/docker-" + cid + ".scope\n":              "",
 	}
 	for in, want := range cases {
 		if got := DockerContainerID(in); got != want {
