@@ -133,11 +133,12 @@ func (au *auditor) interrupted() {
 
 func (au *auditor) run(ctx context.Context) {
 	a, d := au.a, au.d
-	// The cache is root's alone (spec section 4.3), and what a killed Grype left in it goes.
+	// The cache is root's alone (spec section 4.3), and what a killed run or Grype left in it goes.
 	if err := os.MkdirAll(d.CacheDir, 0o700); err == nil {
 		os.Chmod(d.CacheDir, 0o700)
 	}
 	os.RemoveAll(filepath.Join(d.CacheDir, "tmp"))
+	os.RemoveAll(au.scanDir())
 	st, updateErr, err := d.Grype.Prepare(ctx)
 	switch {
 	case ctx.Err() != nil:

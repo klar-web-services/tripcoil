@@ -2,7 +2,9 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -134,5 +136,35 @@ func TestAuditPackageChangedSinceTheInventory(t *testing.T) {
 				t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
 			}
 		})
+	}
+}
+
+// What a killed run left in the scan folder, such as the copy of a user's file, is removed when the
+// next run starts, even when that run then fails.
+func TestAuditRemovesWhatAKilledRunLeft(t *testing.T) {
+	root, cache, inv := host(t)
+	left := filepath.Join(cache, "scan", sumOf("killed"), "copy")
+	leave := func() {
+		os.MkdirAll(filepath.Dir(left), 0o700)
+		os.WriteFile(left, []byte("a user's file"), 0o600)
+	}
+	leave()
+	g := hostScanner(root, cache)
+	var seen []string
+	g.scanning = func(source string) {
+		if _, err := os.Stat(left); err == nil {
+			seen = append(seen, source)
+		}
+	}
+	if a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); a.Status != Complete || len(seen) != 0 {
+		t.Fatalf("audit %s; the copy was still there when Grype scanned %q", a.Status, seen)
+	}
+	leave()
+	g.prepareErr = errors.New("cannot download Grype")
+	if a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); a.Status != Failed {
+		t.Fatalf("audit %s", a.Status)
+	}
+	if _, err := os.Stat(left); !os.IsNotExist(err) {
+		t.Fatalf("the copy is still there: %v", err)
 	}
 }
