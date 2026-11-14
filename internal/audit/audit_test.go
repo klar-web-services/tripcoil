@@ -634,6 +634,64 @@ func TestAuditAppDirCachedOnlyFromItsOwnLockfiles(t *testing.T) {
 	}
 }
 
+// A package source added anywhere below an app directory after its SBOM was cached, such as a
+// nested lockfile, is scanned at the next run.
+func TestAuditAppDirNewPackageSource(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	write(t, filepath.Join(root, "srv/shop/worker/package-lock.json"), `{"lockfileVersion":3}`)
+	g.catalogs = nil
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if shop := "dir:" + filepath.Join(root, "srv/shop"); !slices.Contains(g.catalogs, shop) {
+		t.Fatalf("scanned %q: the app directory was matched from its cached SBOM", g.catalogs)
+	}
+}
+
+// An app directory whose lockfile changed while Grype read it is not cached: the SBOM may be of
+// the new lockfile, and the key of the old one, to which an app's owner could change it back.
+func TestAuditAppDirChangedDuringTheScan(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	shop := "dir:" + filepath.Join(root, "srv/shop")
+	g.scanning = func(source string) {
+		if source == shop {
+			write(t, filepath.Join(root, "srv/shop/package-lock.json"), `{"lockfileVersion":3,"packages":{"node_modules/lodash":{"version":"4.17.21"}}}`)
+		}
+	}
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if kinds := cachedKinds(cache); slices.Contains(kinds, "appdir") {
+		t.Fatalf("cached %v", kinds)
+	}
+	g.scanning = nil
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if kinds := cachedKinds(cache); !slices.Contains(kinds, "appdir") {
+		t.Fatalf("cached %v: an app directory that holds still is cached", kinds)
+	}
+}
+
+// Every app directory is cataloged at least once per UTC day.
+func TestAuditAppDirEachDay(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	d := deps(root, cache, t.TempDir(), g, fakeKernel{})
+	Run(context.Background(), d, inv)
+	for _, tc := range []struct {
+		at      time.Time
+		scanned bool
+	}{
+		{time.Date(2026, 11, 15, 0, 30, 0, 0, time.FixedZone("CET", 3600)), false}, // 23:30 UTC
+		{now.Add(24 * time.Hour), true},
+	} {
+		g.catalogs = nil
+		d.Now, d.RunDir = func() time.Time { return tc.at }, t.TempDir()
+		Run(context.Background(), d, inv)
+		if shop := "dir:" + filepath.Join(root, "srv/shop"); slices.Contains(g.catalogs, shop) != tc.scanned {
+			t.Errorf("at %s scanned %q", tc.at, g.catalogs)
+		}
+	}
+}
+
 func TestAuditReadsBinariesThroughTheProcess(t *testing.T) {
 	// A service with PrivateTmp extracted a native library into its own /tmp, and runs an
 	// executable from it: the host's /tmp has neither.

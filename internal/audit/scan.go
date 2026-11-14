@@ -125,6 +125,12 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if err != nil {
 		return nil, counts{}, err
 	}
+	if key != "" {
+		// The SBOM of an app directory that changed while Grype read it is of neither key.
+		if again, _, err := au.cacheKey(o); err != nil || again != key {
+			key = ""
+		}
+	}
 	au.cacheIfVerified(ctx, key, files, data, rep, rawName(o.ID, ".verify"))
 	return rep, n, nil
 }
@@ -206,9 +212,10 @@ func rejected(err error) error {
 // packages otherwise than a scan, so the SBOM is matched once, exactly as it would be cached, as
 // name.cdx.json in the scan folder; grype.Matchable first rules out the cases known to differ.
 // An origin whose SBOM is not cached is scanned every run. When files is set, every package must
-// have been read from one of them: an app directory's key hashes only its own lockfiles and
-// manifests, and Grype also reads nested lockfiles and virtual environments, which would change
-// unseen. The cache only saves time, so a failed match or write is not an error.
+// have been read from one of them, the lockfiles and manifests whose content an app directory's
+// key hashes: the rest of its tree is fingerprinted by size, inode and ctime only, which a file
+// rewritten in place within one tick of a coarse file system clock keeps. The cache only saves
+// time, so a failed match or write is not an error.
 func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []string, data []byte, scan *grype.Report, name string) {
 	if key == "" {
 		return
@@ -264,9 +271,9 @@ func sameMatches(a, b *grype.Report) bool {
 }
 
 // cacheKey is an origin's SBOM cache key (spec section 6.2), or "" when it is cataloged every
-// run: an app directory without a lockfile. For an app directory it also returns the files the
-// key hashes, as Grype names its locations. A binary's or jar's key holds its file name too,
-// because the SBOM depends on it (see source).
+// run, such as an app directory without a lockfile (see appDirKey). For an app directory it also
+// returns the files the key hashes, as Grype names its locations. A binary's or jar's key holds
+// its file name too, because the SBOM depends on it (see source).
 func (au *auditor) cacheKey(o inventory.Origin) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
@@ -277,7 +284,7 @@ func (au *auditor) cacheKey(o inventory.Origin) (string, []string, error) {
 		if o.Jar {
 			return keyOf("jar", o.SHA256, fileName(o)), nil, nil
 		}
-		return appDirKey(filepath.Join(au.d.Root, o.Path))
+		return appDirKey(filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"))
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }

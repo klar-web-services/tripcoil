@@ -4,11 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
@@ -100,12 +102,17 @@ var (
 // app is a few MB.
 const maxLockfile = 64 << 20
 
-// appDirKey is the cache key of an app directory: its path and the hashes of the lockfiles and
-// manifests in it, which it returns too, as Grype names locations ("/package-lock.json").
-// Without a lockfile there is no key, and the directory is cataloged every run; so too when one
-// of the files is not a regular file of a real file system (Grype skips those) or is too large.
-func appDirKey(dir string) (string, []string, error) {
-	parts := []string{dir}
+// maxTreeEntries is the most entries of an app directory that its key covers.
+var maxTreeEntries = 200_000 // lowered by tests
+
+// appDirKey is the cache key of an app directory: its path, the UTC day, the fingerprint of its
+// tree (see treeFingerprint) and the hashes of the lockfiles and manifests in it, which it returns
+// too, as Grype names locations ("/package-lock.json"). The day bounds how stale a cached SBOM can
+// be: every app directory is cataloged at least daily. Without a lockfile there is no key, and the
+// directory is cataloged every run; so too when one of the files is not a regular file of a real
+// file system (Grype skips those) or is too large, or when the tree cannot be fingerprinted.
+func appDirKey(dir, day string) (string, []string, error) {
+	parts := []string{dir, day}
 	var files []string
 	locked := false
 	for _, name := range append(append([]string{}, appLockfiles...), appManifests...) {
@@ -124,5 +131,44 @@ func appDirKey(dir string) (string, []string, error) {
 	if !locked {
 		return "", nil, nil
 	}
-	return keyOf("appdir", parts...), files, nil
+	tree, err := treeFingerprint(dir)
+	if err != nil {
+		return "", nil, nil
+	}
+	return keyOf("appdir", append(parts, tree)...), files, nil
+}
+
+// treeFingerprint hashes the path, type, size, inode and ctime of every entry below dir, without
+// following symbolic links: Grype does not follow them out of the directory either. Unlike mtime,
+// ctime changes on every write or rename, and users cannot set it: npm writes package files with
+// a fixed mtime. A directory of more than maxTreeEntries entries has no fingerprint.
+func treeFingerprint(dir string) (string, error) {
+	h := sha256.New()
+	n := 0
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case path == dir && !d.IsDir():
+			return fmt.Errorf("%s is not a directory", dir) // such as a link to one
+		}
+		if n++; n > maxTreeEntries {
+			return fmt.Errorf("%s has more than %d entries", dir, maxTreeEntries)
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			return fmt.Errorf("%s has no inode", path)
+		}
+		rel, _ := filepath.Rel(dir, path)
+		fmt.Fprintf(h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, fi.Mode().Type(), fi.Size(), st.Ino, st.Ctim.Nano())
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
