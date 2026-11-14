@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -92,6 +93,29 @@ func TestGrypeStopsAtTheCacheFloor(t *testing.T) {
 		cacheSpace = func(string) (uint64, uint64, error) { return free, 10000, nil } // floor 1000
 		if got := r.HasRoom(t.TempDir()); got != room {
 			t.Errorf("%d bytes free of 10000: room %v, want %v", free, got, room)
+		}
+	}
+}
+
+// Grype reads a copy only as a file and an app directory only as a directory, never as an image:
+// its file: source takes any file that holds a docker save archive for an image, and dir: any
+// directory that holds an OCI layout, and both unpack the image's layers. Only the package
+// database's staging root, which Tripcoil writes, and images are scanned otherwise.
+func TestUserFilesAreScannedAsPlainFilesAndDirectories(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if len(g.catalogs) != 8 {
+		t.Fatalf("cataloged %q", g.catalogs)
+	}
+	for _, source := range g.catalogs {
+		scheme, rest, _ := strings.Cut(source, ":")
+		switch {
+		case scheme == "local-file" && strings.HasPrefix(rest, filepath.Join(cache, "scan")+"/"):
+		case scheme == "local-directory" && strings.HasPrefix(rest, root+"/"):
+		case source == "dir:"+filepath.Join(cache, "staging"), source == "docker:sha256:1111":
+		default:
+			t.Errorf("Grype scanned %s", source)
 		}
 	}
 }

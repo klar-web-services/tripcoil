@@ -221,3 +221,17 @@ func TestGrypeStopsWhenTheCacheRunsLow(t *testing.T) {
 		t.Fatalf("with room: %v", err)
 	}
 }
+
+// The plain file and directory sources are given to Grype by absolute path too.
+func TestScanTakesPlainSourcesByAbsolutePath(t *testing.T) {
+	for _, scheme := range []string{"local-file:", "local-directory:"} {
+		r, dir, log := newRunner(t)
+		if _, err := r.Scan(context.Background(), scheme+"relative/x", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+			t.Fatal(err)
+		}
+		abs, _ := filepath.Abs("relative/x")
+		if got := args(t, log); got[0] != scheme+abs {
+			t.Errorf("source %q, want %q", got[0], scheme+abs)
+		}
+	}
+}

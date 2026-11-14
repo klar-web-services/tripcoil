@@ -63,7 +63,7 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 			return nil, err
 		}
 	}
-	if path, ok := strings.CutPrefix(source, "file:"); ok {
+	if path, ok := strings.CutPrefix(source, "local-file:"); ok {
 		if _, err := os.Stat(path); err != nil {
 			return nil, err
 		}

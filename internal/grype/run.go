@@ -37,9 +37,9 @@ type Runner struct {
 	HasRoom func(dir string) bool
 }
 
-// Scan catalogs a source, such as "dir:/srv/shop", "file:/path" or "docker:sha256:…", and
-// matches it: it writes Grype's JSON report to raw and the SBOM, as CycloneDX JSON, to sbom, and
-// parses the report. When Grype fails, it leaves both files empty.
+// Scan catalogs a source, such as "local-directory:/srv/shop", "local-file:/path" or
+// "docker:sha256:…", and matches it: it writes Grype's JSON report to raw and the SBOM, as
+// CycloneDX JSON, to sbom, and parses the report. When Grype fails, it leaves both files empty.
 func (r *Runner) Scan(ctx context.Context, source, raw, sbom string) (*Report, error) {
 	if err := r.run(ctx, []string{source, "-o", "json=" + raw, "-o", "cyclonedx-json=" + sbom}, io.Discard); err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	}
 	args = append([]string{}, args...)
 	for i, a := range args {
-		for _, prefix := range []string{"dir:", "file:", "sbom:"} {
+		for _, prefix := range []string{"dir:", "file:", "local-directory:", "local-file:", "sbom:"} {
 			if rest, ok := strings.CutPrefix(a, prefix); ok {
 				abs, err := filepath.Abs(rest)
 				if err != nil {

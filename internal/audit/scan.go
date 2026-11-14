@@ -306,14 +306,16 @@ func fileName(o inventory.Origin) string {
 // source is what Grype scans for an origin: a verified copy of a binary or jar, an app directory,
 // or an image by ID from the local Docker daemon. A copy is scan/<sha>/<file name>, because
 // Syft's Java cataloger and binary classifiers go by the file name (*.jar, python*, node, ...).
-// cleanup removes it.
+// cleanup removes it. Users control copies and app directories, so Grype reads them only as a
+// file and a directory: its file: and dir: sources also take any file that holds a docker save
+// or OCI archive, and any directory that holds an OCI layout, for an image, and unpack its layers.
 func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func(), error) {
 	none := func() {}
 	switch {
 	case o.Kind == inventory.OriginImage:
 		return "docker:" + o.ImageID, none, nil
 	case o.Kind == inventory.OriginAppDir && !o.Jar:
-		return "dir:" + filepath.Join(au.d.Root, o.Path), none, nil
+		return "local-directory:" + filepath.Join(au.d.Root, o.Path), none, nil
 	}
 	dir := filepath.Join(au.scanDir(), o.SHA256)
 	path := filepath.Join(dir, fileName(o))
@@ -328,7 +330,7 @@ func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func
 		os.RemoveAll(dir)
 		return "", none, err
 	}
-	return "file:" + path, func() { os.RemoveAll(dir) }, nil
+	return "local-file:" + path, func() { os.RemoveAll(dir) }, nil
 }
 
 // binaryFile puts the binary's content at path: the Inventory's copy of a replaced file, or a
