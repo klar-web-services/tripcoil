@@ -2,6 +2,7 @@ package run
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -118,6 +119,15 @@ func TestSubfolderShareAndWriteFile(t *testing.T) {
 		if gid < 0 {
 			t.Skip("needs a supplementary group or root to tell the agent group from the primary group")
 		}
+	}
+	// A user namespace that maps only the process's own IDs, as in a rootless container, leaves
+	// every other gid unmapped.
+	probe := filepath.Join(t.TempDir(), "probe")
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(probe, -1, gid); errors.Is(err, syscall.EINVAL) {
+		t.Skipf("gid %d is not mapped in this user namespace (%v), so no file can get a group other than the primary one", gid, err)
 	}
 	oldGID := AgentGID
 	AgentGID = func() (int, bool) { return gid, true }
