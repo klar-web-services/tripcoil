@@ -213,6 +213,17 @@ func (f FS) SameRootAsInit(pid int) (bool, error) {
 	return a == b, nil
 }
 
+// RootDir returns the process's root directory as seen from the host root, such as /run/sshd for
+// a chrooted process.
+func (f FS) RootDir(pid int) (string, error) {
+	target, err := os.Readlink(f.proc(pid, "root"))
+	if err != nil {
+		return "", err
+	}
+	root, _ := strings.CutSuffix(target, " (deleted)")
+	return root, nil
+}
+
 // ExeFileID identifies the running executable's file (through /proc, so also in another root).
 func (f FS) ExeFileID(pid int) (FileID, error) {
 	return f.statID(f.proc(pid, "exe"))

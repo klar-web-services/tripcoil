@@ -299,3 +299,14 @@ func TestMapFileID(t *testing.T) {
 		t.Fatalf("%+v, want %+v", got, want)
 	}
 }
+
+func TestRootDir(t *testing.T) {
+	f, root := fixture(t)
+	proc(t, root, 80, nil, map[string]string{"root": "/run/sshd"})
+	proc(t, root, 81, nil, map[string]string{"root": "/srv/jail (deleted)"})
+	for pid, want := range map[int]string{80: "/run/sshd", 81: "/srv/jail"} {
+		if got, err := f.RootDir(pid); err != nil || got != want {
+			t.Errorf("%d: %q %v, want %q", pid, got, err, want)
+		}
+	}
+}

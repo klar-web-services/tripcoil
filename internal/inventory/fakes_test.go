@@ -28,6 +28,7 @@ type fakeProc struct {
 	cgroup    string // /proc/<pid>/cgroup content
 	maps      []procfs.Mapping
 	otherRoot bool
+	root      string                   // what /proc/<pid>/root reads; "" is "/"
 	exeData   string                   // what /proc/<pid>/exe reads
 	mapData   map[string]string        // path -> what map_files reads
 	mapIDs    map[string]procfs.FileID // path -> device and inode of the mapped file
@@ -86,6 +87,12 @@ func (s fakeSource) StartTime(pid int) (time.Time, error) {
 func (s fakeSource) Cgroup(pid int) (string, error)         { return s[pid].cgroup, nil }
 func (s fakeSource) Maps(pid int) ([]procfs.Mapping, error) { return s[pid].maps, nil }
 func (s fakeSource) SameRootAsInit(pid int) (bool, error)   { return !s[pid].otherRoot, nil }
+func (s fakeSource) RootDir(pid int) (string, error) {
+	if s[pid].root == "" {
+		return "/", nil
+	}
+	return s[pid].root, nil
+}
 func (s fakeSource) OpenExe(pid int) (io.ReadCloser, error) {
 	return s[pid].open(s[pid].exeData, s[pid].exeID)
 }

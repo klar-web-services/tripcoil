@@ -31,6 +31,7 @@ type Source interface {
 	Cgroup(pid int) (string, error)
 	Maps(pid int) ([]procfs.Mapping, error)
 	SameRootAsInit(pid int) (bool, error)
+	RootDir(pid int) (string, error)
 	OpenExe(pid int) (io.ReadCloser, error)
 	OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error)
 }
@@ -159,7 +160,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 	default:
 		if same, err := c.src.SameRootAsInit(pid); err == nil && !same {
 			p.otherRoot = true
-			if !c.runsHostFile(pid, exe) {
+			if !c.runsHostFile(pid, exe, deleted) {
 				p.unresolved = "it runs in another root file system (a container runtime other than Docker, systemd-nspawn or a chroot)"
 			}
 		}
@@ -196,10 +197,19 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 }
 
 // runsHostFile reports whether a process in another root runs the host's own file at exe, as a
-// chrooted daemon does (sshd's pre-authentication child, Postfix's daemons). Such a process is
-// resolved like a host process: its executable is the host's, and so are the libraries it maps
-// that are the host's files. A container that runs a bind-mounted host executable maps its own.
-func (c *processCollector) runsHostFile(pid int, exe string) bool {
+// chrooted daemon does (sshd's pre-authentication child, Postfix's daemons, haproxy): it executed
+// that file before it chrooted, so the file lies outside its root. Such a process is resolved
+// like a host process: its executable is the host's, and so are the libraries it maps that are
+// the host's files. A container that runs a bind-mounted host executable maps its own. A process
+// in a plain chroot runs a file inside its root, whose packages the host does not know.
+func (c *processCollector) runsHostFile(pid int, exe string, deleted bool) bool {
+	root, err := c.src.RootDir(pid)
+	if err != nil || root == "/" || within(exe, root) {
+		return false
+	}
+	if deleted {
+		return true // the host's file at exe was replaced, as by an upgrade of the daemon
+	}
 	id, err := c.src.ExeFileID(pid)
 	return err == nil && c.isHostFile(exe, id)
 }
