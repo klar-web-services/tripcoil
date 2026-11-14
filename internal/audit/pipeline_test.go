@@ -198,3 +198,48 @@ func TestAuditKernelDataUpdateFailed(t *testing.T) {
 		t.Fatalf("warnings %+v", a.Warnings)
 	}
 }
+
+// Readers change some files of an RPM database that no reader needs: SQLite's shared-memory index,
+// which SQLite rebuilds from the write-ahead log, and Berkeley DB's environment regions, which
+// every rpm query rewrites on RHEL 8. They are neither staged nor keyed, so that an SBOM is
+// reused. The write-ahead log can hold committed data, and is both.
+func TestStagePackageDBRPMLeavesOutWhatReadersChange(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		database, readers  []string
+		staged, keyChanges []string
+	}{
+		{"sqlite", []string{"rpmdb.sqlite", "rpmdb.sqlite-wal"}, []string{"rpmdb.sqlite-shm"},
+			[]string{"etc/os-release", "var/lib/rpm/rpmdb.sqlite", "var/lib/rpm/rpmdb.sqlite-wal"}, []string{"rpmdb.sqlite-wal"}},
+		{"berkeley db", []string{"Packages", "Name"}, []string{"__db.001", "__db.002", "__db.003"},
+			[]string{"etc/os-release", "var/lib/rpm/Name", "var/lib/rpm/Packages"}, []string{"Packages"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree0 := map[string]string{"etc/os-release": "ID=rocky\n"}
+			for _, f := range slices.Concat(tc.database, tc.readers) {
+				tree0["var/lib/rpm/"+f] = "v1"
+			}
+			root := files(t, tree0)
+			dst := t.TempDir()
+			key, err := stagePackageDB(budget(), root, osrel.RHEL, dst)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := tree(t, dst); !slices.Equal(got, tc.staged) {
+				t.Fatalf("staged %v, want %v", got, tc.staged)
+			}
+			for _, f := range tc.readers {
+				os.WriteFile(filepath.Join(root, "var/lib/rpm", f), []byte("v2, after a query"), 0o644)
+			}
+			if again, _ := stagePackageDB(budget(), root, osrel.RHEL, t.TempDir()); again != key {
+				t.Fatal("a query changed the key")
+			}
+			for _, f := range tc.keyChanges {
+				os.WriteFile(filepath.Join(root, "var/lib/rpm", f), []byte("v2, after a transaction"), 0o644)
+			}
+			if again, _ := stagePackageDB(budget(), root, osrel.RHEL, t.TempDir()); again == key {
+				t.Fatal("a transaction kept the key")
+			}
+		})
+	}
+}

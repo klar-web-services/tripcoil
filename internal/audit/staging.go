@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -31,6 +32,12 @@ var packageDBFiles = map[string][][]string{
 // /etc/debian_version.
 var releaseFiles = map[string][]string{"deb": {"etc/debian_version"}}
 
+// rpmReaderFile matches the files of an RPM database that readers change and that no reader needs,
+// which are neither staged nor keyed: SQLite's shared-memory index, which SQLite rebuilds from the
+// write-ahead log, and Berkeley DB's environment regions, which every rpm query rewrites. With
+// them, the key of RHEL 8's database changed at every run, and its SBOM was never reused.
+var rpmReaderFile = regexp.MustCompile(`/(rpmdb\.sqlite-shm|__db\.[0-9]+)$`)
+
 // stagePackageDB copies os-release and the package database of the host below root into dst, a
 // staging root that holds nothing else, and returns the SBOM cache key: the hash of what it
 // copied. Only regular files are copied: a package database file that is not one is left out,
@@ -49,6 +56,9 @@ func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst str
 				return "", err
 			}
 			for _, m := range matches {
+				if family.PackageType() == "rpm" && rpmReaderFile.MatchString(m) {
+					continue
+				}
 				rel, _ := filepath.Rel(root, m)
 				files = append(files, rel)
 			}
