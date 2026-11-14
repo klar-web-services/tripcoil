@@ -244,6 +244,9 @@ func TestPacman(t *testing.T) {
 		"pacman -Q pacman":                     out("pacman 7.1.0.r9.g54d9411-3\n"),
 	}}
 	realpath := func(p string) (string, error) {
+		if p == "/lib" {
+			return "/usr/lib", nil
+		}
 		if p == "/lib/libc.so.6" {
 			return "/usr/lib/libc.so.6", nil
 		}
@@ -324,6 +327,28 @@ func TestMissingFileIsUnowned(t *testing.T) {
 		if got, err := New(tc.typ, f.run).Owners(ctx, []string{tc.path}); err != nil || len(got) != 0 {
 			t.Errorf("%s: %+v %v", tc.typ, got, err)
 		}
+	}
+}
+
+func TestPacmanResolvesOnlyTheDirectory(t *testing.T) {
+	f := &fakeRunner{t: t, resp: map[string]Result{
+		"pacman -Qo /usr/bin/bash /tmp/evil": {
+			Stdout:   []byte("/usr/bin/bash is owned by bash 5.2.037-5\n"),
+			Stderr:   []byte("error: No package owns /tmp/evil\n"),
+			ExitCode: 1,
+		},
+	}}
+	// /tmp/evil is a symlink to /usr/bin/bash.
+	realpath := func(p string) (string, error) {
+		if p == "/tmp/evil" {
+			return "/usr/bin/bash", nil
+		}
+		return p, nil
+	}
+	got, err := pacman{run: f.run, realpath: realpath}.Owners(ctx, []string{"/usr/bin/bash", "/tmp/evil"})
+	want := map[string]Package{"/usr/bin/bash": {Name: "bash", Version: "5.2.037-5", Type: "alpm"}}
+	if err != nil || !maps.Equal(got, want) {
+		t.Fatalf("%+v %v", got, err)
 	}
 }
 

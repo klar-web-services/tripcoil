@@ -3,6 +3,7 @@ package pkgtool
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,7 +18,8 @@ var (
 
 type pacman struct {
 	run Runner
-	// realpath resolves symlinks: pacman reports the resolved path, not the one it was asked about.
+	// realpath resolves symlinks: pacman reports the path with its directory resolved, not the one
+	// it was asked about. It does not resolve the last component, and neither may we.
 	realpath func(string) (string, error)
 }
 
@@ -58,8 +60,8 @@ func (p pacman) Owners(ctx context.Context, paths []string) (map[string]Package,
 			out[path] = pkg
 			continue
 		}
-		if rp, err := p.realpath(path); err == nil {
-			if pkg, ok := reported[rp]; ok {
+		if dir, err := p.realpath(filepath.Dir(path)); err == nil {
+			if pkg, ok := reported[filepath.Join(dir, filepath.Base(path))]; ok {
 				out[path] = pkg
 			}
 		}
