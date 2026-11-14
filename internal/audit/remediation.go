@@ -2,6 +2,7 @@ package audit
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -139,8 +140,8 @@ func (r remediation) recreate(origin string) string {
 		if it.Kind != inventory.KindContainer {
 			continue
 		}
-		if c := it.Compose; c != nil && c.Project != "" && c.Service != "" {
-			how = append(how, fmt.Sprintf("%s (docker compose -p %s up -d --force-recreate %s)", it.Name, c.Project, c.Service))
+		if cmd := composeRecreate(it.Compose); cmd != "" {
+			how = append(how, fmt.Sprintf("%s (%s)", it.Name, cmd))
 		} else {
 			how = append(how, it.Name)
 		}
@@ -150,6 +151,27 @@ func (r remediation) recreate(origin string) string {
 		return "its containers"
 	}
 	return "the container " + list(how)
+}
+
+// Compose's own name rules, and a directory without shell syntax.
+var (
+	composeProject = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	composeService = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	plainDir       = regexp.MustCompile(`^/[A-Za-z0-9._/+-]*$`)
+)
+
+// composeRecreate is the command that recreates a container's Compose service, or "". The Compose
+// labels it is built from can come from the image, and an admin may run the command as root, so
+// it is only written when every part follows the rules above.
+func composeRecreate(c *inventory.Compose) string {
+	if c == nil || !composeProject.MatchString(c.Project) || !composeService.MatchString(c.Service) {
+		return ""
+	}
+	cmd := "docker compose -p " + c.Project
+	if plainDir.MatchString(c.WorkingDir) {
+		cmd += " --project-directory " + c.WorkingDir
+	}
+	return cmd + " up -d --force-recreate --no-deps " + c.Service
 }
 
 func list(names []string) string {

