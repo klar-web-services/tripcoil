@@ -35,8 +35,9 @@ var (
 	maxSystemReportSize int64 = 4 << 30   // lowered by tests
 )
 
-// spaceCheckEvery is how often HasRoom is asked while Grype runs.
-var spaceCheckEvery = 500 * time.Millisecond // lowered by tests
+// spaceCheckEvery is how often HasRoom is asked while Grype runs: a nested-jar bomb unpacks about
+// 0.9 GB in 500 ms. A check costs one statfs.
+var spaceCheckEvery = 50 * time.Millisecond // lowered by tests
 
 // Runner runs the verified Grype binary, isolated from any user or project configuration.
 type Runner struct {

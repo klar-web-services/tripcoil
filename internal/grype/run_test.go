@@ -229,6 +229,25 @@ func TestGrypeStopsWhenTheCacheRunsLow(t *testing.T) {
 	}
 }
 
+// The free-space check is asked every 50 ms while Grype runs: a nested-jar bomb unpacks about
+// 0.9 GB in 500 ms, and filled a 2 GB file system between two checks 500 ms apart.
+func TestSpaceIsCheckedOften(t *testing.T) {
+	r, dir, _ := newRunner(t, "FAKE_GRYPE_SLEEP=1")
+	var asked atomic.Int32
+	r.HasRoom = func(string) bool {
+		asked.Add(1)
+		return true
+	}
+	start := time.Now()
+	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(start)
+	if n := asked.Load(); n < int32(took/(100*time.Millisecond)) {
+		t.Fatalf("asked %d times while Grype ran for %s", n, took)
+	}
+}
+
 // A database update runs without the free-space check: it briefly needs about 3.4 GB of the cache
 // file system, which the floor does not leave on a small disk that has room for every scan.
 func TestUpdateDBDoesNotAskAboutSpace(t *testing.T) {
