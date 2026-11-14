@@ -100,13 +100,33 @@ func WriteJSON(path string, v any, mode fs.FileMode) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if err := shareWithAgent(tmp.Name()); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir flushes a directory so a rename inside it survives a power loss.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // UpdateLatest points stateDir/runs/<name> (latest, latest-reviewed) at the run folder id,
@@ -118,5 +138,8 @@ func UpdateLatest(stateDir, name, id string) error {
 	if err := os.Symlink(id, tmp); err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(runs, name))
+	if err := os.Rename(tmp, filepath.Join(runs, name)); err != nil {
+		return err
+	}
+	return syncDir(runs)
 }
