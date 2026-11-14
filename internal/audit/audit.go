@@ -150,7 +150,17 @@ func (au *auditor) run(ctx context.Context) {
 		return
 	}
 
+	// The package database first, one scan for all: the closer to the Inventory, the less of it
+	// has changed since.
 	var packages []inventory.Origin
+	for _, o := range au.inv.Origins {
+		if o.Kind == inventory.OriginPackage {
+			packages = append(packages, o)
+		}
+	}
+	if len(packages) > 0 && ctx.Err() == nil {
+		au.packages(ctx, packages)
+	}
 	for _, o := range au.inv.Origins {
 		if ctx.Err() != nil {
 			return // interrupted() records what was not scanned
@@ -158,16 +168,12 @@ func (au *auditor) run(ctx context.Context) {
 		switch o.Kind {
 		case inventory.OriginUnresolved:
 			a.Origins = append(a.Origins, OriginResult{ID: o.ID, Kind: o.Kind, Status: Unresolved, Reason: o.Reason})
-		case inventory.OriginPackage:
-			packages = append(packages, o) // one scan for all
+		case inventory.OriginPackage: // scanned above
 		case inventory.OriginKernelUpstream:
 			au.kernel(ctx, o)
 		default:
 			au.origin(ctx, o)
 		}
-	}
-	if len(packages) > 0 && ctx.Err() == nil {
-		au.packages(ctx, packages)
 	}
 	slices.SortFunc(a.Origins, func(x, y OriginResult) int { return cmp.Compare(x.ID, y.ID) })
 	slices.SortFunc(a.Findings, func(x, y Finding) int {

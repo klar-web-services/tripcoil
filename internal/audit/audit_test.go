@@ -309,6 +309,33 @@ func TestAuditPackageScanFailure(t *testing.T) {
 	}
 }
 
+// The kernel package was upgraded in place, under the same name, after the Inventory: only the
+// kernel's origin fails, and the other packages are audited. The package database is scanned
+// first, which keeps that window short.
+func TestAuditKernelPackageUpgradedSinceTheInventory(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	staging := "dir:" + filepath.Join(cache, "staging")
+	comps := slices.Clone(g.sboms[staging])
+	comps[1].Version = "6.1.124-1"
+	comps[1].PURL = "pkg:deb/debian/linux-image-6.1.0-28-amd64@6.1.124-1?arch=amd64&distro=debian-12"
+	g.sboms[staging] = comps
+	for range 2 { // cataloged, then matched from the cached SBOM
+		a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+		st := statuses(a)
+		if st[libsslO] != Scanned || st[kernelO] != ScanFailed || a.Status != Partial || len(a.Errors) != 1 ||
+			!strings.Contains(a.Errors[0].Message, "the kernel package linux-image-6.1.0-28-amd64 6.1.123-1 changed since the inventory") {
+			t.Fatalf("audit %s, statuses %v, errors %+v", a.Status, st, a.Errors)
+		}
+		if f := byVuln(a)["CVE-2026-1234"]; f.Origin != libsslO {
+			t.Fatalf("libssl3 is audited: %+v", a.Findings)
+		}
+	}
+	if g.catalogs[0] != staging {
+		t.Errorf("scanned %q: the package database comes first", g.catalogs)
+	}
+}
+
 func TestAuditCannotMatch(t *testing.T) {
 	for _, tc := range []struct {
 		name string

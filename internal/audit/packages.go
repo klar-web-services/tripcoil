@@ -45,10 +45,16 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	}
 	for _, o := range origins {
 		res := OriginResult{ID: o.ID, Kind: o.Kind, Status: Scanned, Packages: counts[o.ID], Raw: raw}
+		_, _, kernel := au.kernelPackage(o)
 		switch {
 		case rep.Distro == "":
 			// Without a distribution, no distribution data applies, and no match would come.
 			res.Status, res.Reason = Unidentified, "Grype did not recognise the distribution, so its vulnerability data does not apply"
+		case res.Packages == 0 && kernel:
+			// It is counted at its running version only when runningKernel found it at the
+			// version the Inventory saw, and changed it.
+			au.failOrigin(o, fmt.Errorf("the kernel package %s %s changed since the inventory, so the kernel is audited at the next run", o.Name, o.Version))
+			continue
 		case res.Packages == 0:
 			res.Status, res.Reason = Unidentified, "the package tool knows it, but Grype did not read it from the package database"
 		}
@@ -201,7 +207,9 @@ func (au *auditor) kernelPackage(o inventory.Origin) (running, source string, ok
 }
 
 // runningKernel changes the running kernel's package in an SBOM as kernelPackage says, and reports
-// whether it changed anything.
+// whether it changed anything. When the SBOM does not hold the package at the version the
+// Inventory saw, because it was upgraded in place since, the SBOM stays as it is: packages()
+// then fails the kernel's origin alone.
 func (au *auditor) runningKernel(data []byte) ([]byte, bool, error) {
 	for _, o := range au.inv.Origins {
 		running, source, ok := au.kernelPackage(o)
@@ -209,11 +217,8 @@ func (au *auditor) runningKernel(data []byte) ([]byte, bool, error) {
 			continue
 		}
 		out, n, err := grype.SetKernel(data, o.Name, o.Version, running, source)
-		if err != nil {
-			return nil, false, err
-		}
-		if n == 0 {
-			return nil, false, fmt.Errorf("the kernel package %s %s is not in the package database", o.Name, o.Version)
+		if err != nil || n == 0 {
+			return data, false, err
 		}
 		return out, true, nil
 	}
