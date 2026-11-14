@@ -72,14 +72,14 @@ func (r remediation) line(f Finding) string {
 	case !fixed:
 		return noFix(f)
 	}
-	to, above := fixVersion(f)
-	upgradeTo := to
-	if above {
-		upgradeTo += " or later"
+	fix, above := fixVersion(f)
+	orLater := fix
+	if !above {
+		orLater += " or later"
 	}
 	switch o.Kind {
 	case inventory.OriginPackage:
-		line := fmt.Sprintf("Upgrade %s to %s", f.Package.Name, upgradeTo)
+		line := fmt.Sprintf("Upgrade %s to %s", f.Package.Name, fix)
 		if c := r.packageUpgrade(f.Package.Name); c != "" {
 			line += " (" + c + ")"
 		}
@@ -89,28 +89,52 @@ func (r remediation) line(f Finding) string {
 		}
 		return line
 	case inventory.OriginBinary:
-		return fmt.Sprintf("Replace or rebuild %s with %s %s or later%s.", named(o.Paths, "the binary"), f.Package.Name, to, r.restart(f.Origin))
+		return fmt.Sprintf("Replace or rebuild %s with %s %s%s.", named(o.Paths, "the binary"), f.Package.Name, orLater, r.restart(f.Origin))
 	case inventory.OriginAppDir:
-		return fmt.Sprintf("Upgrade %s in %s to %s%s.", f.Package.Name, o.Path, upgradeTo, r.restart(f.Origin))
+		return fmt.Sprintf("Upgrade %s in %s to %s%s.", f.Package.Name, o.Path, fix, r.restart(f.Origin))
 	case inventory.OriginImage:
-		return fmt.Sprintf("Rebuild %s or pull a newer image with %s %s or later, then recreate %s.", imageName(o), f.Package.Name, to, r.recreate(f.Origin))
+		return fmt.Sprintf("Rebuild %s or pull a newer image with %s %s, then recreate %s.", imageName(o), f.Package.Name, orLater, r.recreate(f.Origin))
 	}
-	return fmt.Sprintf("Upgrade %s to %s.", f.Package.Name, upgradeTo)
+	return fmt.Sprintf("Upgrade %s to %s.", f.Package.Name, fix)
 }
 
-// fixVersion is the smallest fix version above the installed one, and true. When none is above
-// it, or the installed version is unknown, it is every fix version, as Grype lists them.
+// fixVersion names the smallest fix version above the installed one, "or later", and the other
+// fix versions above it, which fix other branches, and true. When none is above it, or the
+// installed version is unknown, it is every fix version, as Grype lists them.
 func fixVersion(f Finding) (string, bool) {
-	best := ""
+	installed, typ := f.Package.Version, f.Package.Type
+	// Debian's fixed versions are its source packages', which have no epoch where the binary
+	// package has one: bsdutils 1:2.38.1-5+b1 is fixed in util-linux 2.38.1-5+deb12u1.
+	installedEpoch, _, ok := strings.Cut(installed, ":")
+	adoptEpoch := typ == "deb" && ok && allDigits(installedEpoch)
+	key := func(v string) string {
+		if e, _, ok := strings.Cut(v, ":"); adoptEpoch && !(ok && allDigits(e)) {
+			return installedEpoch + ":" + v
+		}
+		return v
+	}
+	var above []string
 	for _, v := range f.Fix.Versions {
-		if f.Package.Version != "" && compareVersions(f.Package.Type, v, f.Package.Version) > 0 && (best == "" || compareVersions(f.Package.Type, v, best) < 0) {
-			best = v
+		if installed != "" && compareVersions(typ, key(v), installed) > 0 && !slices.Contains(above, v) {
+			above = append(above, v)
 		}
 	}
-	if best == "" {
+	if len(above) == 0 {
 		return strings.Join(f.Fix.Versions, " or "), false
 	}
-	return best, true
+	slices.SortStableFunc(above, func(x, y string) int { return compareVersions(typ, key(x), key(y)) })
+	fix := above[0] + " or later"
+	if len(above) > 1 {
+		fix += " (also fixed in " + andList(above[1:]) + ")"
+	}
+	return fix, true
+}
+
+func andList(s []string) string {
+	if len(s) == 1 {
+		return s[0]
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " and " + s[len(s)-1]
 }
 
 func noFix(f Finding) string {
