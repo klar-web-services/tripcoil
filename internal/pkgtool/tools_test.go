@@ -29,8 +29,8 @@ func out(s string) Result { return Result{Stdout: []byte(s)} }
 func TestDpkgOwners(t *testing.T) {
 	f := &fakeRunner{t: t, resp: map[string]Result{
 		"dpkg-query -S /usr/bin/dpkg /usr/lib/x86_64-linux-gnu/libc.so.6 /bin/sh": {
-			Stdout: []byte("dpkg: /usr/bin/dpkg\ndiversion by dash from: /bin/sh\ndiversion by dash to: /bin/sh.distrib\n" +
-				"local diversion from: /usr/bin/dpkg\nlocal diversion to: /usr/bin/dpkg.real\ndash: /bin/sh\n"),
+			Stdout: []byte("local diversion from: /usr/bin/dpkg\nlocal diversion to: /usr/bin/dpkg.real\ndpkg: /usr/bin/dpkg\n" +
+				"diversion by dash from: /bin/sh\ndiversion by dash to: /bin/sh.distrib\ndash: /bin/sh\n"),
 			Stderr:   []byte("dpkg-query: no path found matching pattern /usr/lib/x86_64-linux-gnu/libc.so.6\n"),
 			ExitCode: 1,
 		},
@@ -41,11 +41,39 @@ func TestDpkgOwners(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]Package{
-		"/usr/bin/dpkg": {Name: "dpkg", Version: "1.21.23", Arch: "amd64", Type: "deb"},
-		"/bin/sh":       {Name: "dash", Version: "0.5.12-2", Arch: "amd64", Type: "deb"},
+		"/bin/sh": {Name: "dash", Version: "0.5.12-2", Arch: "amd64", Type: "deb"},
 	}
 	if !maps.Equal(got, want) {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestDpkgDiversions(t *testing.T) {
+	f := &fakeRunner{t: t, resp: map[string]Result{
+		"dpkg-query -S /bin/sh":                    out("diversion by dash from: /bin/sh\ndiversion by dash to: /bin/sh.distrib\nbash: /bin/sh\n"),
+		"dpkg-query -W -f " + dpkgFormat + " bash": out("ii \tbash\tbash\tamd64\t5.2.15-2+b7\n"),
+		"dpkg-query -S /usr/sbin/nginx.distrib /usr/bin/ssh": out("local diversion from: /usr/sbin/nginx\n" +
+			"local diversion to: /usr/sbin/nginx.distrib\nopenssh-client: /usr/bin/ssh\n"),
+		"dpkg-query -W -f " + dpkgFormat + " openssh-client": out("ii \topenssh-client\topenssh-client\tamd64\t1:9.2p1-2+deb12u3\n"),
+		"dpkg-query -S /usr/lib/x86_64-linux-gnu/libGL.so.1": out("diversion by libnvidia-glvnd from: /usr/lib/x86_64-linux-gnu/libGL.so.1\n" +
+			"diversion by libnvidia-glvnd to: /usr/lib/x86_64-linux-gnu/libGL.so.1.distrib\n" +
+			"libgl1:amd64, libnvidia-glvnd:amd64: /usr/lib/x86_64-linux-gnu/libGL.so.1\n"),
+		"dpkg-query -W -f " + dpkgFormat + " libgl1:amd64 libnvidia-glvnd:amd64": out("ii \tlibgl1:amd64\tlibgl1\tamd64\t1.6.0-1\n" +
+			"ii \tlibnvidia-glvnd:amd64\tlibnvidia-glvnd\tamd64\t535.216.01-1\n"),
+	}}
+	d := dpkg{f.run}
+	if got, err := d.Owners(ctx, []string{"/bin/sh"}); err != nil || len(got) != 0 {
+		t.Errorf("diverted by a package that is not a listed owner: %+v %v", got, err)
+	}
+	got, err := d.Owners(ctx, []string{"/usr/sbin/nginx.distrib", "/usr/bin/ssh"})
+	want := map[string]Package{"/usr/bin/ssh": {Name: "openssh-client", Version: "1:9.2p1-2+deb12u3", Arch: "amd64", Type: "deb"}}
+	if err != nil || !maps.Equal(got, want) {
+		t.Errorf("a diversion of another path: %+v %v", got, err)
+	}
+	got, err = d.Owners(ctx, []string{"/usr/lib/x86_64-linux-gnu/libGL.so.1"})
+	want = map[string]Package{"/usr/lib/x86_64-linux-gnu/libGL.so.1": {Name: "libnvidia-glvnd", Version: "535.216.01-1", Arch: "amd64", Type: "deb"}}
+	if err != nil || !maps.Equal(got, want) {
+		t.Errorf("diverted by an architecture-qualified listed owner: %+v %v", got, err)
 	}
 }
 

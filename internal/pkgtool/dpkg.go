@@ -26,6 +26,9 @@ func (d dpkg) Check(ctx context.Context) error {
 
 func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, error) {
 	owners := map[string][]string{} // path -> listed binary package names, such as libc6:amd64
+	// path -> the package that diverted it, "" for a local diversion: the file there is that
+	// package's own copy (if it is a listed owner), or the admin's.
+	divertedBy := map[string]string{}
 	for _, chunk := range chunks(paths, 200) {
 		res, err := d.run(ctx, "dpkg-query", append([]string{"-S"}, chunk...)...)
 		if err != nil {
@@ -38,8 +41,20 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 		for _, p := range chunk {
 			want[p] = true
 		}
+		// A path's diversion lines come directly before its owner line.
+		var divFrom, divBy string
 		for _, line := range lines(res.Stdout) {
-			if strings.HasPrefix(line, "diversion by ") || strings.HasPrefix(line, "local diversion ") {
+			if from, ok := strings.CutPrefix(line, "local diversion from: "); ok {
+				divFrom, divBy = from, ""
+				continue
+			}
+			if rest, ok := strings.CutPrefix(line, "diversion by "); ok {
+				if by, from, ok := strings.Cut(rest, " from: "); ok {
+					divFrom, divBy = from, by
+				}
+				continue
+			}
+			if strings.HasPrefix(line, "local diversion ") {
 				continue
 			}
 			i := strings.Index(line, ": /")
@@ -47,6 +62,8 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 				continue
 			}
 			path := line[i+2:]
+			from, by := divFrom, divBy
+			divFrom, divBy = "", ""
 			if !want[path] {
 				continue
 			}
@@ -55,6 +72,9 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 				names[j] = strings.TrimSpace(names[j])
 			}
 			owners[path] = names
+			if from == path {
+				divertedBy[path] = by
+			}
 		}
 	}
 	out := map[string]Package{}
@@ -66,6 +86,16 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 		return nil, err
 	}
 	for path, names := range owners {
+		if by, ok := divertedBy[path]; ok {
+			var kept []string
+			for _, n := range names {
+				// A diversion names the package without the architecture that may qualify an owner.
+				if by != "" && (n == by || strings.HasPrefix(n, by+":")) {
+					kept = append(kept, n)
+				}
+			}
+			names = kept
+		}
 		for _, name := range names {
 			if p, ok := pkgs[name]; ok {
 				out[path] = p
