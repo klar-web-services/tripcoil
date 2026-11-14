@@ -123,8 +123,8 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		rec.Add(inv.Warnings...)
 		rec.Add(inv.Notices...)
 		if err := run.WriteJSON(filepath.Join(dir, "inventory.json"), inv, 0o640); err != nil {
-			fmt.Fprintf(stderr, "%s: %v\n", problem.RunFolderUnwritable, err)
-			return 2
+			rec.Stages["inventory"] = run.StageFailed
+			rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write inventory.json: %v", err))
 		}
 	}
 	rec.Finish(d.now())

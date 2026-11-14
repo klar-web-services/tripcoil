@@ -168,3 +168,26 @@ func TestRunRefusals(t *testing.T) {
 		t.Fatalf("extra argument: exit %d", code)
 	}
 }
+
+func TestRunInventoryWriteFailed(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	d.collect = func(context.Context, string) (*inventory.Inventory, error) {
+		blocker := filepath.Join(d.stateDir, "runs", runID, "inventory.json", "x")
+		if err := os.MkdirAll(blocker, 0o750); err != nil { // a directory where inventory.json goes
+			t.Fatal(err)
+		}
+		return sampleInventory(), nil
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	rec := readRecord(t, d.stateDir)
+	if rec.Status != run.Failed || rec.ExitCode != 2 || rec.Stages["inventory"] != run.StageFailed ||
+		len(rec.Errors) != 1 || rec.Errors[0].Code != problem.RunFolderUnwritable {
+		t.Fatalf("run.json %+v", rec)
+	}
+	if target, err := os.Readlink(filepath.Join(d.stateDir, "runs", "latest")); err != nil || target != runID {
+		t.Fatalf("latest -> %q %v", target, err)
+	}
+}
