@@ -16,7 +16,13 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-var errGrypeTimeout = errors.New("grype timeout")
+var (
+	errGrypeTimeout = errors.New("grype timeout")
+	errLowSpace     = errors.New("the cache file system ran low on space while Grype ran")
+)
+
+// spaceCheckEvery is how often HasRoom is asked while Grype runs.
+var spaceCheckEvery = 500 * time.Millisecond // lowered by tests
 
 // Runner runs the verified Grype binary, isolated from any user or project configuration.
 type Runner struct {
@@ -24,6 +30,11 @@ type Runner struct {
 	CacheDir string        // Tripcoil's cache; the database lives in CacheDir/grype-db
 	Timeout  time.Duration // per invocation; default 15 minutes
 	Environ  []string      // the parent environment, usually os.Environ()
+	// HasRoom reports whether the file system that holds dir has free space above its floor. While
+	// Grype runs, it is asked about Grype's temporary directory every spaceCheckEvery, and Grype is
+	// stopped when it says no: what Grype unpacks there depends on what it scans, which users
+	// control, and a small archive can unpack to gigabytes. Nil: no check.
+	HasRoom func(dir string) bool
 }
 
 // Scan catalogs a source, such as "dir:/srv/shop", "file:/path" or "docker:sha256:…", and
@@ -164,8 +175,13 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	if timeout <= 0 {
 		timeout = 15 * time.Minute
 	}
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errGrypeTimeout)
 	defer cancel()
+	if r.HasRoom != nil {
+		go r.watchSpace(ctx, work, stop)
+	}
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = work
 	cmd.Env = isolatedEnv(environ, work)
@@ -180,6 +196,8 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	switch {
 	case context.Cause(ctx) == errGrypeTimeout:
 		return fmt.Errorf("Grype timed out after %s", timeout)
+	case context.Cause(ctx) == errLowSpace:
+		return errLowSpace
 	case ctx.Err() != nil:
 		return ctx.Err()
 	}
@@ -188,6 +206,23 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 		msg = err.Error()
 	}
 	return fmt.Errorf("Grype failed: %s", msg)
+}
+
+// watchSpace stops Grype through stop when HasRoom says that dir's file system ran low on space.
+func (r *Runner) watchSpace(ctx context.Context, dir string, stop context.CancelCauseFunc) {
+	tick := time.NewTicker(spaceCheckEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if !r.HasRoom(dir) {
+				stop(errLowSpace)
+				return
+			}
+		}
+	}
 }
 
 // configYAML is the only Grype configuration used: no update checks, a database in Tripcoil's

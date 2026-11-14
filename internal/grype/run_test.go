@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -183,4 +184,40 @@ func TestCancelWhileGrypeRuns(t *testing.T) {
 		t.Fatalf("Grype was not stopped: Scan returned after %s", took)
 	}
 	noWorkDirs(t, r)
+}
+
+// Grype is stopped when the cache file system runs low on space while it runs: what it unpacks
+// into its temporary directory depends on what it scans.
+func TestGrypeStopsWhenTheCacheRunsLow(t *testing.T) {
+	old := spaceCheckEvery
+	spaceCheckEvery = 20 * time.Millisecond
+	defer func() { spaceCheckEvery = old }()
+	r, dir, _ := newRunner(t, "FAKE_GRYPE_SLEEP=10")
+	var mu sync.Mutex
+	var asked []string
+	r.HasRoom = func(d string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		asked = append(asked, d)
+		return len(asked) < 3
+	}
+	start := time.Now()
+	_, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b"))
+	if err == nil || err.Error() != "the cache file system ran low on space while Grype ran" {
+		t.Fatalf("err %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("Grype was not stopped: Scan returned after %s", took)
+	}
+	mu.Lock()
+	if len(asked) != 3 || !strings.HasPrefix(asked[0], filepath.Join(r.CacheDir, "tmp", "grype-")) {
+		t.Fatalf("asked about %q, want Grype's temporary directory three times", asked)
+	}
+	mu.Unlock()
+	noWorkDirs(t, r)
+	r, dir, _ = newRunner(t)
+	r.HasRoom = func(string) bool { return true }
+	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+		t.Fatalf("with room: %v", err)
+	}
 }

@@ -79,3 +79,19 @@ func TestAppDirKeyNeverFollowsALockfileLink(t *testing.T) {
 		t.Fatalf("a lockfile link: %q %v", k, err)
 	}
 }
+
+// The production Scanner stops Grype at the floor that copies leave the cache file system.
+func TestGrypeStopsAtTheCacheFloor(t *testing.T) {
+	old := cacheSpace
+	defer func() { cacheSpace = old }()
+	r := NewGrype(t.TempDir()).(*grypeScanner).runner
+	if r.HasRoom == nil {
+		t.Fatal("Grype runs without a free-space check")
+	}
+	for free, room := range map[uint64]bool{1001: true, 1000: false, 0: false} {
+		cacheSpace = func(string) (uint64, uint64, error) { return free, 10000, nil } // floor 1000
+		if got := r.HasRoom(t.TempDir()); got != room {
+			t.Errorf("%d bytes free of 10000: room %v, want %v", free, got, room)
+		}
+	}
+}
