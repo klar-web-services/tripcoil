@@ -81,7 +81,9 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 		}
 		o.SHA256 = sha // a jar is keyed and copied like a binary
 	}
-	key, files, err := au.cacheKey(ctx, o)
+	// The copy and the cache key take one name: which path's file root owns can change meanwhile.
+	name := au.fileName(o)
+	key, files, err := au.cacheKey(ctx, o, name)
 	if err != nil {
 		return nil, counts{}, err
 	}
@@ -95,7 +97,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 			au.cache.remove(key)
 		}
 	}
-	source, cleanup, err := au.source(ctx, o)
+	source, cleanup, err := au.source(ctx, o, name)
 	if err != nil {
 		return nil, counts{}, err
 	}
@@ -134,7 +136,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	}
 	if key != "" {
 		// The SBOM of an app directory that changed while Grype read it is of neither key.
-		if again, _, err := au.cacheKey(ctx, o); err != nil || again != key {
+		if again, _, err := au.cacheKey(ctx, o, name); err != nil || again != key {
 			key = ""
 		}
 	}
@@ -291,17 +293,17 @@ func sameMatches(a, b *grype.Report) bool {
 // cacheKey is an origin's SBOM cache key (spec section 6.2), or "" when it is cataloged every
 // run, such as an app directory without a lockfile (see appDirKey) or with a mount below it (see
 // mountBelow). For an app directory it also returns the files the key hashes, as Grype names its
-// locations. A binary's or jar's key holds its file name too, because the SBOM depends on it (see
-// source).
-func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []string, error) {
+// locations. A binary's or jar's key holds name too, the name of its copy (see fileName), because
+// the SBOM depends on it (see source).
+func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin, name string) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
-		return keyOf("binary", o.SHA256, au.fileName(o)), nil, nil
+		return keyOf("binary", o.SHA256, name), nil, nil
 	case inventory.OriginImage:
 		return keyOf("image", o.ImageID), nil, nil
 	case inventory.OriginAppDir:
 		if o.Jar {
-			return keyOf("jar", o.SHA256, au.fileName(o)), nil, nil
+			return keyOf("jar", o.SHA256, name), nil, nil
 		}
 		return appDirKey(ctx, au.reads, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"), au.mountBelow)
 	}
@@ -374,12 +376,12 @@ func jarName(name string) string {
 }
 
 // source is what Grype scans for an origin: a verified copy of a binary or jar, an app directory,
-// or an image by ID from the local Docker daemon. A copy is scan/<sha>/<file name>, because
-// Syft's Java cataloger and binary classifiers go by the file name (*.jar, python*, node, ...).
-// cleanup removes it. Users control copies and app directories, so Grype reads them only as a
-// file and a directory: its file: and dir: sources also take any file that holds a docker save
+// or an image by ID from the local Docker daemon. A copy is scan/<sha>/<name> (see fileName),
+// because Syft's Java cataloger and binary classifiers go by the file name (*.jar, python*, node,
+// ...). cleanup removes it. Users control copies and app directories, so Grype reads them only as
+// a file and a directory: its file: and dir: sources also take any file that holds a docker save
 // or OCI archive, and any directory that holds an OCI layout, for an image, and unpack its layers.
-func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func(), error) {
+func (au *auditor) source(ctx context.Context, o inventory.Origin, name string) (string, func(), error) {
 	none := func() {}
 	switch {
 	case o.Kind == inventory.OriginImage:
@@ -388,7 +390,7 @@ func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func
 		return "local-directory:" + filepath.Join(au.d.Root, o.Path), none, nil
 	}
 	dir := filepath.Join(au.scanDir(), o.SHA256)
-	path := filepath.Join(dir, au.fileName(o))
+	path := filepath.Join(dir, name)
 	var err error
 	if o.Jar {
 		jar := filepath.Join(au.d.Root, o.Path)

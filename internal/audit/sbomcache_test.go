@@ -215,7 +215,7 @@ func TestTreeFingerprintStaysOnOneFileSystem(t *testing.T) {
 			t.Fatalf("key across a mount: %q %v", k, err)
 		}
 		au := &auditor{d: Deps{Root: "/", Now: time.Now}, reads: budget()}
-		if k, _, err := au.cacheKey(context.Background(), inventory.Origin{Kind: inventory.OriginAppDir, Path: dir}); !au.mountBelow(dir) || k != "" || err != nil {
+		if k, _, err := au.cacheKey(context.Background(), inventory.Origin{Kind: inventory.OriginAppDir, Path: dir}, ""); !au.mountBelow(dir) || k != "" || err != nil {
 			t.Fatalf("mountinfo does not list the mount below %s: %q %v", dir, k, err)
 		}
 		return
@@ -258,7 +258,7 @@ func TestAppDirMountBelow(t *testing.T) {
 	au := &auditor{d: Deps{Root: root, Now: func() time.Time { return now }}, reads: budget()}
 	key := func(dir string) string {
 		t.Helper()
-		k, _, err := au.cacheKey(context.Background(), inventory.Origin{Kind: inventory.OriginAppDir, Path: dir})
+		k, _, err := au.cacheKey(context.Background(), inventory.Origin{Kind: inventory.OriginAppDir, Path: dir}, "")
 		if err != nil {
 			t.Fatal(err)
 		}

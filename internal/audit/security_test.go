@@ -166,10 +166,10 @@ func TestCopyNamesAreNeverArchives(t *testing.T) {
 		t.Fatalf("cataloged %q", g.catalogs)
 	}
 	au := &auditor{d: Deps{Root: root, Now: time.Now}, reads: budget()}
-	if k, _, _ := au.cacheKey(context.Background(), *o); k != keyOf("binary", o.SHA256, "libx.so.1_tar.gz") {
+	if k, _, _ := au.cacheKey(context.Background(), *o, au.fileName(*o)); k != keyOf("binary", o.SHA256, "libx.so.1_tar.gz") {
 		t.Errorf("cache key %s", k)
 	}
-	if k, _, _ := au.cacheKey(context.Background(), inv.Origins[7]); k != keyOf("jar", "", "app.jar") {
+	if k, _, _ := au.cacheKey(context.Background(), inv.Origins[7], au.fileName(inv.Origins[7])); k != keyOf("jar", "", "app.jar") {
 		t.Errorf("jar cache key %s", k)
 	}
 }
@@ -208,7 +208,7 @@ func TestJarCopyNamesAreNeverOtherArchives(t *testing.T) {
 		t.Fatalf("cataloged %q", g.catalogs)
 	}
 	au := &auditor{d: Deps{Root: root, Now: time.Now}, reads: budget()}
-	if k, _, _ := au.cacheKey(context.Background(), *o); k != keyOf("jar", "", "app_tar.gz.jar") {
+	if k, _, _ := au.cacheKey(context.Background(), *o, au.fileName(*o)); k != keyOf("jar", "", "app_tar.gz.jar") {
 		t.Errorf("cache key %s", k)
 	}
 }
@@ -331,13 +331,73 @@ func TestCopyIsNamedAfterRootsFile(t *testing.T) {
 		t.Fatalf("cataloged %q: %+v", g.catalogs, a.Origins)
 	}
 	au := &auditor{d: Deps{Root: "/", Now: time.Now}, reads: budget()}
-	if k, _, _ := au.cacheKey(context.Background(), o); k != keyOf("binary", o.SHA256, filepath.Base(system)) {
+	if k, _, _ := au.cacheKey(context.Background(), o, au.fileName(o)); k != keyOf("binary", o.SHA256, filepath.Base(system)) {
 		t.Errorf("cache key %s", k)
 	}
 	// Without a file of root's, the first path names the copy.
 	o.Paths = []string{mine}
-	if k, _, _ := au.cacheKey(context.Background(), o); k != keyOf("binary", o.SHA256, "x") {
+	if k, _, _ := au.cacheKey(context.Background(), o, au.fileName(o)); k != keyOf("binary", o.SHA256, "x") {
 		t.Errorf("cache key %s", k)
+	}
+}
+
+// The copy Grype scans and the cache key take one name, chosen once per origin: whether a path of
+// the origin holds root's file can change while it is scanned, and an SBOM cached under the name of
+// root's file would be of a copy named otherwise. Here a directory link changes to a user's copy
+// while the cached SBOM is matched and rejected, and back while Grype scans.
+func TestCopyAndCacheKeyTakeOneName(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("every file is root's")
+	}
+	var system string
+	for _, p := range []string{"/usr/bin/true", "/usr/bin/env", "/usr/bin/ls"} {
+		if rootOwned(p) {
+			system = p
+			break
+		}
+	}
+	if system == "" {
+		t.Skip("no file of root's to copy")
+	}
+	data, err := os.ReadFile(system)
+	if err != nil {
+		t.Skip(err)
+	}
+	dir, name := t.TempDir(), filepath.Base(system)
+	mine, theirs := filepath.Join(dir, "x"), filepath.Join(dir, "mine", name)
+	write(t, mine, string(data))
+	write(t, theirs, string(data))
+	link := filepath.Join(dir, "bin")
+	point := func(to string) {
+		os.Remove(link)
+		if err := os.Symlink(to, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	point(filepath.Dir(system))
+	o := inventory.Origin{ID: inventory.BinaryOriginID(sumOf(string(data))), Kind: inventory.OriginBinary, SHA256: sumOf(string(data)), Paths: []string{mine, filepath.Join(link, name)}}
+	inv := &inventory.Inventory{Origins: []inventory.Origin{o}}
+	cache := t.TempDir()
+	g := hostScanner("/", cache)
+	copied := "local-file:" + filepath.Join(cache, "scan", o.SHA256, name)
+	g.sboms[copied] = []grype.Component{{Name: "coreutils", Version: "9.5", PURL: "pkg:generic/coreutils@9.5"}}
+	g.sboms["local-file:"+filepath.Join(cache, "scan", o.SHA256, "x")] = g.sboms[copied]
+	Run(context.Background(), deps("/", cache, t.TempDir(), g, fakeKernel{}), inv)
+	if !slices.Equal(cachedKinds(cache), []string{"binary"}) {
+		t.Fatalf("cached %v", cachedKinds(cache))
+	}
+	g.catalogs = nil
+	g.matchErr = map[string]error{}
+	g.onMatch = func(sbom string) {
+		if strings.HasPrefix(filepath.Base(sbom), "binary-") {
+			point(filepath.Dir(theirs))
+			g.matchErr[filepath.Base(sbom)] = errors.New("Grype failed: unable to decode sbom")
+		}
+	}
+	g.scanning = func(string) { point(filepath.Dir(system)) }
+	Run(context.Background(), deps("/", cache, t.TempDir(), g, fakeKernel{}), inv)
+	if !slices.Equal(g.catalogs, []string{copied}) {
+		t.Fatalf("cataloged %q, want the copy named as the cache key %q", g.catalogs, copied)
 	}
 }
 

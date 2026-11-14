@@ -45,6 +45,7 @@ type fakeScanner struct {
 	matching   func(*grype.Report) // changes what matching an SBOM gives, as against scanning its source
 	asUsers    map[string][]bool   // by package name: what each Match of an SBOM that holds it said users control; nil: not kept
 	sbomVulns  int                 // how many vulnerabilities of 5 KB the SBOMs Scan writes hold, as Grype's repeat its matches
+	onMatch    func(sbom string)   // called as Match starts
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -123,6 +124,9 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 }
 
 func (f *fakeScanner) Match(ctx context.Context, sbom, raw string, users bool) (*grype.Report, error) {
+	if f.onMatch != nil {
+		f.onMatch(sbom)
+	}
 	if f.asUsers != nil {
 		if data, err := os.ReadFile(sbom); err == nil {
 			comps, _ := grype.SBOMPackages(data)
