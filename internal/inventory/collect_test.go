@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/osrel"
@@ -216,5 +217,40 @@ func TestCollectInterrupted(t *testing.T) {
 	}
 	if len(inv.Errors) != 2 || inv.Errors[0].Code != problem.PackageToolFailed {
 		t.Fatalf("errors %+v", inv.Errors)
+	}
+}
+
+func TestCollectDockerInsideOtherContainers(t *testing.T) {
+	d := collectDeps(t)
+	nested := func(cgroup string) *fakeProc {
+		return &fakeProc{cmdline: []string{"nginx"}, exe: "/usr/sbin/nginx", otherRoot: true, cgroup: cg(cgroup + "/system.slice/docker-" + containerID + ".scope")}
+	}
+	d.Proc = fakeSource{
+		10: hostProcesses()[10],
+		20: nested("/lxc.payload.c1"),                                   // LXD, Incus
+		21: nested("/lxc/101/ns"),                                       // Proxmox
+		22: nested("/machine.slice/systemd-nspawn@box.service/payload"), // systemd-nspawn
+	}
+	inv, err := Collect(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Errors) != 0 || inv.Status() != "ok" {
+		t.Fatalf("errors %+v: their Docker is not the host's", inv.Errors)
+	}
+	unresolved := 0
+	for _, it := range inv.Items {
+		for _, p := range it.Processes {
+			if p.PID < 20 {
+				continue
+			}
+			unresolved++
+			if o := originByID(inv.Origins, it.Origins[0]); len(it.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "another root") {
+				t.Errorf("process %d: item %+v origin %+v", p.PID, it, o)
+			}
+		}
+	}
+	if unresolved != 3 {
+		t.Fatalf("%d of the nested processes are host process items, want 3", unresolved)
 	}
 }

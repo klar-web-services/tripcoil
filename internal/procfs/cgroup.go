@@ -33,17 +33,22 @@ var dockerID = regexp.MustCompile(`(?m)(?:/docker-|/docker/)([0-9a-f]{64})(?:\.s
 // or a cgroup named like a container that anyone can create there.
 var userManager = regexp.MustCompile(`/user@[^/]*\.service/`)
 
+// nestedRuntime matches another runtime's tree (LXC/LXD/Incus, Proxmox CTs, systemd-nspawn): a
+// Docker inside it is not the host's. A machine needs its own cgroup below machine.slice, so the
+// host's Docker run with cgroup-parent machine.slice still counts.
+var nestedRuntime = regexp.MustCompile(`/(lxc\.payload\.[^/]+|lxc/[^/]+|machine\.slice/[^/]+)/`)
+
 // UserManaged reports whether /proc/<pid>/cgroup content puts the process below a user's own
 // systemd tree.
 func UserManaged(cgroup string) bool { return userManager.MatchString(cgroup) }
 
 // DockerContainerID returns the Docker container ID in /proc/<pid>/cgroup content (systemd or
 // cgroupfs driver, any line, so hybrid hosts work too), or "". A Docker path
-// below a user's own systemd tree never counts.
+// below a user's own systemd tree or another runtime's container never counts.
 func DockerContainerID(cgroup string) string {
 	for _, line := range strings.Split(cgroup, "\n") {
 		m := dockerID.FindStringSubmatchIndex(line)
-		if m == nil || userManager.MatchString(line[:m[0]+1]) {
+		if m == nil || userManager.MatchString(line[:m[0]+1]) || nestedRuntime.MatchString(line[:m[0]+1]) {
 			continue
 		}
 		return line[m[2]:m[3]]

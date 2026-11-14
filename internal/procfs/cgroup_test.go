@@ -32,6 +32,13 @@ func TestDockerContainerID(t *testing.T) {
 		"0::/system.slice/docker-" + cid + ".scope/user.slice/user-1000.slice/user@1000.service/init.scope\n": cid,
 		"0::/user.slice/user-1000.slice/user@1000.service/docker/" + cid + "\n":                               "",
 		"0::/user.slice/user-1000.slice/user@1000.service/user.slice/docker-" + cid + ".scope\n":              "",
+		// Docker inside another runtime's container: LXD and Incus, Proxmox, systemd-nspawn.
+		"0::/lxc.payload.c1/system.slice/docker-" + cid + ".scope\n":                                   "",
+		"0::/lxc/101/ns/system.slice/docker-" + cid + ".scope\n":                                       "",
+		"0::/machine.slice/systemd-nspawn@box.service/payload/system.slice/docker-" + cid + ".scope\n": "",
+		"12:memory:/lxc/101/ns/docker/" + cid + "\n0::/\n":                                             "",
+		// The host's Docker with cgroup-parent machine.slice.
+		"0::/machine.slice/docker-" + cid + ".scope\n": cid,
 	}
 	for in, want := range cases {
 		if got := DockerContainerID(in); got != want {
