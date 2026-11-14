@@ -8,25 +8,30 @@ permissions:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: gofmt
-        run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
+        run: out=$(gofmt -l .) && test -z "$out"
+      - run: go vet ./... && go vet -tags integration ./internal/integration/ && go vet -tags live ./internal/integration/
       - run: go test ./...
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Distribution containers
-        run: go test -tags integration -count=1 -v -timeout 30m ./internal/integration/
+        run: |
+          go test -tags integration -count=1 -v -timeout 30m ./internal/integration/ | tee docker.out
+          ! grep -q -e '--- SKIP' docker.out
       - name: Live inventory of the runner, as root
         run: |
           go test -c -tags live -o live.test ./internal/integration/
-          sudo ./live.test -test.v -test.run TestLiveHost
+          sudo ./live.test -test.v -test.run '^TestLiveHost$' | tee live.out
+          ! grep -q -e '--- SKIP' -e 'no tests to run' live.out
