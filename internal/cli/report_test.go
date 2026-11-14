@@ -40,3 +40,23 @@ func TestReport(t *testing.T) {
 		t.Fatalf("not root: exit %d, stderr %q", code, errb.String())
 	}
 }
+
+func TestReportLatestWithoutReport(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	runs := filepath.Join(d.stateDir, "runs")
+	if err := os.MkdirAll(runs, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, setup := range map[string]func(){
+		"dangling":  func() {},
+		"no report": func() { os.MkdirAll(filepath.Join(runs, runID), 0o750) },
+	} {
+		os.Remove(filepath.Join(runs, "latest"))
+		os.Symlink(runID, filepath.Join(runs, "latest"))
+		setup()
+		var out, errb bytes.Buffer
+		if code := dispatch([]string{"report"}, &out, &errb, d); code != 2 || !strings.Contains(errb.String(), "The latest run ("+runID+") has no report.") {
+			t.Errorf("%s: exit %d, stderr %q", name, code, errb.String())
+		}
+	}
+}

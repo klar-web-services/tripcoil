@@ -50,10 +50,16 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 		}
 		name = *id
 	}
-	data, err := os.ReadFile(filepath.Join(d.stateDir, "runs", name, "report.md"))
+	runs := filepath.Join(d.stateDir, "runs")
+	data, err := os.ReadFile(filepath.Join(runs, name, "report.md"))
 	switch {
 	case errors.Is(err, fs.ErrNotExist) && *id == "":
-		fmt.Fprintln(stderr, "No run has finished yet. Start one with: sudo tripcoil run")
+		if _, lerr := os.Lstat(filepath.Join(runs, "latest")); lerr != nil {
+			fmt.Fprintln(stderr, "No run has finished yet. Start one with: sudo tripcoil run")
+			return 2
+		}
+		target, _ := os.Readlink(filepath.Join(runs, "latest"))
+		fmt.Fprintf(stderr, "The latest run (%s) has no report.\n", filepath.Base(target))
 		return 2
 	case errors.Is(err, fs.ErrNotExist):
 		fmt.Fprintf(stderr, "Run %s has no report.\n", *id)

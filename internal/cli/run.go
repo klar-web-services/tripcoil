@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/buildinfo"
@@ -82,7 +84,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	}
 	// As light on the host as a scheduled run, and so are the Grype processes it starts.
 	if err := d.lowerPriority(); err != nil {
-		fmt.Fprintf(stderr, "tripcoil: cannot lower the run's priority: %v\n", err)
+		fmt.Fprintf(stderr, "tripcoil: cannot lower the run's priority: %s\n", strings.ReplaceAll(err.Error(), "\n", "; "))
 	}
 	cfg, err := config.Load(d.configPath)
 	if err != nil {
@@ -128,6 +130,12 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	switch {
 	case ctx.Err() != nil:
 		rec.Interrupt(d.now(), "inventory")
+		if inv != nil { // what was raised before the signal still counts
+			rec.Add(inv.Errors...)
+			rec.Add(inv.Warnings...)
+			rec.Add(inv.Notices...)
+		}
+		rec.Stages["audit"] = run.StageSkipped
 	case err != nil:
 		rec.Stages["inventory"] = run.StageFailed
 		rec.Add(problem.New(problem.Error, problem.InventoryFailed, "inventory", "cannot inventory the host: %v", err))
@@ -153,6 +161,12 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		aud = d.audit(ctx, inv, cacheDir, dir, cfg)
 		if ctx.Err() != nil {
 			rec.Interrupt(d.now(), "audit")
+			for _, e := range aud.Errors {
+				if e.Code != problem.Interrupted { // rec.Interrupt added one for the run
+					rec.Add(e)
+				}
+			}
+			rec.Add(aud.Warnings...)
 		} else {
 			rec.Stages["audit"] = auditStage(aud.Status)
 			rec.Add(aud.Errors...)
@@ -250,10 +264,20 @@ func printRun(stdout io.Writer, rec *run.Record, dir string, asJSON bool) int {
 	fmt.Fprintf(stdout, "Run %s: %s. %s, %s, %s, %s.\n", rec.RunID, rec.Status, plural(rec.Counts["items"], "item"),
 		plural(rec.Counts["origins"], "origin"), plural(rec.Counts["findings"], "finding"), plural(rec.Counts["coverageGaps"], "coverage gap"))
 	for _, e := range rec.Errors {
-		fmt.Fprintf(stdout, "  error %s: %s\n", e.Code, e.Message)
+		fmt.Fprintf(stdout, "  error %s: %s\n", e.Code, oneLine(e.Message))
 	}
-	fmt.Fprintf(stdout, "Evidence: %s\nRead the report with: sudo tripcoil report\n", dir)
+	fmt.Fprintf(stdout, "Evidence: %s\nRead the report with: sudo tripcoil report --run %s\n", dir, rec.RunID)
 	return rec.ExitCode
+}
+
+// oneLine replaces control characters, which text from the host may carry, with spaces.
+func oneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func plural(n int, word string) string {

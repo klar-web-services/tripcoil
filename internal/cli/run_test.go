@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/config"
@@ -156,7 +157,7 @@ func TestRunWritesEvidence(t *testing.T) {
 	if target, err := os.Readlink(filepath.Join(d.stateDir, "runs", "latest")); err != nil || target != runID {
 		t.Fatalf("latest -> %q %v", target, err)
 	}
-	if want := "Run " + runID + ": complete. 1 item, 1 origin, 1 finding, 0 coverage gaps.\nEvidence: " + dir + "\nRead the report with: sudo tripcoil report\n"; out.String() != want {
+	if want := "Run " + runID + ": complete. 1 item, 1 origin, 1 finding, 0 coverage gaps.\nEvidence: " + dir + "\nRead the report with: sudo tripcoil report --run " + runID + "\n"; out.String() != want {
 		t.Fatalf("stdout %q, want %q", out.String(), want)
 	}
 	if !strings.Contains(errb.String(), "does not exist yet, so the defaults apply") {
@@ -375,5 +376,82 @@ func TestRunLatestUpdateFailed(t *testing.T) {
 		if rec := readRecord(t, d.stateDir); rec.Status != run.Complete {
 			t.Fatalf("run.json %+v", rec)
 		}
+	}
+}
+
+func TestRunPrintsErrorsOnOneLine(t *testing.T) {
+	d := testDeps(t, nil, errors.New("bad\x1b[2J path\nsecond\rline\x07"))
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	for _, r := range strings.ReplaceAll(out.String(), "\n", "") {
+		if unicode.IsControl(r) {
+			t.Fatalf("control character %q in %q", r, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), "bad [2J path second line ") {
+		t.Fatalf("stdout %q", out.String())
+	}
+	if n := strings.Count(out.String(), "\n"); n != 4 {
+		t.Fatalf("%d lines in %q", n, out.String())
+	}
+}
+
+func TestRunPointsAtThisRunsReport(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	var out, errb bytes.Buffer
+	dispatch([]string{"run"}, &out, &errb, d)
+	if !strings.Contains(out.String(), "sudo tripcoil report --run "+runID+"\n") {
+		t.Fatalf("stdout %q", out.String())
+	}
+}
+
+func TestRunPriorityWarningOnOneLine(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	d.lowerPriority = func() error { return errors.Join(errors.New("setpriority: denied"), errors.New("ionice: denied")) }
+	var out, errb bytes.Buffer
+	dispatch([]string{"run"}, &out, &errb, d)
+	want := "tripcoil: cannot lower the run's priority: setpriority: denied; ionice: denied\n"
+	if !strings.Contains(errb.String(), want) {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
+func TestRunInterruptedKeepsStageProblems(t *testing.T) {
+	warn := problem.New(problem.Warning, "W_ONE", "inventory", "inv warning")
+	e1 := problem.New(problem.Error, "E_INV", "inventory", "inv error")
+	d := testDeps(t, sampleInventory(e1, warn), nil)
+	d.interrupts = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, func() {}
+	}
+	var out, errb bytes.Buffer
+	dispatch([]string{"run"}, &out, &errb, d)
+	rec := readRecord(t, d.stateDir)
+	if len(rec.Errors) != 2 || rec.Errors[1].Code != "E_INV" || len(rec.Warnings) != 1 || rec.Warnings[0].Code != "W_ONE" {
+		t.Fatalf("inventory problems lost: %+v", rec)
+	}
+	if rec.Stages["audit"] != run.StageSkipped {
+		t.Fatalf("stages %+v", rec.Stages)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d = testDeps(t, sampleInventory(), nil)
+	d.interrupts = func() (context.Context, context.CancelFunc) { return ctx, cancel }
+	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
+		cancel()
+		a := sampleAudit(audit.Partial, problem.New(problem.Error, "E_AUD", "audit", "audit error"),
+			problem.New(problem.Error, problem.Interrupted, "audit", "stopped"))
+		a.Warnings = append(a.Warnings, problem.New(problem.Warning, "W_AUD", "audit", "audit warning"))
+		return a
+	}
+	out.Reset()
+	dispatch([]string{"run"}, &out, &errb, d)
+	rec = readRecord(t, d.stateDir)
+	if len(rec.Errors) != 2 || rec.Errors[0].Code != problem.Interrupted || rec.Errors[1].Code != "E_AUD" ||
+		len(rec.Warnings) != 1 || rec.Warnings[0].Code != "W_AUD" {
+		t.Fatalf("audit problems lost: %+v", rec)
 	}
 }
