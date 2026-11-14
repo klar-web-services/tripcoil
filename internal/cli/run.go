@@ -133,8 +133,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		return 2
 	}
 	if err := run.UpdateLatest(d.stateDir, "latest", id); err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", problem.RunFolderUnwritable, err)
-		return 2
+		fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest: %v\n", err) // only a pointer; run.json stands
 	}
 	return printRun(stdout, rec, dir, *jsonOut)
 }

@@ -191,3 +191,38 @@ func TestRunInventoryWriteFailed(t *testing.T) {
 		t.Fatalf("latest -> %q %v", target, err)
 	}
 }
+
+func TestRunLatestUpdateFailed(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		d := testDeps(t, sampleInventory(), nil)
+		d.collect = func(context.Context, string) (*inventory.Inventory, error) {
+			blocker := filepath.Join(d.stateDir, "runs", "latest", "x")
+			if err := os.MkdirAll(blocker, 0o750); err != nil { // a directory where latest goes
+				t.Fatal(err)
+			}
+			return sampleInventory(), nil
+		}
+		args := []string{"run"}
+		if asJSON {
+			args = append(args, "--json")
+		}
+		var out, errb bytes.Buffer
+		if code := dispatch(args, &out, &errb, d); code != 0 {
+			t.Fatalf("json=%v: exit %d, stderr %q", asJSON, code, errb.String())
+		}
+		if !strings.Contains(errb.String(), "cannot update runs/latest") {
+			t.Fatalf("json=%v: stderr %q", asJSON, errb.String())
+		}
+		if asJSON {
+			var rec run.Record
+			if err := json.Unmarshal(out.Bytes(), &rec); err != nil || rec.RunID != runID {
+				t.Fatalf("stdout is not run.json: %v\n%s", err, out.String())
+			}
+		} else if !strings.Contains(out.String(), "Run "+runID+": complete.") {
+			t.Fatalf("stdout %q", out.String())
+		}
+		if rec := readRecord(t, d.stateDir); rec.Status != run.Complete {
+			t.Fatalf("run.json %+v", rec)
+		}
+	}
+}
