@@ -14,13 +14,21 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// upgradeCandidate is a candidate upgrade line with the packages to match at its version: each
-// purl of its findings once, with the candidate version. check is nil when a finding cannot be
-// matched again that way: it has no purl, or Grype matched it by CPE, which the purl does not carry.
+// upgradeCandidate is a candidate upgrade line with the packages to match at its version (see
+// matchAt), or a nil check when a finding cannot be matched again.
 type upgradeCandidate struct {
 	Upgrade
 	name  string // the package's name as Grype reports it
-	check []grype.Component
+	check []component
+}
+
+// component is a package of the SBOM that checks the candidates. CycloneDX allows it one CPE.
+type component struct {
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	PURL    string `json:"purl"`
+	CPE     string `json:"cpe,omitempty"`
 }
 
 // upgradeCandidates returns the candidate upgrade lines of spec section 6.6: for each package in
@@ -102,20 +110,66 @@ func installedVersions(findings []Finding) []string {
 	return out
 }
 
-// matchAt lists the packages of findings at version, one per purl, or nil when a finding cannot be
-// matched again.
-func matchAt(findings []Finding, version string) []grype.Component {
-	var out []grype.Component
+// matchAt lists the packages of findings at version: each purl once, and a package with CPEs once
+// per CPE, with that purl and the CPE at version, because Grype matches a CPE at its own version.
+// It is nil when a finding cannot be matched again: it has no purl, a CPE that is not a CPE 2.3
+// formatted string, or no CPE although Grype matched it by CPE.
+func matchAt(findings []Finding, version string) []component {
+	var out []component
 	for _, f := range findings {
 		purl, ok := purlWithVersion(f.Package.PURL, version)
-		if !ok || f.Source == "nvd:cpe" {
+		if !ok || (f.Source == "nvd:cpe" && len(f.Package.CPEs) == 0) {
 			return nil
 		}
-		if !slices.ContainsFunc(out, func(c grype.Component) bool { return c.PURL == purl }) {
-			out = append(out, grype.Component{Name: f.Package.Name, Version: version, PURL: purl})
+		comps := []component{{Type: "library", Name: f.Package.Name, Version: version, PURL: purl}}
+		if len(f.Package.CPEs) > 0 {
+			comps = nil
+		}
+		for _, cpe := range f.Package.CPEs {
+			c, ok := cpeWithVersion(cpe, version)
+			if !ok {
+				return nil
+			}
+			comps = append(comps, component{Type: "library", Name: f.Package.Name, Version: version, PURL: purl, CPE: c})
+		}
+		for _, c := range comps {
+			if !slices.Contains(out, c) {
+				out = append(out, c)
+			}
 		}
 	}
 	return out
+}
+
+// cpeWithVersion is a CPE 2.3 formatted string with its version, the sixth field, replaced and
+// escaped as the binding requires: a backslash before each character other than a letter, digit,
+// period, hyphen or underscore.
+func cpeWithVersion(cpe, version string) (string, bool) {
+	var fields []string
+	start := 0
+	for i := 0; i < len(cpe); i++ {
+		switch cpe[i] {
+		case '\\':
+			i++ // an escaped character, such as \:
+		case ':':
+			fields = append(fields, cpe[start:i])
+			start = i + 1
+		}
+	}
+	fields = append(fields, cpe[start:])
+	if len(fields) != 13 || fields[0] != "cpe" || fields[1] != "2.3" {
+		return "", false
+	}
+	var b strings.Builder
+	for i := 0; i < len(version); i++ {
+		c := version[i]
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '.' || c == '-' || c == '_') {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	fields[5] = b.String()
+	return strings.Join(fields, ":"), true
 }
 
 // purlVersion finds the version of a purl: after the last @ before the qualifiers (?) and the
@@ -155,10 +209,12 @@ func purlWithVersion(purl, version string) (string, bool) {
 // given, and a warning says why, unless the run was interrupted.
 func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) []Upgrade {
 	byPURL := map[string][]int{} // the candidates of each purl in the SBOM
-	var comps []grype.Component
+	seen := map[component]bool{}
+	var comps []component
 	for i, c := range cands {
 		for _, p := range c.check {
-			if _, seen := byPURL[p.PURL]; !seen {
+			if !seen[p] {
+				seen[p] = true
 				comps = append(comps, p)
 			}
 			byPURL[p.PURL] = append(byPURL[p.PURL], i)
@@ -199,21 +255,12 @@ func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) 
 
 // matchUpgrades matches packages written as a CycloneDX SBOM. Both the SBOM and Grype's report stay
 // in the scan folder, which is removed at the end of the run.
-func (au *auditor) matchUpgrades(ctx context.Context, comps []grype.Component) (*grype.Report, error) {
-	type component struct {
-		Type    string `json:"type"`
-		Name    string `json:"name"`
-		Version string `json:"version"`
-		PURL    string `json:"purl"`
-	}
+func (au *auditor) matchUpgrades(ctx context.Context, comps []component) (*grype.Report, error) {
 	doc := struct {
 		BOMFormat   string      `json:"bomFormat"`
 		SpecVersion string      `json:"specVersion"`
 		Components  []component `json:"components"`
-	}{BOMFormat: "CycloneDX", SpecVersion: "1.5"}
-	for _, c := range comps {
-		doc.Components = append(doc.Components, component{"library", c.Name, c.Version, c.PURL})
-	}
+	}{BOMFormat: "CycloneDX", SpecVersion: "1.5", Components: comps}
 	data, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err

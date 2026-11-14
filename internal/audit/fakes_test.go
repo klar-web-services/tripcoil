@@ -17,8 +17,8 @@ import (
 )
 
 // fakeScanner imitates Grype. Scan writes the SBOM listed for the source and matches it; Match
-// matches every package of the SBOM it is given against vulns, keyed by name@version or by purl,
-// so a cached or rewritten SBOM gives the matches it holds, unless matching changes them. A
+// matches every package of the SBOM it is given against vulns, keyed by name@version, by purl or
+// by CPE, so a cached or rewritten SBOM gives the matches it holds, unless matching changes them. A
 // file's SBOM is listed by the path of the copy Grype scans, scan/<sha>/<file name>, because the
 // SBOM of a jar or of a binary that Syft identifies by name depends on the file name.
 type fakeScanner struct {
@@ -30,6 +30,7 @@ type fakeScanner struct {
 	distro     string                       // the distribution Grype reports; "" when it saw none
 	locations  map[string]string            // the file each package (by name) was read from
 	found      map[string][]string          // the locations Match reports for a package, by name; else /where/<name>
+	cpes       map[string]string            // the CPE of a package in the SBOMs Scan writes, by name
 	catalogErr map[string]error             // by source prefix
 	vulns      map[string][]grype.Vulnerability
 	lookups    map[string]grype.Vulnerability
@@ -87,6 +88,7 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 		Name       string `json:"name"`
 		Version    string `json:"version"`
 		PURL       string `json:"purl"`
+		CPE        string `json:"cpe,omitempty"`
 		Properties []prop `json:"properties,omitempty"`
 	}
 	doc := struct {
@@ -96,7 +98,7 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 		Vulnerabilities []any  `json:"vulnerabilities"`
 	}{"CycloneDX", source, []comp{{Type: "operating-system", Name: "debian", Version: f.osVersion}, {Type: "file", Name: "/etc/os-release"}}, []any{"x"}}
 	for _, c := range comps {
-		cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL}
+		cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL, CPE: f.cpes[c.Name]}
 		if typ, _, ok := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/"); ok { // Syft's type is the purl's for deb, rpm, apk and alpm
 			cc.Properties = append(cc.Properties, prop{"syft:package:type", typ})
 		}
@@ -136,11 +138,24 @@ func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Repor
 	if err != nil {
 		return nil, err
 	}
+	var doc struct {
+		Components []struct {
+			Type string `json:"type"`
+			CPE  string `json:"cpe"`
+		} `json:"components"`
+	}
+	json.Unmarshal(data, &doc)
+	var cpes []string // of comps, in order
+	for _, c := range doc.Components {
+		if c.Type != "file" && c.Type != "operating-system" {
+			cpes = append(cpes, c.CPE)
+		}
+	}
 	rep := &grype.Report{DBBuilt: f.status.Built, Distro: f.distro}
 	if f.distro != "" {
 		rep.DistroVersion = f.osVersion
 	}
-	for _, c := range comps {
+	for i, c := range comps {
 		typ, _, _ := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/")
 		purl := c.PURL
 		if p, ok := f.purlAs[purl]; ok {
@@ -150,9 +165,13 @@ func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Repor
 		if l, ok := f.found[c.Name]; ok {
 			locations = l
 		}
-		for _, v := range slices.Concat(f.vulns[c.Name+"@"+c.Version], f.vulns[c.PURL]) {
+		var cpe []string
+		if cpes[i] != "" {
+			cpe = []string{cpes[i]}
+		}
+		for _, v := range slices.Concat(f.vulns[c.Name+"@"+c.Version], f.vulns[c.PURL], f.vulns[cpes[i]]) {
 			rep.Matches = append(rep.Matches, grype.Match{Vulnerability: v,
-				Artifact: grype.Artifact{Name: c.Name, Version: c.Version, Type: typ, PURL: purl, Locations: slices.Clone(locations)}})
+				Artifact: grype.Artifact{Name: c.Name, Version: c.Version, Type: typ, PURL: purl, CPEs: cpe, Locations: slices.Clone(locations)}})
 		}
 	}
 	return rep, os.WriteFile(raw, []byte(`{"matches":[]}`), 0o600)

@@ -47,6 +47,7 @@ type CVSS struct {
 // Artifact is the matched package.
 type Artifact struct {
 	Name, Version, Type, PURL string
+	CPEs                      []string // CPE 2.3 formatted strings
 	Locations                 []string
 }
 
@@ -89,10 +90,11 @@ type document struct {
 		Vulnerability          rawVulnerability   `json:"vulnerability"`
 		RelatedVulnerabilities []rawVulnerability `json:"relatedVulnerabilities"`
 		Artifact               struct {
-			Name      string `json:"name"`
-			Version   string `json:"version"`
-			Type      string `json:"type"`
-			PURL      string `json:"purl"`
+			Name      string   `json:"name"`
+			Version   string   `json:"version"`
+			Type      string   `json:"type"`
+			PURL      string   `json:"purl"`
+			CPEs      []string `json:"cpes"`
 			Locations []struct {
 				Path string `json:"path"`
 			} `json:"locations"`
@@ -134,7 +136,7 @@ func Parse(data []byte) (*Report, error) {
 			return nil, errors.New("unparseable Grype output: a match has no vulnerability ID or package name")
 		}
 		out := Match{Vulnerability: m.Vulnerability.convert(),
-			Artifact: Artifact{Name: m.Artifact.Name, Version: m.Artifact.Version, Type: m.Artifact.Type, PURL: m.Artifact.PURL}}
+			Artifact: Artifact{Name: m.Artifact.Name, Version: m.Artifact.Version, Type: m.Artifact.Type, PURL: m.Artifact.PURL, CPEs: m.Artifact.CPEs}}
 		for _, l := range m.Artifact.Locations {
 			out.Artifact.Locations = append(out.Artifact.Locations, l.Path)
 		}

@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -130,6 +131,21 @@ func TestUpgrades(t *testing.T) {
 	}
 }
 
+func TestCPEWithVersion(t *testing.T) {
+	tests := []struct{ cpe, version, want string }{
+		{"cpe:2.3:a:haxx:curl:7.80.0:*:*:*:*:*:*:*", "8.23.0", "cpe:2.3:a:haxx:curl:8.23.0:*:*:*:*:*:*:*"},
+		{`cpe:2.3:a:libc6:libc6:2.36-9\+deb12u14:*:*:*:*:*:*:*`, "v2.0.0+incompatible", `cpe:2.3:a:libc6:libc6:v2.0.0\+incompatible:*:*:*:*:*:*:*`},
+		{`cpe:2.3:a:a\:b:c:1.0.0:*:*:*:*:*:linux:*`, "1.0.1-rc_1", `cpe:2.3:a:a\:b:c:1.0.1-rc_1:*:*:*:*:*:linux:*`},
+		{"cpe:/a:haxx:curl:7.80.0", "8.23.0", ""},
+		{"cpe:2.3:a:haxx:curl:7.80.0", "8.23.0", ""},
+	}
+	for _, tc := range tests {
+		if got, ok := cpeWithVersion(tc.cpe, tc.version); got != tc.want || ok != (tc.want != "") {
+			t.Errorf("cpeWithVersion(%q, %q) = %q, %v; want %q", tc.cpe, tc.version, got, ok, tc.want)
+		}
+	}
+}
+
 func TestPURLVersion(t *testing.T) {
 	tests := []struct{ purl, version, want, without string }{
 		{"pkg:npm/lodash@4.17.20", "4.18.0", "pkg:npm/lodash@4.18.0", "pkg:npm/lodash"},
@@ -224,15 +240,38 @@ func TestCheckUpgrades(t *testing.T) {
 	})
 	t.Run("dropped when it cannot be checked", func(t *testing.T) {
 		cpe := fixedIn("binary", "node", "18.12.1", "18.20.4")
-		cpe.Package.PURL, cpe.Source = "pkg:generic/node@18.12.1", "nvd:cpe" // the SBOM carries no CPE
+		cpe.Package.PURL, cpe.Source = "pkg:generic/node@18.12.1", "nvd:cpe" // matched by CPE, but has none
+		bad := withPURL(fixedIn("binary", "curl", "7.80.0", "8.23.0"), "pkg:generic/curl@7.80.0")
+		bad.Package.CPEs = []string{"cpe:/a:haxx:curl:7.80.0"} // CPE 2.2
 		g := &fakeScanner{}
-		if ups, warns, _ := checked(ctx, t, g, []Finding{fixedIn("npm", "a", "1.0.0", "1.0.1"), cpe}); len(ups) != 0 || len(warns) != 0 || len(g.matched) != 0 {
-			t.Fatalf("lines %v, warnings %v, matched %v: a finding without a purl, or matched by CPE, cannot be checked", names(ups), warns, g.matched)
+		if ups, warns, _ := checked(ctx, t, g, []Finding{fixedIn("npm", "a", "1.0.0", "1.0.1"), cpe, bad}); len(ups) != 0 || len(warns) != 0 || len(g.matched) != 0 {
+			t.Fatalf("lines %v, warnings %v, matched %v: a finding without a purl, matched by CPE without one, or with a CPE that is not 2.3, cannot be checked", names(ups), warns, g.matched)
 		}
 		// A copy without a purl is told apart by its name, so it is a package of its own.
 		ups, _, _ := checked(ctx, t, g, append(lodash, fixedIn("npm", "lodash", "4.17.19", "4.17.21")))
 		if len(ups) != 1 || !slices.Equal(ups[0].Installed, []string{"3.10.1", "4.17.20"}) {
 			t.Fatalf("lines %+v", ups)
+		}
+	})
+	t.Run("a package with CPEs is matched once per CPE, at the candidate version", func(t *testing.T) {
+		redis := withPURL(fixedIn("binary", "redis", "2.8.23", "6.2.7+x"), "pkg:generic/redis@2.8.23")
+		redis.Source = "nvd:cpe"
+		redis.Package.CPEs = []string{"cpe:2.3:a:redislabs:redis:2.8.23:*:*:*:*:*:*:*", "cpe:2.3:a:redis:redis:2.8.23:*:*:*:*:*:*:*"}
+		g := &fakeScanner{}
+		ups, _, dir := checked(ctx, t, g, []Finding{redis, redis})
+		data, _ := os.ReadFile(filepath.Join(dir, "upgrades.cdx.json"))
+		var doc struct{ Components []component }
+		json.Unmarshal(data, &doc)
+		want := []component{
+			{Type: "library", Name: "redis", Version: "6.2.7+x", PURL: "pkg:generic/redis@6.2.7%2Bx", CPE: `cpe:2.3:a:redislabs:redis:6.2.7\+x:*:*:*:*:*:*:*`},
+			{Type: "library", Name: "redis", Version: "6.2.7+x", PURL: "pkg:generic/redis@6.2.7%2Bx", CPE: `cpe:2.3:a:redis:redis:6.2.7\+x:*:*:*:*:*:*:*`},
+		}
+		if !slices.Equal(names(ups), []string{"redis 6.2.7+x"}) || !slices.Equal(doc.Components, want) {
+			t.Fatalf("lines %v, SBOM %+v", names(ups), doc.Components)
+		}
+		g.vulns = map[string][]grype.Vulnerability{`cpe:2.3:a:redis:redis:6.2.7\+x:*:*:*:*:*:*:*`: {gone}}
+		if ups, _, _ := checked(ctx, t, g, []Finding{redis}); len(ups) != 0 {
+			t.Fatalf("lines %v: the version is still vulnerable by CPE", names(ups))
 		}
 	})
 	t.Run("no line when Grype fails", func(t *testing.T) {

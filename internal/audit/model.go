@@ -111,11 +111,12 @@ type CVSS struct {
 
 // Package is the matched package.
 type Package struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Type     string `json:"type"`
-	PURL     string `json:"purl,omitempty"` // as Grype reports it; kernel findings have none
-	Location string `json:"location,omitempty"`
+	Name     string   `json:"name"`
+	Version  string   `json:"version"`
+	Type     string   `json:"type"`
+	PURL     string   `json:"purl,omitempty"` // as Grype reports it; kernel findings have none
+	CPEs     []string `json:"cpes,omitempty"` // as Grype reports them
+	Location string   `json:"location,omitempty"`
 }
 
 // Fix is the fix state: fixed, not-fixed, wont-fix or unknown.

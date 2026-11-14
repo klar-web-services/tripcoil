@@ -243,7 +243,7 @@ func (au *auditor) addFindings(matches []grype.Match, raw string, owner func(gry
 		f := Finding{
 			Vulnerability: vulnerability(m.Vulnerability, m.Related),
 			Origin:        origin,
-			Package:       Package{Name: m.Artifact.Name, Version: m.Artifact.Version, Type: m.Artifact.Type, PURL: m.Artifact.PURL},
+			Package:       Package{Name: m.Artifact.Name, Version: m.Artifact.Version, Type: m.Artifact.Type, PURL: m.Artifact.PURL, CPEs: m.Artifact.CPEs},
 			Fix:           Fix{State: cmp.Or(m.Vulnerability.FixState, "unknown"), Versions: nonNil(m.Vulnerability.FixVersions)},
 			Source:        m.Vulnerability.Namespace,
 			Raw:           raw,

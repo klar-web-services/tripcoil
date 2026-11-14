@@ -2,6 +2,7 @@ package grype
 
 import (
 	"os"
+	"slices"
 	"testing"
 	"time"
 )
@@ -36,7 +37,14 @@ func TestParse(t *testing.T) {
 	if !kev {
 		t.Errorf("Log4Shell's KEV and EPSS: %+v %+v", log4j.Vulnerability, log4j.Related)
 	}
+	if !slices.Equal(log4j.Artifact.CPEs, []string{"cpe:2.3:a:apache:log4j-core:2.14.1:*:*:*:*:*:*:*", "cpe:2.3:a:apache:log4j_core:2.14.1:*:*:*:*:*:*:*",
+		"cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*", "cpe:2.3:a:apache:core:2.14.1:*:*:*:*:*:*:*"}) {
+		t.Errorf("log4j CPEs %q", log4j.Artifact.CPEs)
+	}
 	libc := rep.Matches[1]
+	if !slices.Equal(libc.Artifact.CPEs, []string{`cpe:2.3:a:libc6:libc6:2.36-9\+deb12u14:*:*:*:*:*:*:*`}) {
+		t.Errorf("libc6 CPEs %q: as Grype escapes them", libc.Artifact.CPEs)
+	}
 	if len(libc.Vulnerability.CVSS) != 0 || len(libc.Related) == 0 || len(libc.Related[0].CVSS) == 0 || libc.Vulnerability.Namespace != "debian:distro:debian:12" {
 		t.Errorf("Debian keeps the CVSS score in the related NVD record: %+v", libc)
 	}

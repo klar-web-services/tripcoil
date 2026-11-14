@@ -265,6 +265,31 @@ func TestAuditChecksUpgradeLines(t *testing.T) {
 	}
 }
 
+// A binary in an app directory that Grype matched by its CPE gets a line only when matching its CPE
+// at the version finds nothing: its purl alone never matches.
+func TestAuditChecksUpgradeLinesByCPE(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	shop := "dir:" + filepath.Join(root, "srv/shop")
+	g.sboms[shop] = append(g.sboms[shop], grype.Component{Name: "curl", Version: "7.80.0", PURL: "pkg:generic/curl@7.80.0"})
+	g.cpes = map[string]string{"curl": "cpe:2.3:a:haxx:curl:7.80.0:*:*:*:*:*:*:*"}
+	cve := vuln("CVE-2022-32221", "Critical", "fixed", "7.86.0")
+	cve.Namespace = "nvd:cpe"
+	g.vulns["cpe:2.3:a:haxx:curl:7.80.0:*:*:*:*:*:*:*"] = []grype.Vulnerability{cve}
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if f := byVuln(a)["CVE-2022-32221"]; !slices.Equal(f.Package.CPEs, []string{"cpe:2.3:a:haxx:curl:7.80.0:*:*:*:*:*:*:*"}) {
+		t.Fatalf("finding %+v: it keeps the CPEs Grype reported", f)
+	}
+	if !slices.Contains(names(a.Upgrades), "curl 7.86.0") {
+		t.Fatalf("upgrades %+v: no match for the CPE at 7.86.0", a.Upgrades)
+	}
+	g.vulns["cpe:2.3:a:haxx:curl:7.86.0:*:*:*:*:*:*:*"] = []grype.Vulnerability{vuln("CVE-2023-38545", "Critical", "fixed", "8.4.0")}
+	a = Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if slices.Contains(names(a.Upgrades), "curl 7.86.0") || !slices.Contains(names(a.Upgrades), "lodash 4.17.21") {
+		t.Fatalf("upgrades %+v: 7.86.0 is still vulnerable by its CPE", a.Upgrades)
+	}
+}
+
 func TestAuditScansWhatAnSBOMCannotMatchEveryRun(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
