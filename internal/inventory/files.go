@@ -178,14 +178,12 @@ func copyToCache(ctx context.Context, f runningFile, cacheDir string) (string, s
 	return sha, final, nil
 }
 
-// pruneCache removes the copies that keep does not name, which would otherwise pile up. The run
-// lock keeps other runs away.
-func pruneCache(cacheDir string, keep map[string]bool) {
+// pruneCache removes the copies of earlier runs before a run copies anything: they would pile up
+// and count against the free space a copy must leave. The run lock keeps other runs away.
+func pruneCache(cacheDir string) {
 	dir := filepath.Join(cacheDir, "replaced")
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if p := filepath.Join(dir, e.Name()); !keep[p] {
-			os.Remove(p)
-		}
+		os.Remove(filepath.Join(dir, e.Name()))
 	}
 }

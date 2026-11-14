@@ -92,6 +92,7 @@ type processResult struct {
 
 func (c *processCollector) collect(ctx context.Context) (processResult, error) {
 	c.owned, c.files, c.libPaths, c.readLeft = map[string]bool{}, map[fileKey]Origin{}, map[string]bool{}, runReadCap
+	pruneCache(c.cacheDir)
 	pids, err := c.src.PIDs()
 	if err != nil {
 		return processResult{}, fmt.Errorf("cannot list processes: %w", err)
@@ -120,15 +121,6 @@ func (c *processCollector) collect(ctx context.Context) (processResult, error) {
 		c.build(ctx, p, owners, finder, b)
 	}
 	res.items, res.origins = b.result()
-	if ctx.Err() == nil { // an interrupted run did not get to every copy the last run refers to
-		keep := map[string]bool{}
-		for _, o := range res.origins {
-			if o.Copy != "" {
-				keep[o.Copy] = true
-			}
-		}
-		pruneCache(c.cacheDir, keep)
-	}
 	return res, nil
 }
 

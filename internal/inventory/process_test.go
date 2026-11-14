@@ -332,15 +332,32 @@ func TestProcessCollectorPrunesCache(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{sum("an old binary"), ".copy-123"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("old"), 0o600); err != nil {
+	// The last run's copies would leave too little free space for this run's.
+	for name, size := range map[string]int{sum("an old binary"): 890, ".copy-123": 5} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.Repeat("x", size)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+	old := cacheSpace
+	cacheSpace = func(dir string) (uint64, uint64, error) { // a 1000-byte file system
+		var used uint64
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if fi, err := e.Info(); err == nil {
+				used += uint64(fi.Size())
+			}
+		}
+		return 1000 - used, 1000, nil
+	}
+	t.Cleanup(func() { cacheSpace = old })
 	src := fakeSource{31: hostProcesses()[31]}
 	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: cache}
-	if _, err := c.collect(context.Background()); err != nil {
+	res, err := c.collect(context.Background())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if o := originByID(res.origins, BinaryOriginID(sum("go binary v0"))); o.Copy == "" {
+		t.Fatalf("origins %+v", res.origins)
 	}
 	var names []string
 	entries, _ := os.ReadDir(dir)
