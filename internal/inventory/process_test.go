@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -701,15 +702,24 @@ func TestProcessCollectorUnresolvedOriginPerPathAndReason(t *testing.T) {
 
 func TestProcessCollectorProcessEndsWhileRead(t *testing.T) {
 	for _, errno := range []syscall.Errno{syscall.ENOENT, syscall.ESRCH} {
-		src := fakeSource{30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api",
-			openErr: &fs.PathError{Op: "open", Path: "/proc/30/exe", Err: errno}}}
+		src := fakeSource{30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", openErr: &fs.PathError{Op: "open", Path: "/proc/30/exe", Err: errno},
+			maps: []procfs.Mapping{{Start: "5", End: "6", Path: "/tmp/libnetty_transport.so"}}}}
 		c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
 		res, err := c.collect(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(res.origins) != 1 || res.origins[0].Reason != "the running file was not read (the process ended during the inventory)" {
-			t.Errorf("%v: origins %+v", errno, res.origins)
+		reasons := map[string]string{}
+		for _, o := range res.origins {
+			reasons[o.Paths[0]] = o.Reason
+		}
+		want := map[string]string{
+			"/opt/api/api": "the running file was not read (the process ended during the inventory)",
+			// A live process can also unmap a library between the reads.
+			"/tmp/libnetty_transport.so": "the running file was not read (the process ended or unmapped the file during the inventory)",
+		}
+		if !maps.Equal(reasons, want) {
+			t.Errorf("%v: reasons %q", errno, reasons)
 		}
 	}
 }

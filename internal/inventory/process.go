@@ -327,7 +327,7 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			d.note(problem.AppDirNotFound)
 		}
 	}
-	c.linkFile(ctx, b, d, p.exe, p.exeDeleted, owners, c.opener(p, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) }))
+	c.linkFile(ctx, b, d, p.exe, p.exeDeleted, owners, c.opener(p, errProcessEnded, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) }))
 	for _, m := range p.libs {
 		if found && !dir.Jar && within(m.Path, dir.Path) {
 			if m.Deleted && c.existsOnHost(m.Path) {
@@ -335,7 +335,7 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			}
 			continue // covered by the app directory
 		}
-		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, c.opener(p, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) }))
+		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, c.opener(p, errUnmapped, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) }))
 	}
 	for _, path := range p.notHost {
 		b.link(d, Origin{ID: UnresolvedOriginID("another root:" + path), Kind: OriginUnresolved,
@@ -346,15 +346,19 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 	}
 }
 
-var errProcessEnded = errors.New("the process ended during the inventory")
+var (
+	errProcessEnded = errors.New("the process ended during the inventory")
+	errUnmapped     = errors.New("the process ended or unmapped the file during the inventory")
+)
 
 // opener wraps open, which opens a running file of p, with a check that the PID is still p's: a
-// PID reused since p was read would supply another process's file.
-func (c *processCollector) opener(p *rawProcess, open func() (io.ReadCloser, error)) func() (io.ReadCloser, error) {
+// PID reused since p was read would supply another process's file. gone is the error for a file
+// that no longer exists in /proc.
+func (c *processCollector) opener(p *rawProcess, gone error, open func() (io.ReadCloser, error)) func() (io.ReadCloser, error) {
 	return func() (io.ReadCloser, error) {
 		r, err := open()
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
-			return nil, errProcessEnded
+			return nil, gone
 		}
 		if err != nil {
 			return nil, err
