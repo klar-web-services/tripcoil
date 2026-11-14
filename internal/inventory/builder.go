@@ -24,7 +24,8 @@ func newBuilder() *itemBuilder {
 }
 
 // process returns the draft of the host process item keyed by key and appDir, creating it on
-// first use. key is the executable, or "unresolved:<exe>" for a process whose origin is unresolved.
+// first use. key is the executable, or for a process whose origin is unresolved "unresolved:<exe>",
+// or "unresolved:command:<name>" when its executable cannot be read.
 func (b *itemBuilder) process(key, exe, appDir, name string) *draft {
 	id := ProcessItemID(key, appDir)
 	d, ok := b.items[id]
