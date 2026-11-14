@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -45,6 +46,20 @@ func TestLockWaitsForTheHolder(t *testing.T) {
 		u()
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second lock was not granted after the first was released")
+	}
+}
+
+func TestLockCreatesStateRootWithMode0755(t *testing.T) {
+	old := syscall.Umask(0o027)
+	defer syscall.Umask(old)
+	dir := filepath.Join(t.TempDir(), "state")
+	unlock, err := Lock(dir, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if fi, err := os.Stat(dir); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("state root mode %v %v", fi.Mode(), err)
 	}
 }
 

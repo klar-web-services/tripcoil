@@ -38,6 +38,9 @@ func Lock(stateDir string, waiting func()) (unlock func(), err error) {
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, err
 	}
+	if err := os.Chmod(stateDir, 0o755); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(filepath.Join(stateDir, "run.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
