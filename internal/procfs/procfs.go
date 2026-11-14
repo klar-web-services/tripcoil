@@ -248,20 +248,24 @@ func (f FS) OpenMapFile(pid int, m Mapping) (io.ReadCloser, error) {
 	return openRegular(f.mapFile(pid, m))
 }
 
-// openRegular opens a file only if it is a regular file. A process can map a FIFO or a device:
-// O_NONBLOCK keeps the open of a FIFO from waiting for a writer, and nothing is read from either.
+// oPath is O_PATH, which package syscall defines only on some architectures.
+const oPath = 0x200000
+
+// openRegular opens a file for reading only if it is a regular file. A process can map a FIFO or
+// a device, which are never opened: an O_PATH descriptor only names the file, and only a regular
+// file is reopened for reading through it.
 func openRegular(path string) (*os.File, error) {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
+	fd, err := syscall.Open(path, oPath|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, err
+		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
-	fi, err := file.Stat()
-	if err == nil && !fi.Mode().IsRegular() {
-		err = &fs.PathError{Op: "open", Path: path, Err: ErrNotRegular}
+	defer syscall.Close(fd)
+	var st syscall.Stat_t
+	if err := syscall.Fstat(fd, &st); err != nil {
+		return nil, &fs.PathError{Op: "fstat", Path: path, Err: err}
 	}
-	if err != nil {
-		file.Close()
-		return nil, err
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: ErrNotRegular}
 	}
-	return file, nil
+	return os.OpenFile("/proc/self/fd/"+strconv.Itoa(fd), os.O_RDONLY|syscall.O_NOCTTY, 0)
 }

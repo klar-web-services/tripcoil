@@ -1,6 +1,7 @@
 package procfs
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -308,5 +309,57 @@ func TestRootDir(t *testing.T) {
 		if got, err := f.RootDir(pid); err != nil || got != want {
 			t.Errorf("%d: %q %v, want %q", pid, got, err, want)
 		}
+	}
+}
+
+func TestOpenNeverOpensNonRegularFilesForReading(t *testing.T) {
+	f, root := fixture(t)
+	dir := t.TempDir()
+	fifo, lib := filepath.Join(dir, "fifo"), filepath.Join(dir, "lib.so")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lib, []byte("lib"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mf := filepath.Join(root, "proc/42/map_files")
+	if err := os.MkdirAll(mf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{"1000-2000": fifo, "3000-4000": lib} {
+		if err := os.Symlink(target, filepath.Join(mf, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	in, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer syscall.Close(in)
+	fifoWatch, err1 := syscall.InotifyAddWatch(in, fifo, syscall.IN_OPEN)
+	libWatch, err2 := syscall.InotifyAddWatch(in, lib, syscall.IN_OPEN)
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	if _, err := f.OpenMapFile(42, Mapping{Start: "1000", End: "2000"}); !errors.Is(err, ErrNotRegular) {
+		t.Fatalf("FIFO: %v", err)
+	}
+	r, err := f.OpenMapFile(42, Mapping{Start: "3000", End: "4000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(r); string(b) != "lib" {
+		t.Fatalf("%q", b)
+	}
+	r.Close()
+	opened := map[int]bool{}
+	buf := make([]byte, 4096)
+	n, _ := syscall.Read(in, buf)
+	for off := 0; off+syscall.SizeofInotifyEvent <= n; {
+		opened[int(int32(binary.NativeEndian.Uint32(buf[off:])))] = true
+		off += syscall.SizeofInotifyEvent + int(binary.NativeEndian.Uint32(buf[off+12:]))
+	}
+	if opened[fifoWatch] || !opened[libWatch] {
+		t.Fatalf("opened the FIFO: %v, the regular file: %v", opened[fifoWatch], opened[libWatch])
 	}
 }
