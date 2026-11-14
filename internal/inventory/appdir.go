@@ -59,8 +59,16 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 			}
 			i++
 			continue
-		case "-r", "--require", "--import", "--loader", "--experimental-loader", "-p", "--module-path":
+		case "-r", "--require", "--import", "--loader", "--experimental-loader", "--module-path":
 			i++ // a preloaded module or a module path, not the script
+			continue
+		}
+		if v, ok := strings.CutPrefix(a, "--class-path="); ok {
+			if !strings.Contains(v, ":") {
+				if p := abs(v); strings.HasSuffix(p, ".jar") && f.isFile(p) {
+					return appDir{Path: f.resolve(p), Jar: true}, true
+				}
+			}
 			continue
 		}
 		if strings.HasPrefix(a, "-") {

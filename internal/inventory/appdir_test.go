@@ -52,6 +52,7 @@ func TestFindAppDir(t *testing.T) {
 		"home/app/package.json", "home/app/src/server.js",
 		"srv/mono/package.json",
 		"srv/web/package.json", "srv/web/server.js", "opt/newrelic/package.json", "opt/newrelic/newrelic.js", "opt/svc/app.jar",
+		"srv/x/Gemfile.lock", "srv/x/script.rb",
 	)
 	const nvm = "/home/n8n/.nvm/versions/node/v20.11.0"
 	for link, target := range map[string]string{
@@ -84,6 +85,8 @@ func TestFindAppDir(t *testing.T) {
 		{"preload option value is not the script", []string{"node", "-r", "/opt/newrelic/newrelic.js", "/srv/web/server.js"}, "/", appDir{Path: "/srv/web"}, true},
 		{"loader option value is not the script", []string{"node", "--experimental-loader", "/opt/newrelic/newrelic.js", "/srv/web/server.js"}, "/", appDir{Path: "/srv/web"}, true},
 		{"single-jar class path", []string{"java", "-Xmx1g", "-cp", "/opt/svc/app.jar", "com.example.Main"}, "/", appDir{Path: "/opt/svc/app.jar", Jar: true}, true},
+		{"single-jar class path with =", []string{"java", "--class-path=/opt/svc/app.jar", "com.example.Main"}, "/", appDir{Path: "/opt/svc/app.jar", Jar: true}, true},
+		{"ruby -p takes no value", []string{"ruby", "-p", "/srv/x/script.rb"}, "/", appDir{Path: "/srv/x"}, true},
 		{"multi-entry class path", []string{"java", "-cp", "/opt/svc/app.jar:/opt/svc/lib/*", "com.example.Main"}, "/srv/app", appDir{Path: "/srv/app"}, true},
 		{"pm2 falls back to cwd", []string{"node", "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
 		{"global npm package through a symlink", []string{"node", "/usr/bin/node-red"}, "/", appDir{Path: "/usr/lib/node_modules/node-red"}, true},
