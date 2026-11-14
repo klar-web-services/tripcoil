@@ -190,6 +190,20 @@ func TestApk(t *testing.T) {
 	}
 }
 
+func TestApkIgnoresUnrequestedPaths(t *testing.T) {
+	f := &fakeRunner{t: t, resp: map[string]Result{
+		"apk info --who-owns /usr/bin/vi /usr/local/bin/tool": {
+			Stdout:   []byte("/usr/bin/vi symlink target is owned by busybox-1.37.0-r14\n/usr/sbin/nginx is owned by nginx-99.0-r0\n"),
+			Stderr:   []byte("ERROR: /usr/local/bin/tool: Could not find owner package\n"),
+			ExitCode: 1,
+		},
+	}}
+	got, err := apk{f.run}.Owners(ctx, []string{"/usr/bin/vi", "/usr/local/bin/tool"})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
 func TestPacman(t *testing.T) {
 	f := &fakeRunner{t: t, resp: map[string]Result{
 		"pacman -Qo /usr/bin/pacman /lib/libc.so.6 /usr/bin/nonexistent": {

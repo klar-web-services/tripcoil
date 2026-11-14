@@ -35,15 +35,22 @@ type Resolver struct {
 	Aliases []Alias
 }
 
-// Owners maps each owned path (as given) to its package.
+// Owners maps each owned path (as given) to its package. A path with a newline could forge lines
+// of the tool's output, so it is never asked about and counts as unowned.
 func (r *Resolver) Owners(ctx context.Context, paths []string) (map[string]Package, error) {
-	found, err := r.Tool.Owners(ctx, paths)
+	var ask []string
+	for _, p := range paths {
+		if !strings.Contains(p, "\n") {
+			ask = append(ask, p)
+		}
+	}
+	found, err := r.Tool.Owners(ctx, ask)
 	if err != nil {
 		return nil, err
 	}
 	var alts []string
 	altOf := map[string]string{}
-	for _, p := range paths {
+	for _, p := range ask {
 		if _, ok := found[p]; ok {
 			continue
 		}

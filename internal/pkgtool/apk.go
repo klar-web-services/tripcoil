@@ -40,9 +40,13 @@ func (a apk) Owners(ctx context.Context, paths []string) (map[string]Package, er
 				return nil, fmt.Errorf("apk info --who-owns failed (exit %d): %s", res.ExitCode, line)
 			}
 		}
+		want := make(map[string]bool, len(chunk))
+		for _, p := range chunk {
+			want[p] = true
+		}
 		for _, line := range lines(res.Stdout) {
 			m := apkOwned.FindStringSubmatch(line)
-			if m == nil {
+			if m == nil || !want[m[1]] {
 				continue
 			}
 			nv := apkNameVersion.FindStringSubmatch(m[2])

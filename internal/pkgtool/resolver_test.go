@@ -28,6 +28,26 @@ func TestDetectAliases(t *testing.T) {
 	}
 }
 
+func TestResolverNeverAsksAboutNewlinePaths(t *testing.T) {
+	f := &fakeRunner{t: t, resp: map[string]Result{
+		"dpkg-query -S /usr/bin/dpkg":              out("dpkg: /usr/bin/dpkg\n"),
+		"dpkg-query -W -f " + dpkgFormat + " dpkg": out("ii \tdpkg\tdpkg\tamd64\t1.21.23\n"),
+	}}
+	r := Resolver{Tool: dpkg{f.run}, Aliases: []Alias{{Canonical: "/usr/bin/", Alt: "/bin/"}}}
+	forged := "/usr/bin/a\nnginx-core: /usr/sbin/nginx"
+	got, err := r.Owners(ctx, []string{"/usr/bin/dpkg", forged})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Package{"/usr/bin/dpkg": {Name: "dpkg", Version: "1.21.23", Arch: "amd64", Type: "deb"}}
+	if !maps.Equal(got, want) {
+		t.Fatalf("got %+v", got)
+	}
+	if r.Owned(ctx, forged) {
+		t.Fatal("a path with a newline is never owned")
+	}
+}
+
 func TestResolverTriesAliases(t *testing.T) {
 	f := &fakeRunner{t: t, resp: map[string]Result{
 		"dpkg-query -S /usr/bin/dpkg /usr/lib/x86_64-linux-gnu/libc.so.6 /usr/bin/nonexistent": {
