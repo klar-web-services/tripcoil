@@ -54,8 +54,12 @@ func errTooLarge() error { return fmt.Errorf("it is larger than %d bytes", runni
 var soPattern = regexp.MustCompile(`\.so($|\.)`)
 
 // isSharedLibrary reports whether a mapped file is a shared library (libssl.so.3,
-// ld-linux-x86-64.so.2, _ssl.cpython-312-x86_64-linux-gnu.so), not a locale archive or data file.
-func isSharedLibrary(path string) bool { return soPattern.MatchString(filepath.Base(path)) }
+// ld-linux-x86-64.so.2, _ssl.cpython-312-x86_64-linux-gnu.so), not a locale archive or data file
+// such as /etc/ld.so.cache, which ldconfig replaces on every upgrade.
+func isSharedLibrary(path string) bool {
+	b := filepath.Base(path)
+	return soPattern.MatchString(b) && !strings.HasSuffix(b, ".cache")
+}
 
 // within reports whether path lies below dir.
 func within(path, dir string) bool { return strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/") }
