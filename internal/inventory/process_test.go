@@ -542,3 +542,34 @@ func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessCollectorReadBudget(t *testing.T) {
+	old := runReadCap
+	runReadCap = 20
+	t.Cleanup(func() { runReadCap = old })
+	link := procfs.FileID{Dev: 1, Ino: 100}
+	src := fakeSource{
+		30: {cmdline: []string{"/opt/api/a"}, exe: "/opt/api/a", exeID: link, exeData: "go binary v1"},
+		// A hard link to the same file: the read cache is keyed by path, the budget is not.
+		31: {cmdline: []string{"/opt/api/b"}, exe: "/opt/api/b", exeID: link, exeData: "go binary v1"},
+		// It reports 4 bytes but holds 12, more than the 8 left.
+		32: {cmdline: []string{"/opt/api/c"}, exe: "/opt/api/c", exeData: "go binary v2", size: 4},
+	}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := byName(res.items, "a").Origins; !slices.Equal(got, []string{BinaryOriginID(sum("go binary v1"))}) {
+		t.Fatalf("a origins %v", got)
+	}
+	for _, name := range []string{"b", "c"} {
+		it := byName(res.items, name)
+		if o := originByID(res.origins, it.Origins[0]); len(it.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "read budget was spent") {
+			t.Errorf("%s: origin %+v", name, o)
+		}
+	}
+	if n := src[30].read + src[31].read + src[32].read; n > 21 {
+		t.Fatalf("read %d bytes with a budget of 20", n)
+	}
+}

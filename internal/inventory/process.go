@@ -56,6 +56,7 @@ type processCollector struct {
 	owned    map[string]bool    // package ownership of single paths (app directory markers), by path
 	files    map[fileKey]Origin // origins of unpackaged running files
 	libPaths map[string]bool    // the distinct library paths taken in this run
+	readLeft int64              // what is left of the run's read budget
 }
 
 // fileKey identifies a running file by path and by device and inode: another mount namespace
@@ -89,7 +90,7 @@ type processResult struct {
 }
 
 func (c *processCollector) collect(ctx context.Context) (processResult, error) {
-	c.owned, c.files, c.libPaths = map[string]bool{}, map[fileKey]Origin{}, map[string]bool{}
+	c.owned, c.files, c.libPaths, c.readLeft = map[string]bool{}, map[fileKey]Origin{}, map[string]bool{}, runReadCap
 	pids, err := c.src.PIDs()
 	if err != nil {
 		return processResult{}, fmt.Errorf("cannot list processes: %w", err)
@@ -384,7 +385,7 @@ func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draf
 // it can never be a FIFO or device someone put at that path. A replaced file is also copied into
 // the cache, because the Audit cannot read it from the path.
 func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted bool, open func() (io.ReadCloser, error)) (Origin, error) {
-	f, err := openRunning(open)
+	f, err := openRunning(open, &c.readLeft)
 	if err != nil {
 		return Origin{}, err
 	}

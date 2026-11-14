@@ -23,6 +23,14 @@ const maxRunningFileSize = 4 << 30
 
 var runningFileCap int64 = maxRunningFileSize // lowered by tests
 
+// maxRunReadBytes is the most read from running files in one run: the per-file cap still allows
+// one sparse file per library and per hard link to it.
+const maxRunReadBytes = 64 << 30
+
+var runReadCap int64 = maxRunReadBytes // lowered by tests
+
+var errReadBudget = errors.New("the run's read budget was spent")
+
 // cacheSpace returns the available and total bytes of the file system that holds dir.
 var cacheSpace = func(dir string) (free, total uint64, err error) {
 	var st syscall.Statfs_t
@@ -51,15 +59,17 @@ type runningFile struct {
 	size    int64 // -1 when unknown
 	id      procfs.FileID
 	idKnown bool
+	left    *int64 // what is left of the run's read budget
 }
 
-// openRunning opens a running file, refusing one larger than runningFileCap.
-func openRunning(open func() (io.ReadCloser, error)) (runningFile, error) {
+// openRunning opens a running file, refusing one larger than runningFileCap. Reading it takes
+// from left.
+func openRunning(open func() (io.ReadCloser, error), left *int64) (runningFile, error) {
 	r, err := open()
 	if err != nil {
 		return runningFile{}, err
 	}
-	f := runningFile{ReadCloser: r, size: -1}
+	f := runningFile{ReadCloser: r, size: -1, left: left}
 	if s, ok := r.(interface{ Stat() (fs.FileInfo, error) }); ok {
 		fi, err := s.Stat()
 		if err != nil {
@@ -76,15 +86,24 @@ func openRunning(open func() (io.ReadCloser, error)) (runningFile, error) {
 	return f, nil
 }
 
-// readRunning copies a running file to w until ctx is cancelled. It fails past runningFileCap,
-// because the file can grow while it is read.
+// readRunning copies a running file to w until ctx is cancelled. It refuses a file larger than
+// what is left of the read budget and fails past runningFileCap or the budget, because the file
+// can grow while it is read.
 func readRunning(ctx context.Context, w io.Writer, f runningFile) error {
-	n, err := io.Copy(w, io.LimitReader(ctxReader{ctx, f}, runningFileCap+1))
+	if f.size > *f.left {
+		return errReadBudget
+	}
+	limit, over := runningFileCap, errTooLarge()
+	if *f.left < limit {
+		limit, over = *f.left, errReadBudget
+	}
+	n, err := io.Copy(w, io.LimitReader(ctxReader{ctx, f}, limit+1))
+	*f.left -= min(n, *f.left)
 	if err != nil {
 		return err
 	}
-	if n > runningFileCap {
-		return errTooLarge()
+	if n > limit {
+		return over
 	}
 	return nil
 }
