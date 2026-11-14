@@ -3,7 +3,10 @@ package kernelcna
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 )
+
+var cveID = regexp.MustCompile(`^CVE-[0-9]{4}-[0-9]+$`)
 
 // Record is what Tripcoil keeps of one CVE record: its affected entries without the git ranges,
 // and the CNA's own CVSS score when it gave one.
@@ -58,7 +61,7 @@ func ParseRecord(data []byte) (Record, error) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return Record{}, err
 	}
-	if doc.CVEMetadata.CVEID == "" || doc.CVEMetadata.State != "PUBLISHED" {
+	if !cveID.MatchString(doc.CVEMetadata.CVEID) || doc.CVEMetadata.State != "PUBLISHED" {
 		return Record{}, fmt.Errorf("not a published CVE record: %q %q", doc.CVEMetadata.CVEID, doc.CVEMetadata.State)
 	}
 	r := Record{ID: doc.CVEMetadata.CVEID, Affected: []Entry{}}

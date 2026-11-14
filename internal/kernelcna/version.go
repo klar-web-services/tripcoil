@@ -19,19 +19,29 @@ func parseVersion(s string) (version, bool) {
 	var v version
 	if base, rc, ok := strings.Cut(s, "-rc"); ok {
 		n, err := strconv.Atoi(rc)
-		if err != nil || n < 1 {
+		if !digits(rc) || err != nil || n < 1 {
 			return version{}, false
 		}
 		s, v.rc = base, n
 	}
 	for _, p := range strings.Split(s, ".") {
 		n, err := strconv.Atoi(p)
-		if err != nil || n < 0 {
+		if !digits(p) || err != nil {
 			return version{}, false
 		}
 		v.parts = append(v.parts, n)
 	}
 	return v, true
+}
+
+// digits reports whether s is one or more characters 0-9.
+func digits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // compare orders versions numerically, a missing component counting as 0, and a release

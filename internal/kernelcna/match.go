@@ -23,7 +23,7 @@ type Match struct {
 // Affected returns the CVEs that affect an upstream kernel version, sorted by ID. A version that
 // does not parse matches nothing.
 func (d *Data) Affected(upstream string) []Match {
-	v, ok := parseVersion(normalize(upstream))
+	v, ok := parseVersion(upstream)
 	if !ok {
 		return nil
 	}
@@ -39,20 +39,8 @@ func (d *Data) Affected(upstream string) []Match {
 
 // IsVersion reports whether an upstream kernel version can be matched.
 func IsVersion(upstream string) bool {
-	_, ok := parseVersion(normalize(upstream))
+	_, ok := parseVersion(upstream)
 	return ok
-}
-
-// normalize writes uname's 6.1.0 as the records write it: 6.1.
-func normalize(s string) string {
-	base, rc, isRC := strings.Cut(s, "-rc")
-	if strings.Count(base, ".") == 2 && strings.HasSuffix(base, ".0") && !strings.HasPrefix(base, "2.6.") {
-		base = strings.TrimSuffix(base, ".0")
-	}
-	if isRC {
-		return base + "-rc" + rc
-	}
-	return base
 }
 
 // affects applies CVE JSON 5's rule to each entry, and the record affects v when any entry says
@@ -123,7 +111,7 @@ func atMost(v version, upper string) bool {
 	return ok && compare(v, u) <= 0
 }
 
-// fixFor is the first version above v where the record says the bug is fixed: the start of an
+// fixFor is the first version above v that the record does not mark affected, where it says the bug is fixed: the start of an
 // unaffected range that runs to the end of v's branch, the end of an affected range that covers v,
 // or the mainline fix ("X.Y <= *"). A fix in v's own branch wins over the mainline fix; a fix in
 // another stable branch does not help v and is not considered.
@@ -133,7 +121,7 @@ func (r Record) fixFor(v version) string {
 	bestSame := false
 	consider := func(s string) {
 		f, ok := parseVersion(s)
-		if !ok || compare(f, v) <= 0 {
+		if !ok || compare(f, v) <= 0 || r.affects(f) {
 			return
 		}
 		same := sameBranch(f, v)
