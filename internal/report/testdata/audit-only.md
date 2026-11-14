@@ -4,7 +4,7 @@
 
 ## Upgrades
 
-- Upgrade lodash in /srv/shop to 4.18.0 to clear all 4 of its findings.
+- Upgrade lodash 4.17.20 in /srv/shop to 4.18.0 to clear all 4 of its findings.
 
 ## Critical risk (1)
 

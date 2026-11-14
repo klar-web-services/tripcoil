@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,8 +17,8 @@ import (
 )
 
 // fakeScanner imitates Grype. Scan writes the SBOM listed for the source and matches it; Match
-// matches every package of the SBOM it is given against vulns, keyed by name@version, so a
-// cached or rewritten SBOM gives the matches it holds.
+// matches every package of the SBOM it is given against vulns, keyed by name@version or by purl,
+// so a cached or rewritten SBOM gives the matches it holds.
 type fakeScanner struct {
 	status     grype.DBStatus
 	updateErr  error
@@ -29,7 +31,10 @@ type fakeScanner struct {
 	vulns      map[string][]grype.Vulnerability
 	lookups    map[string]grype.Vulnerability
 	lookupErr  error
-	catalogs   []string // the sources cataloged, in order
+	matchErr   map[string]error  // by SBOM file name
+	purlAs     map[string]string // the purl Match reports for a package, when it is not the SBOM's
+	catalogs   []string          // the sources cataloged, in order
+	matched    []string          // the file names of the SBOMs matched, in order
 	lookedUp   []string
 }
 
@@ -82,6 +87,10 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 }
 
 func (f *fakeScanner) Match(_ context.Context, sbom, raw string) (*grype.Report, error) {
+	f.matched = append(f.matched, filepath.Base(sbom))
+	if err := f.matchErr[filepath.Base(sbom)]; err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(sbom)
 	if err != nil {
 		return nil, err
@@ -93,9 +102,13 @@ func (f *fakeScanner) Match(_ context.Context, sbom, raw string) (*grype.Report,
 	rep := &grype.Report{DBBuilt: f.status.Built, Distro: f.distro}
 	for _, c := range comps {
 		typ, _, _ := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/")
-		for _, v := range f.vulns[c.Name+"@"+c.Version] {
+		purl := c.PURL
+		if p, ok := f.purlAs[purl]; ok {
+			purl = p
+		}
+		for _, v := range slices.Concat(f.vulns[c.Name+"@"+c.Version], f.vulns[c.PURL]) {
 			rep.Matches = append(rep.Matches, grype.Match{Vulnerability: v,
-				Artifact: grype.Artifact{Name: c.Name, Version: c.Version, Type: typ, PURL: c.PURL, Locations: []string{"/where/" + c.Name}}})
+				Artifact: grype.Artifact{Name: c.Name, Version: c.Version, Type: typ, PURL: purl, Locations: []string{"/where/" + c.Name}}})
 		}
 	}
 	return rep, os.WriteFile(raw, []byte(`{"matches":[]}`), 0o600)

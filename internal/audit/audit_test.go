@@ -191,9 +191,15 @@ func TestAudit(t *testing.T) {
 	if a.Findings[0].Risk != RiskCritical || a.Findings[len(a.Findings)-1].Risk != RiskLow {
 		t.Errorf("findings are not sorted by risk: %+v", a.Findings)
 	}
+	if l := f["GHSA-35jh-r3h4-6jhm"]; l.Package.PURL != "pkg:npm/lodash@4.17.20" {
+		t.Errorf("app directory finding %+v: the purl is Grype's", l)
+	}
 	if len(a.Upgrades) != 2 || a.Upgrades[0].Package != "lodash" || a.Upgrades[0].Version != "4.17.21" || a.Upgrades[0].Findings != 2 ||
-		a.Upgrades[1].Path != "/srv/app.jar" || a.Upgrades[1].Version != "2.15.0" {
+		!slices.Equal(a.Upgrades[0].Installed, []string{"4.17.20"}) || a.Upgrades[1].Path != "/srv/app.jar" || a.Upgrades[1].Version != "2.15.0" {
 		t.Errorf("upgrades %+v", a.Upgrades)
+	}
+	if !slices.Contains(g.matched, "upgrades.cdx.json") {
+		t.Errorf("the upgrade lines were not checked: %v", g.matched)
 	}
 	st := statuses(a)
 	for id, want := range map[string]string{libsslO: Scanned, kernelO: Scanned, apiO: Scanned, oldO: Scanned, toolO: Unidentified,
@@ -239,6 +245,21 @@ func TestAudit(t *testing.T) {
 	want = []string{"file:" + filepath.Join(cache, "scan", sumOf("go binary v1")), "file:" + filepath.Join(cache, "replaced", sumOf("go binary v0")), "dir:" + filepath.Join(root, "srv/venv")}
 	if slices.Sort(g.catalogs); !slices.Equal(g.catalogs, slices.Sorted(slices.Values(want))) || len(a2.Findings) != len(a.Findings) {
 		t.Fatalf("second run scanned %q and found %d findings", g.catalogs, len(a2.Findings))
+	}
+}
+
+func TestAuditChecksUpgradeLines(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.vulns["lodash@4.17.21"] = []grype.Vulnerability{vuln("GHSA-0000-0000-0000", "High", "fixed", "4.17.22")}
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if len(a.Upgrades) != 1 || a.Upgrades[0].Package != "log4j-core" || len(a.Warnings) != 0 {
+		t.Fatalf("upgrades %+v, warnings %+v: lodash 4.17.21 is still vulnerable", a.Upgrades, a.Warnings)
+	}
+	g.matchErr = map[string]error{"upgrades.cdx.json": errors.New("Grype failed: boom")}
+	a = Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if a.Status != Complete || len(a.Errors) != 0 || a.Upgrades == nil || len(a.Upgrades) != 0 || len(a.Warnings) != 1 || a.Warnings[0].Code != problem.UpgradeCheckFailed {
+		t.Fatalf("audit %s, upgrades %+v, errors %+v, warnings %+v", a.Status, a.Upgrades, a.Errors, a.Warnings)
 	}
 }
 

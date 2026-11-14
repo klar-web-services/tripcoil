@@ -91,7 +91,7 @@ func hostAudit() *audit.Audit {
 			f("f:0000000000000004", img, "CVE-2026-3000", "Low", 0, false, audit.RiskLow, "zlib1g", "1:1.2.13.dfsg-1",
 				"No fix is known for zlib1g 1:1.2.13.dfsg-1 yet.", "container:shop-web-1"),
 		},
-		Upgrades: []audit.Upgrade{{Origin: shop, Path: "/srv/shop", Package: "lodash", Type: "npm", Version: "4.18.0", Findings: 4}},
+		Upgrades: []audit.Upgrade{{Origin: shop, Path: "/srv/shop", Package: "lodash", Type: "npm", Installed: []string{"4.17.20"}, Version: "4.18.0", Findings: 4}},
 		Errors:   []problem.Problem{}, Warnings: []problem.Problem{},
 	}
 }
@@ -160,13 +160,16 @@ func TestRenderEscapesUntrustedText(t *testing.T) {
 	aud.Findings[2].Vulnerability.URLs = []string{"http://insecure.example"}
 	aud.Findings[3].Package.Name = "a~b~c"
 	aud.Findings[3].Package.Version = "ev\u202eil\u200bx"
+	aud.Findings[3].Vulnerability.ID = "\n# Heading" // clean makes the newline a space
+	aud.Findings[3].Vulnerability.URLs = nil
+	aud.Upgrades[0].Installed = []string{"4.17.20", "*4.17.21*"}
 	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
-	for _, bad := range []string{"\x1b", "<script>", "|*pkg*", "[x](javascript", "](https://example.com/a)b)", "- # CVE-1", "- 1. GHSA", "a~b~c", "\u202e", "\u200b"} {
+	for _, bad := range []string{"\x1b", "<script>", "|*pkg*", "[x](javascript", "](https://example.com/a)b)", "- # CVE-1", "- 1. GHSA", "-  # Heading", "a~b~c", "\u202e", "\u200b", "*4.17.21*"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("report contains %q", bad)
 		}
 	}
-	for _, want := range []string{`evil\|\*pkg\*`, `- \# CVE-1`, `- 1\. GHSA`, `a\~b\~c`, "ev il x"} {
+	for _, want := range []string{`evil\|\*pkg\*`, `- \# CVE-1`, `- 1\. GHSA`, `- \# Heading`, `a\~b\~c`, "ev il x", `- Upgrade lodash 4.17.20, \*4.17.21\* in /srv/shop to 4.18.0`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q missing:\n%s", want, got)
 		}

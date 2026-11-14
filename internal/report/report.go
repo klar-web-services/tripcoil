@@ -174,7 +174,11 @@ func writeUpgrades(b *strings.Builder, ups []audit.Upgrade) {
 	}
 	b.WriteString("## Upgrades\n\n")
 	for _, u := range ups {
-		fmt.Fprintf(b, "- Upgrade %s in %s to %s to clear %s.\n", md(u.Package), md(u.Path), md(u.Version), clears(u.Findings))
+		installed := make([]string, len(u.Installed))
+		for i, v := range u.Installed {
+			installed[i] = md(v)
+		}
+		fmt.Fprintf(b, "- Upgrade %s %s in %s to %s to clear %s.\n", md(u.Package), strings.Join(installed, ", "), md(u.Path), md(u.Version), clears(u.Findings))
 	}
 	b.WriteString("\n")
 }
@@ -396,7 +400,10 @@ func vulnLink(v audit.Vulnerability) string {
 }
 
 // escapeBlockStart keeps text printed at the start of a list item from opening a Markdown block.
+// Leading spaces go first: clean turns control characters into spaces, and spaces before a block
+// marker still open the block.
 func escapeBlockStart(s string) string {
+	s = strings.TrimLeft(s, " ")
 	if s == "" {
 		return s
 	}

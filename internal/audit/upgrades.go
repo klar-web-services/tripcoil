@@ -2,39 +2,220 @@ package audit
 
 import (
 	"cmp"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/klar-web-services/tripcoil/internal/grype"
+	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// Upgrades returns the upgrade lines of spec section 6.6: for each package in an app directory or
-// jar whose findings all have a fix, the one version that clears them all. That is the highest fix
-// version, given only when every installed and fix version is semver, the highest is spelled one
-// way only, and it is above every installed version. The version is always one that Grype
-// reported; none is derived. Sorted by findings cleared, then path and package.
+// Upgrades returns the candidate upgrade lines of spec section 6.6: for each package in an app
+// directory or jar whose findings all have a fix, the one version that may clear them all. That is
+// the highest fix version, given only when every installed and fix version is semver, the highest
+// is spelled one way only, and it is above every installed version. The version is always one that
+// Grype reported; none is derived. Grype reports for each finding only the fix of the version range
+// that matched, so the highest fix may still be in another range: the Audit gives a line only when
+// matching the package at that version finds nothing (checkUpgrades). A package is told apart by
+// its purl without the version, or by its name when it has none. Sorted by findings cleared, then
+// path and package.
 func Upgrades(findings []Finding) []Upgrade {
-	type key struct{ origin, typ, pkg string }
+	var out []Upgrade
+	for _, c := range upgradeCandidates(findings) {
+		out = append(out, c.Upgrade)
+	}
+	return out
+}
+
+// upgradeCandidate is a candidate upgrade line with the packages to match at its version: each
+// purl of its findings once, with the candidate version. check is nil when a finding cannot be
+// matched again that way: it has no purl, or Grype matched it by CPE, which the purl does not carry.
+type upgradeCandidate struct {
+	Upgrade
+	check []grype.Component
+}
+
+// upgradeCandidates is Upgrades with the packages that check each candidate.
+func upgradeCandidates(findings []Finding) []upgradeCandidate {
+	type key struct{ origin, typ, purl, name string }
 	groups := map[key][]Finding{}
 	var keys []key
 	for _, f := range findings {
 		if !strings.HasPrefix(f.Origin, "appdir:") {
 			continue
 		}
-		k := key{f.Origin, f.Package.Type, f.Package.Name}
+		k := key{origin: f.Origin, typ: f.Package.Type}
+		if f.Package.PURL != "" {
+			k.purl = purlWithoutVersion(f.Package.PURL) // a Maven name is only the artifactId
+		} else {
+			k.name = f.Package.Name
+		}
 		if _, seen := groups[k]; !seen {
 			keys = append(keys, k)
 		}
 		groups[k] = append(groups[k], f)
 	}
-	var out []Upgrade
+	var out []upgradeCandidate
 	for _, k := range keys {
-		if v, ok := upgradeVersion(groups[k]); ok {
-			out = append(out, Upgrade{Origin: k.origin, Path: strings.TrimPrefix(k.origin, "appdir:"), Package: k.pkg, Type: k.typ, Version: v, Findings: len(groups[k])})
+		fs := groups[k]
+		if v, ok := upgradeVersion(fs); ok {
+			out = append(out, upgradeCandidate{
+				Upgrade: Upgrade{Origin: k.origin, Path: strings.TrimPrefix(k.origin, "appdir:"), Package: fs[0].Package.Name, Type: k.typ,
+					Installed: installedVersions(fs), Version: v, Findings: len(fs)},
+				check: matchAt(fs, v),
+			})
 		}
 	}
-	slices.SortFunc(out, func(a, b Upgrade) int {
+	slices.SortStableFunc(out, func(a, b upgradeCandidate) int {
 		return cmp.Or(cmp.Compare(b.Findings, a.Findings), cmp.Compare(a.Path, b.Path), cmp.Compare(a.Package, b.Package), cmp.Compare(a.Type, b.Type))
 	})
 	return out
+}
+
+// installedVersions lists the installed versions of a package's findings, each once, lowest first.
+// upgradeVersion has checked that they are semver.
+func installedVersions(findings []Finding) []string {
+	var out []string
+	for _, f := range findings {
+		if !slices.Contains(out, f.Package.Version) {
+			out = append(out, f.Package.Version)
+		}
+	}
+	slices.SortFunc(out, func(a, b string) int {
+		x, _ := parseSemver(a)
+		y, _ := parseSemver(b)
+		return cmp.Or(compareSemver(x, y), strings.Compare(a, b))
+	})
+	return out
+}
+
+// matchAt lists the packages of findings at version, one per purl, or nil when a finding cannot be
+// matched again.
+func matchAt(findings []Finding, version string) []grype.Component {
+	var out []grype.Component
+	for _, f := range findings {
+		purl, ok := purlWithVersion(f.Package.PURL, version)
+		if !ok || f.Source == "nvd:cpe" {
+			return nil
+		}
+		if !slices.ContainsFunc(out, func(c grype.Component) bool { return c.PURL == purl }) {
+			out = append(out, grype.Component{Name: f.Package.Name, Version: version, PURL: purl})
+		}
+	}
+	return out
+}
+
+// purlVersion finds the version of a purl: after the last @ before the qualifiers (?) and the
+// subpath (#). The @ of an npm scope is percent-encoded, so it is never taken for it.
+func purlVersion(purl string) (start, end int, ok bool) {
+	end = len(purl)
+	if i := strings.IndexAny(purl, "?#"); i >= 0 {
+		end = i
+	}
+	at := strings.LastIndexByte(purl[:end], '@')
+	return at + 1, end, at >= 0
+}
+
+// purlWithoutVersion is a purl without its version, qualifiers and subpath.
+func purlWithoutVersion(purl string) string {
+	start, end, ok := purlVersion(purl)
+	if ok {
+		return purl[:start-1]
+	}
+	return purl[:end]
+}
+
+// purlWithVersion is a purl with its version replaced, keeping the qualifiers and subpath. The
+// version is semver, so + (of build metadata) is the only character to percent-encode.
+func purlWithVersion(purl, version string) (string, bool) {
+	start, end, ok := purlVersion(purl)
+	if !ok {
+		return "", false
+	}
+	return purl[:start] + strings.ReplaceAll(version, "+", "%2B") + purl[end:], true
+}
+
+// checkUpgrades keeps the candidates that Grype confirms: it matches every candidate's packages at
+// the candidate version in one SBOM, and keeps a line only when none of them gets any match, so a
+// version still known to be vulnerable is never recommended. A match for a purl that is not in the
+// SBOM drops every candidate of that package type and name. When the matching fails, no line is
+// given, and a warning says why.
+func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) []Upgrade {
+	byPURL := map[string][]int{} // the candidates of each purl in the SBOM
+	var comps []grype.Component
+	for i, c := range cands {
+		for _, p := range c.check {
+			if _, seen := byPURL[p.PURL]; !seen {
+				comps = append(comps, p)
+			}
+			byPURL[p.PURL] = append(byPURL[p.PURL], i)
+		}
+	}
+	out := []Upgrade{}
+	if len(comps) == 0 {
+		return out
+	}
+	rep, err := au.matchUpgrades(ctx, comps)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		au.a.Warnings = append(au.a.Warnings, problem.New(problem.Warning, problem.UpgradeCheckFailed, "audit",
+			"the upgrade lines could not be checked with Grype, so none are given: %v", err))
+		return out
+	}
+	matched := make([]bool, len(cands))
+	for _, m := range rep.Matches {
+		if is, ok := byPURL[m.Artifact.PURL]; ok {
+			for _, i := range is {
+				matched[i] = true
+			}
+			continue
+		}
+		for i, c := range cands {
+			matched[i] = matched[i] || (c.Type == m.Artifact.Type && c.Package == m.Artifact.Name)
+		}
+	}
+	for i, c := range cands {
+		if c.check != nil && !matched[i] {
+			out = append(out, c.Upgrade)
+		}
+	}
+	return out
+}
+
+// matchUpgrades matches packages written as a CycloneDX SBOM. Both the SBOM and Grype's report stay
+// in the scan folder, which is removed at the end of the run.
+func (au *auditor) matchUpgrades(ctx context.Context, comps []grype.Component) (*grype.Report, error) {
+	type component struct {
+		Type    string `json:"type"`
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		PURL    string `json:"purl"`
+	}
+	doc := struct {
+		BOMFormat   string      `json:"bomFormat"`
+		SpecVersion string      `json:"specVersion"`
+		Components  []component `json:"components"`
+	}{BOMFormat: "CycloneDX", SpecVersion: "1.5"}
+	for _, c := range comps {
+		doc.Components = append(doc.Components, component{"library", c.Name, c.Version, c.PURL})
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(au.scanDir(), 0o700); err != nil {
+		return nil, err
+	}
+	sbom := filepath.Join(au.scanDir(), "upgrades.cdx.json")
+	if err := os.WriteFile(sbom, data, 0o600); err != nil {
+		return nil, err
+	}
+	return au.d.Grype.Match(ctx, sbom, filepath.Join(au.scanDir(), "upgrades.grype.json"))
 }
 
 // upgradeVersion is the highest fix version of one package's findings, if a line is allowed.

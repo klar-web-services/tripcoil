@@ -173,7 +173,7 @@ func (au *auditor) run(ctx context.Context) {
 	slices.SortFunc(a.Findings, func(x, y Finding) int {
 		return cmp.Or(cmp.Compare(slices.Index(Tiers, x.Risk), slices.Index(Tiers, y.Risk)), cmp.Compare(x.Vulnerability.ID, y.Vulnerability.ID), cmp.Compare(x.ID, y.ID))
 	})
-	a.Upgrades = append([]Upgrade{}, Upgrades(a.Findings)...)
+	a.Upgrades = au.checkUpgrades(ctx, upgradeCandidates(a.Findings))
 	au.cache.prune()
 }
 
@@ -223,7 +223,7 @@ func (au *auditor) addFindings(matches []grype.Match, raw string, owner func(gry
 		f := Finding{
 			Vulnerability: vulnerability(m.Vulnerability, m.Related),
 			Origin:        origin,
-			Package:       Package{Name: m.Artifact.Name, Version: m.Artifact.Version, Type: m.Artifact.Type},
+			Package:       Package{Name: m.Artifact.Name, Version: m.Artifact.Version, Type: m.Artifact.Type, PURL: m.Artifact.PURL},
 			Fix:           Fix{State: cmp.Or(m.Vulnerability.FixState, "unknown"), Versions: nonNil(m.Vulnerability.FixVersions)},
 			Source:        m.Vulnerability.Namespace,
 			Raw:           raw,

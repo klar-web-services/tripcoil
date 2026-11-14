@@ -114,6 +114,7 @@ type Package struct {
 	Name     string `json:"name"`
 	Version  string `json:"version"`
 	Type     string `json:"type"`
+	PURL     string `json:"purl,omitempty"` // as Grype reports it; kernel findings have none
 	Location string `json:"location,omitempty"`
 }
 
@@ -123,13 +124,14 @@ type Fix struct {
 	Versions []string `json:"versions"`
 }
 
-// Upgrade is one version of a package in an app directory that clears all its findings
-// (spec section 6.6).
+// Upgrade is one version of a package in an app directory that clears all its findings: Grype
+// matched the package at that version and found nothing (spec section 6.6).
 type Upgrade struct {
-	Origin   string `json:"origin"`
-	Path     string `json:"path"` // the app directory or jar
-	Package  string `json:"package"`
-	Type     string `json:"type"`
-	Version  string `json:"version"`
-	Findings int    `json:"findings"`
+	Origin    string   `json:"origin"`
+	Path      string   `json:"path"` // the app directory or jar
+	Package   string   `json:"package"`
+	Type      string   `json:"type"`
+	Installed []string `json:"installed"` // the installed versions, each once, lowest first
+	Version   string   `json:"version"`
+	Findings  int      `json:"findings"`
 }
