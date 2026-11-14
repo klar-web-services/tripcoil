@@ -18,7 +18,7 @@ const (
 // Origin scan statuses.
 const (
 	Scanned      = "scanned"
-	Unidentified = "unidentified" // Grype found no packages in it: a coverage gap
+	Unidentified = "unidentified" // Grype found no packages in it, or no vulnerability data applies to them: a coverage gap
 	ScanFailed   = "failed"
 	Unresolved   = "unresolved" // the Inventory could not resolve it: a coverage gap
 )
@@ -67,7 +67,7 @@ type OriginResult struct {
 	Status   string `json:"status"`
 	Packages int    `json:"packages"`         // packages Grype cataloged in it
 	Error    string `json:"error,omitempty"`  // why the scan failed
-	Reason   string `json:"reason,omitempty"` // why the Inventory could not resolve it
+	Reason   string `json:"reason,omitempty"` // why it is unresolved or unidentified
 	Raw      *Raw   `json:"raw,omitempty"`
 }
 

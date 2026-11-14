@@ -34,7 +34,7 @@ const (
 	OriginScanFailed   = "ORIGIN_SCAN_FAILED"   // one origin could not be scanned
 	KernelDataStale    = "KERNEL_DATA_STALE"    // the kernel CNA data is too old, so the kernel is not audited
 	OriginUnresolved   = "ORIGIN_UNRESOLVED"    // gap: the Inventory could not resolve an origin
-	OriginUnidentified = "ORIGIN_UNIDENTIFIED"  // gap: Grype found no packages in an origin
+	OriginUnidentified = "ORIGIN_UNIDENTIFIED"  // gap: Grype found no packages in an origin, or no vulnerability data applies to them
 	DBUpdateFailed     = "DB_UPDATE_FAILED"     // warning: the database could not be updated, but is fresh enough
 	UpgradeCheckFailed = "UPGRADE_CHECK_FAILED" // warning: Grype could not check the upgrade lines, so none are given
 )

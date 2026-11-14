@@ -93,11 +93,12 @@ func SBOMLocations(data []byte) ([][]string, error) {
 	return out, nil
 }
 
-// Matchable reports whether matching an SBOM gives the same matches as scanning what it came
-// from, so that the SBOM can be cached. It does not when the SBOM holds Go modules: Grype keeps
-// only the Go matches whose code is linked into a binary, which it sees in the binary but not in
-// an SBOM. An SBOM whose operating system has no version is not cached either: matching it may
-// lose the distribution of a derivative, as it did for CachyOS.
+// Matchable reports false for an SBOM known to match otherwise than a scan of what it came from. It
+// only filters: the Audit still matches any other SBOM and compares its matches with the scan's
+// before caching it. An SBOM that holds Go modules matches otherwise: Grype keeps only the Go
+// matches whose code is linked into a binary, which it sees in the binary but not in an SBOM. So
+// may an SBOM whose operating system has no version: matching it may lose the distribution of a
+// derivative, as it did for CachyOS.
 func Matchable(data []byte) (bool, error) {
 	doc, err := parseSBOM(data)
 	if err != nil {
