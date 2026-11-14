@@ -1,0 +1,210 @@
+package kernelcna
+
+import (
+	"archive/tar"
+	"bufio"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// DefaultBaseURL is the kernel CNA's vulns repository on kernel.org.
+const DefaultBaseURL = "https://git.kernel.org/pub/scm/linux/security/vulns.git"
+
+const (
+	refreshAfter     = 24 * time.Hour // the data is checked for news at most daily (spec section 6.3)
+	minRecords       = 15000          // a snapshot holds about 18,000; fewer means a broken download
+	maxSnapshotBytes = 256 << 20      // compressed; about 35 MB in 2026
+	maxRecordBytes   = 4 << 20
+)
+
+var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// Source fetches the kernel CNA data into the cache.
+type Source struct {
+	CacheDir   string // the data is CacheDir/kernel-cna.json
+	BaseURL    string
+	Client     *http.Client
+	MinRecords int
+}
+
+// NewSource returns a Source for the real vulns repository.
+func NewSource(cacheDir string) *Source {
+	return &Source{CacheDir: cacheDir, BaseURL: DefaultBaseURL, Client: &http.Client{Timeout: 10 * time.Minute}, MinRecords: minRecords}
+}
+
+func (s *Source) path() string { return filepath.Join(s.CacheDir, "kernel-cna.json") }
+
+// Load returns the data in the cache, first checking for newer data when it was last checked a
+// day ago, or maxAge ago when that is shorter. When the check fails, data checked within maxAge is
+// still used; older data, or none, is an error.
+func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) (*Data, error) {
+	old := s.read()
+	if old != nil && now.Sub(old.Checked) < min(refreshAfter, maxAge) && !old.Checked.After(now) {
+		return old, nil
+	}
+	fresh, err := s.refresh(ctx, old, now)
+	switch {
+	case err == nil:
+		return fresh, nil
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	case old == nil:
+		return nil, fmt.Errorf("the kernel CNA data cannot be fetched: %w", err)
+	case now.Sub(old.Checked) <= maxAge:
+		return old, nil
+	}
+	return nil, fmt.Errorf("the kernel CNA data was last checked %.0f hours ago, which is older than audit.maxDatabaseAgeHours (%.0f), and checking it again failed: %w",
+		now.Sub(old.Checked).Hours(), maxAge.Hours(), err)
+}
+
+// read returns the cached data, or nil when there is none or it cannot be read.
+func (s *Source) read() *Data {
+	data, err := os.ReadFile(s.path())
+	if err != nil {
+		return nil
+	}
+	var d Data
+	if err := json.Unmarshal(data, &d); err != nil || !commitPattern.MatchString(d.Commit) {
+		return nil
+	}
+	return &d
+}
+
+// refresh asks which commit the repository is at, and downloads that commit's snapshot unless
+// the cache already holds it.
+func (s *Source) refresh(ctx context.Context, old *Data, now time.Time) (*Data, error) {
+	commit, err := s.masterCommit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if old != nil && old.Commit == commit {
+		d := *old
+		d.Checked = now
+		return &d, s.save(&d)
+	}
+	records, err := s.snapshot(ctx, commit)
+	if err != nil {
+		return nil, err
+	}
+	d := &Data{Commit: commit, Checked: now, Records: records}
+	return d, s.save(d)
+}
+
+// get fetches a URL with GET. A HEAD request once left kernel.org's cache serving empty
+// snapshots, so none is ever sent, and every body is checked.
+func (s *Source) get(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s returned %s", url, resp.Status)
+	}
+	return resp, nil
+}
+
+// masterCommit reads the master branch's commit from info/refs.
+func (s *Source) masterCommit(ctx context.Context) (string, error) {
+	resp, err := s.get(ctx, s.BaseURL+"/info/refs")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
+	for sc.Scan() {
+		sha, ref, ok := strings.Cut(sc.Text(), "\t")
+		if ok && ref == "refs/heads/master" && commitPattern.MatchString(sha) {
+			return sha, nil
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", err
+	}
+	return "", errors.New("the vulns repository lists no master commit")
+}
+
+// snapshot downloads a commit's snapshot and parses the published CVE records in it.
+func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) {
+	resp, err := s.get(ctx, s.BaseURL+"/snapshot/vulns-"+commit+".tar.gz")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	gz, err := gzip.NewReader(io.LimitReader(resp.Body, maxSnapshotBytes))
+	if err != nil {
+		return nil, fmt.Errorf("the snapshot is not a gzip archive: %w", err)
+	}
+	published := regexp.MustCompile(`^vulns-` + commit + `/cve/published/[0-9]{4}/CVE-[0-9]{4}-[0-9]+\.json$`)
+	tr := tar.NewReader(gz)
+	var records []Record
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("the snapshot is damaged: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg || !published.MatchString(hdr.Name) {
+			continue // also symbolic links, rejected records and the repository's test fixtures
+		}
+		if hdr.Size > maxRecordBytes {
+			return nil, fmt.Errorf("%s is unexpectedly large", hdr.Name)
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("the snapshot is damaged: %w", err)
+		}
+		r, err := ParseRecord(data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", hdr.Name, err)
+		}
+		records = append(records, r)
+	}
+	if len(records) < s.MinRecords {
+		return nil, fmt.Errorf("the snapshot holds %d published records, fewer than the %d expected", len(records), s.MinRecords)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+	return records, nil
+}
+
+// save writes the data into the cache atomically.
+func (s *Source) save(d *Data) error {
+	data, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.CacheDir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(s.CacheDir, ".kernel-cna-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.path())
+}
