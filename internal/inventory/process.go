@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/pkgtool"
@@ -346,6 +347,9 @@ var errProcessEnded = errors.New("the process ended during the inventory")
 func (c *processCollector) opener(p *rawProcess, open func() (io.ReadCloser, error)) func() (io.ReadCloser, error) {
 	return func() (io.ReadCloser, error) {
 		r, err := open()
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+			return nil, errProcessEnded
+		}
 		if err != nil {
 			return nil, err
 		}

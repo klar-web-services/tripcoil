@@ -680,3 +680,18 @@ func TestProcessCollectorUnresolvedOriginPerPathAndReason(t *testing.T) {
 		t.Fatalf("reasons %q, want %q", reasons, want)
 	}
 }
+
+func TestProcessCollectorProcessEndsWhileRead(t *testing.T) {
+	for _, errno := range []syscall.Errno{syscall.ENOENT, syscall.ESRCH} {
+		src := fakeSource{30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api",
+			openErr: &fs.PathError{Op: "open", Path: "/proc/30/exe", Err: errno}}}
+		c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+		res, err := c.collect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.origins) != 1 || res.origins[0].Reason != "the running file was not read (the process ended during the inventory)" {
+			t.Errorf("%v: origins %+v", errno, res.origins)
+		}
+	}
+}
