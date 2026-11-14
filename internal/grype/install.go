@@ -50,6 +50,8 @@ func NewInstaller(cacheDir string) *Installer {
 }
 
 // Ensure returns the path of a verified Grype binary, downloading it when the cache is missing or altered.
+// It also removes other Grype versions and stale downloads from the cache, so callers must hold the run lock:
+// a concurrent older run could still be executing a binary that is removed here.
 func (in *Installer) Ensure(ctx context.Context) (string, error) {
 	key := in.OS + "_" + in.Arch
 	want, ok := in.Checksums[key]
@@ -60,6 +62,7 @@ func (in *Installer) Ensure(ctx context.Context) (string, error) {
 	dir := filepath.Join(in.CacheDir, "grype", in.Version, key)
 	bin := filepath.Join(dir, "grype")
 	if got, err := fileSHA256(bin); err == nil && got == wantBin {
+		removeOtherVersions(in.CacheDir, in.Version)
 		return bin, nil
 	}
 	name := fmt.Sprintf("grype_%s_%s.tar.gz", in.Version, key)
@@ -72,6 +75,10 @@ func (in *Installer) Ensure(ctx context.Context) (string, error) {
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
+	}
+	stale, _ := filepath.Glob(filepath.Join(dir, "grype-*.tmp"))
+	for _, f := range stale {
+		_ = os.Remove(f)
 	}
 	tmp, err := extractGrype(archive, dir)
 	if err != nil {
@@ -88,7 +95,22 @@ func (in *Installer) Ensure(ctx context.Context) (string, error) {
 	if err := os.Rename(tmp, bin); err != nil {
 		return "", err
 	}
+	removeOtherVersions(in.CacheDir, in.Version)
 	return bin, nil
+}
+
+// removeOtherVersions deletes every Grype cache entry except keep, ignoring errors.
+func removeOtherVersions(cacheDir, keep string) {
+	root := filepath.Join(cacheDir, "grype")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.Name() != keep {
+			_ = os.RemoveAll(filepath.Join(root, e.Name()))
+		}
+	}
 }
 
 func (in *Installer) download(ctx context.Context, url string) ([]byte, error) {

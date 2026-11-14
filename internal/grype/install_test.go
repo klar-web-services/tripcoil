@@ -134,6 +134,49 @@ func TestEnsureRedownloadsTamperedBinary(t *testing.T) {
 	}
 }
 
+func TestEnsureRemovesOldVersions(t *testing.T) {
+	archive := tarGz(t, map[string]string{"grype": fakeBinary})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(srv.Close)
+	in := testInstaller(t, srv.URL, sum(archive))
+	if _, err := in.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	in.Version = "9.9.10"
+	if _, err := in.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(in.CacheDir, "grype"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "9.9.10" {
+		t.Fatalf("cache entries = %v, want only 9.9.10", entries)
+	}
+}
+
+func TestEnsureRemovesStaleDownloads(t *testing.T) {
+	archive := tarGz(t, map[string]string{"grype": fakeBinary})
+	var hits int32
+	in := testInstaller(t, server(t, archive, &hits).URL, sum(archive))
+	dir := filepath.Join(in.CacheDir, "grype", "9.9.9", "linux_amd64")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "grype-123.tmp")
+	if err := os.WriteFile(stale, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale download still present: %v", err)
+	}
+}
+
 func TestEnsureUnsupportedPlatform(t *testing.T) {
 	in := testInstaller(t, "http://unused", "x")
 	in.OS = "plan9"
