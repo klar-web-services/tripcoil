@@ -189,3 +189,19 @@ func TestDockerContainersItDoesNotList(t *testing.T) {
 		t.Fatalf("items %+v problems %+v", items, p)
 	}
 }
+
+func TestDockerListedContainersAreNotUnlisted(t *testing.T) {
+	const goneID = "0000000000000000000000000000000000000000000000000000000000000001"
+	sock := dockerServer(t, engine(http.StatusOK))
+	// Docker lists both, then answers that one stopped and the other was removed, while the host
+	// still shows a process in each one's cgroup.
+	pids := map[string][]int{shopID: {2201}, stoppedID: {3001}, goneID: {3002}}
+	src := fakeSource{
+		3001: {cmdline: []string{"sh"}, cgroup: cg("/system.slice/docker-" + stoppedID + ".scope")},
+		3002: {cmdline: []string{"sh"}, cgroup: cg("/system.slice/docker-" + goneID + ".scope")},
+	}
+	items, _, p := collectDocker(context.Background(), "unix://"+sock, true, connect, pids, src)
+	if len(items) != 1 || len(p) != 0 {
+		t.Fatalf("items %+v problems %+v", items, p)
+	}
+}

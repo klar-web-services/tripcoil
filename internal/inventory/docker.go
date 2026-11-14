@@ -83,8 +83,9 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	var items []Item
 	var problems []problem.Problem
 	origins := map[string]Origin{}
-	accounted := map[string]bool{} // inventoried, or already reported
+	accounted := map[string]bool{} // listed by Docker
 	for _, s := range list {
+		accounted[s.ID] = true
 		d, err := api.Inspect(ctx, s.ID)
 		if errors.Is(err, dockerapi.ErrNotFound) {
 			continue // it was removed between the list and the inspect: it is no longer running
@@ -93,7 +94,6 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 			if !interrupted(ctx, err) {
 				problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory", "cannot inspect container %.12s: %v", s.ID, err))
 			}
-			accounted[s.ID] = true
 			continue
 		}
 		if !d.State.Running {
@@ -134,7 +134,6 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 		origins[o.ID] = o
 		it.Origins = []string{o.ID}
 		items = append(items, it)
-		accounted[d.ID] = true
 	}
 	if n := stillRunning(src, containerPIDs, accounted); n > 0 {
 		problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory",
