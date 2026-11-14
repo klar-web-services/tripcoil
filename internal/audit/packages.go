@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -67,7 +68,7 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 
 // scanPackages stages the package database and returns its matches and packages: from its cached
 // SBOM, or from a scan of the staging root when the database changed, its SBOM is not matchable,
-// or the cached one cannot be read or matched. The running kernel's package is matched at its
+// or the cached one is at fault (see badSBOM). The running kernel's package is matched at its
 // running version.
 func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, []grype.Component, error) {
 	stage := filepath.Join(au.d.CacheDir, "staging")
@@ -81,12 +82,14 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 		return nil, nil, err
 	}
 	if sbom, ok := au.cache.get(key); ok {
-		data, err := os.ReadFile(sbom)
+		data, _, err := readCached(sbom)
+		var rep *grype.Report
+		var comps []grype.Component
 		if err == nil {
-			rep, comps, err := au.matchPackages(ctx, data, raw)
-			if err == nil || ctx.Err() != nil {
-				return rep, comps, err
-			}
+			rep, comps, err = au.matchPackages(ctx, data, raw)
+		}
+		if !errors.As(err, new(badSBOM)) {
+			return rep, comps, err
 		}
 		au.cache.remove(key)
 	}
@@ -124,7 +127,7 @@ func (au *auditor) matchPackages(ctx context.Context, data []byte, raw *Raw) (*g
 	}
 	rep, err := au.d.Grype.Match(ctx, sbom, filepath.Join(au.d.RunDir, raw.Grype))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, rejected(err)
 	}
 	return au.keepPackages(rep, data, raw)
 }

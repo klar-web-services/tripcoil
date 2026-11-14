@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
@@ -58,8 +59,8 @@ func (au *auditor) scanDir() string { return filepath.Join(au.d.CacheDir, "scan"
 // report and the SBOM in the run folder. Cataloging is the slow part of a scan, so an origin's
 // SBOM is cached under a content key, and later runs only match it; an origin whose SBOM does not
 // match like the origin itself (Go modules, an operating system without a version) is scanned
-// directly every run instead. A cached SBOM that cannot be read or matched is dropped and the
-// origin scanned again.
+// directly every run instead. A cached SBOM that is itself at fault (see badSBOM) is dropped and
+// the origin scanned again; on any other failure the origin fails, and the entry is kept.
 func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, counts, error) {
 	if o.Kind == inventory.OriginAppDir && o.Jar {
 		sha, err := hashFile(ctx, filepath.Join(au.d.Root, o.Path))
@@ -75,7 +76,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if key != "" {
 		if sbom, ok := au.cache.get(key); ok {
 			rep, n, err := au.matchCached(ctx, sbom, raw)
-			if err == nil || ctx.Err() != nil {
+			if !errors.As(err, new(badSBOM)) {
 				return rep, n, err
 			}
 			au.cache.remove(key)
@@ -153,16 +154,40 @@ func countPackages(data []byte) (counts, error) {
 
 // matchCached matches a cached SBOM.
 func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw) (*grype.Report, counts, error) {
-	data, err := os.ReadFile(sbom)
-	if err != nil {
-		return nil, counts{}, err
-	}
-	n, err := countPackages(data)
+	data, n, err := readCached(sbom)
 	if err != nil {
 		return nil, counts{}, err
 	}
 	rep, err := au.matchSBOM(ctx, sbom, data, raw)
 	return rep, n, err
+}
+
+// badSBOM is the failure of a cached SBOM itself: it cannot be read or decoded, or Grype cannot
+// decode it. Only then is the entry dropped. Any other failure, such as a full run folder, a
+// timeout or an interruption, keeps it for the next run.
+type badSBOM struct{ error }
+
+func (e badSBOM) Unwrap() error { return e.error }
+
+// readCached reads and decodes a cached SBOM.
+func readCached(path string) ([]byte, counts, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, counts{}, badSBOM{err}
+	}
+	n, err := countPackages(data)
+	if err != nil {
+		return nil, counts{}, badSBOM{err}
+	}
+	return data, n, nil
+}
+
+// rejected marks Grype's failure to decode an SBOM as badSBOM.
+func rejected(err error) error {
+	if err != nil && strings.Contains(err.Error(), "unable to decode sbom") {
+		return badSBOM{err}
+	}
+	return err
 }
 
 // cacheIfMatchable caches a stripped SBOM under key, unless there is no key or matching the SBOM
@@ -344,7 +369,7 @@ func (au *auditor) matchSBOM(ctx context.Context, sbom string, data []byte, raw 
 	rawPath := filepath.Join(au.d.RunDir, raw.Grype)
 	rep, err := au.d.Grype.Match(ctx, sbom, rawPath)
 	if err != nil {
-		return nil, err
+		return nil, rejected(err)
 	}
 	return rep, run.Share(rawPath, 0o640)
 }

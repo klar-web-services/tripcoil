@@ -449,6 +449,55 @@ func TestAuditDoesNotUseSBOMsCachedWithoutTheFileName(t *testing.T) {
 	}
 }
 
+// A cached SBOM is dropped only when it is at fault: a disk-full run folder, a Grype timeout or
+// an interruption never wipes the cache.
+func TestAuditDropsCachedSBOMsOnlyWhenTheyAreAtFault(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	entries, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*.cdx.json"))
+	if len(entries) != 5 {
+		t.Fatalf("cached %v", entries)
+	}
+	kept := func(when string) {
+		t.Helper()
+		for _, e := range entries {
+			if _, err := os.Stat(e); err != nil {
+				t.Errorf("%s: %v", when, err)
+			}
+		}
+	}
+	timeout := errors.New("Grype timed out after 15m0s")
+	g.matchErr = map[string]error{"packages-match.cdx.json": timeout}
+	for _, e := range entries {
+		g.matchErr[filepath.Base(e)] = timeout
+	}
+	g.catalogs = nil
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if a.Status != Partial || len(g.catalogs) != 3 { // the Go binaries and the app directory without a lockfile
+		t.Fatalf("audit %s, scanned %q: a cached SBOM that timed out is scanned again", a.Status, g.catalogs)
+	}
+	kept("after a timeout")
+
+	g.matchErr, g.catalogs = nil, nil
+	runDir := t.TempDir()
+	os.MkdirAll(filepath.Join(runDir, "raw", rawName(imageO, ".cdx.json")), 0o750) // the SBOM's copy cannot be written
+	a = Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
+	if st := statuses(a); st[imageO] != ScanFailed || slices.Contains(g.catalogs, "docker:sha256:1111") {
+		t.Fatalf("statuses %v, scanned %q", st, g.catalogs)
+	}
+	kept("after a run folder failure")
+
+	g.matchErr, g.catalogs = map[string]error{}, nil
+	for _, e := range entries {
+		g.matchErr[filepath.Base(e)] = errors.New("Grype failed: [0002] ERROR failed to catalog: unable to decode sbom: sbom format not recognized")
+	}
+	a = Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if a.Status != Complete || len(g.catalogs) != 7 { // the package database's is matched as packages-match.cdx.json
+		t.Fatalf("audit %s, scanned %q: an SBOM Grype rejects is cataloged again", a.Status, g.catalogs)
+	}
+}
+
 func TestAuditAppDirCachedOnlyFromItsOwnLockfiles(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)

@@ -63,7 +63,7 @@ func (c sbomCache) put(key string, data []byte) error {
 	return os.Rename(tmp.Name(), c.path(key))
 }
 
-// remove drops an entry that cannot be read or matched, so it is built again.
+// remove drops an entry that is at fault, so it is built again.
 func (c sbomCache) remove(key string) { os.Remove(c.path(key)) }
 
 // prune removes SBOMs that no run used for sbomMaxAge, and those of other Grype versions.
