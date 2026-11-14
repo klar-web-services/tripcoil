@@ -250,10 +250,11 @@ func TestProcessCollectorOwnersError(t *testing.T) {
 
 func TestProcessCollectorRefusesUnsafeFiles(t *testing.T) {
 	cases := map[string]struct {
-		mutate func(p *fakeProc, cancel context.CancelFunc)
-		cap    int64                                // lowers runningFileCap
-		space  func(string) (uint64, uint64, error) // free and total bytes of the cache file system
-		reason string
+		mutate  func(p *fakeProc, cancel context.CancelFunc)
+		cap     int64                                // lowers runningFileCap
+		space   func(string) (uint64, uint64, error) // free and total bytes of the cache file system
+		reason  string
+		maxRead int // the most bytes it may read, if not unlimited
 	}{
 		"not a regular file": {mutate: func(p *fakeProc, _ context.CancelFunc) {
 			p.openErr = &fs.PathError{Op: "open", Path: "/proc/30/exe", Err: procfs.ErrNotRegular}
@@ -261,7 +262,10 @@ func TestProcessCollectorRefusesUnsafeFiles(t *testing.T) {
 		"larger than the cap":           {cap: 8, reason: "larger than"},
 		"grows past the cap while read": {mutate: func(p *fakeProc, _ context.CancelFunc) { p.size = 4 }, cap: 8, reason: "larger than"},
 		"cache file system too full": {mutate: func(p *fakeProc, _ context.CancelFunc) { p.deleted = true },
-			space: func(string) (uint64, uint64, error) { return 110, 1000, nil }, reason: "less than 10%"},
+			space: func(string) (uint64, uint64, error) { return 110, 1000, nil }, reason: "too little free space"},
+		"copy grows past the free space": {mutate: func(p *fakeProc, _ context.CancelFunc) {
+			p.deleted, p.exeData, p.size = true, strings.Repeat("x", 190), 50
+		}, space: func(string) (uint64, uint64, error) { return 200, 1000, nil }, reason: "too little free space", maxRead: 101},
 		"interrupted": {mutate: func(p *fakeProc, cancel context.CancelFunc) {
 			p.exeData, p.onRead = strings.Repeat("x", 1<<20), cancel
 		}, reason: "canceled"},
@@ -301,7 +305,24 @@ func TestProcessCollectorRefusesUnsafeFiles(t *testing.T) {
 			if entries, _ := os.ReadDir(filepath.Join(cache, "replaced")); len(entries) != 0 {
 				t.Fatalf("cache holds %v", entries)
 			}
+			if tc.maxRead != 0 && p.read > tc.maxRead {
+				t.Fatalf("read %d bytes", p.read)
+			}
 		})
+	}
+}
+
+func TestProcessCollectorCopiesOnABigFullDisk(t *testing.T) {
+	old := cacheSpace
+	cacheSpace = func(string) (uint64, uint64, error) { return 5 << 30, 100 << 40, nil } // 5 GiB of 100 TiB free
+	t.Cleanup(func() { cacheSpace = old })
+	c := &processCollector{src: fakeSource{31: hostProcesses()[31]}, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := originByID(res.origins, BinaryOriginID(sum("go binary v0"))); o.Copy == "" {
+		t.Fatalf("origins %+v: 4 GiB stay free, so the copy fits", res.origins)
 	}
 }
 

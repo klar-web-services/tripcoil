@@ -40,7 +40,14 @@ var cacheSpace = func(dir string) (free, total uint64, err error) {
 	return st.Bavail * uint64(st.Bsize), st.Blocks * uint64(st.Bsize), nil
 }
 
-var errCacheFull = errors.New("copying it would leave less than 10% of the cache file system free")
+// A copy leaves the cache file system a tenth free, but at most 4 GiB, so copies still work on a
+// big, fairly full disk.
+const (
+	cacheFloorPercent = 10
+	maxCacheFloor     = 4 << 30
+)
+
+var errCacheFull = errors.New("the cache file system has too little free space for a copy")
 
 func errTooLarge() error { return fmt.Errorf("it is larger than %d bytes", runningFileCap) }
 
@@ -87,13 +94,12 @@ func openRunning(open func() (io.ReadCloser, error), left *int64) (runningFile, 
 }
 
 // readRunning copies a running file to w until ctx is cancelled. It refuses a file larger than
-// what is left of the read budget and fails past runningFileCap or the budget, because the file
-// can grow while it is read.
-func readRunning(ctx context.Context, w io.Writer, f runningFile) error {
+// what is left of the read budget and fails with over past limit, or past the budget, because the
+// file can grow while it is read.
+func readRunning(ctx context.Context, w io.Writer, f runningFile, limit int64, over error) error {
 	if f.size > *f.left {
 		return errReadBudget
 	}
-	limit, over := runningFileCap, errTooLarge()
 	if *f.left < limit {
 		limit, over = *f.left, errReadBudget
 	}
@@ -123,7 +129,7 @@ func (c ctxReader) Read(p []byte) (int, error) {
 // hashRunning hashes a running file.
 func hashRunning(ctx context.Context, f runningFile) (string, error) {
 	h := sha256.New()
-	if err := readRunning(ctx, h, f); err != nil {
+	if err := readRunning(ctx, h, f, runningFileCap, errTooLarge()); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -140,8 +146,16 @@ func copyToCache(ctx context.Context, f runningFile, cacheDir string) (string, s
 	if err != nil {
 		return "", "", err
 	}
-	if size := uint64(max(f.size, 0)); size > free || free-size < total/10 {
+	floor := min(total/100*cacheFloorPercent, maxCacheFloor)
+	if free <= floor {
 		return "", "", errCacheFull
+	}
+	limit, over := runningFileCap, errTooLarge()
+	if room := free - floor; room < uint64(limit) {
+		limit, over = int64(room), errCacheFull
+	}
+	if f.size > limit {
+		return "", "", over
 	}
 	tmp, err := os.CreateTemp(dir, ".copy-*")
 	if err != nil {
@@ -149,7 +163,7 @@ func copyToCache(ctx context.Context, f runningFile, cacheDir string) (string, s
 	}
 	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
 	h := sha256.New()
-	if err := readRunning(ctx, io.MultiWriter(tmp, h), f); err != nil {
+	if err := readRunning(ctx, io.MultiWriter(tmp, h), f, limit, over); err != nil {
 		tmp.Close()
 		return "", "", err
 	}
