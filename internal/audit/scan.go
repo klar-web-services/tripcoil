@@ -112,7 +112,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if err := run.Share(rawPath, 0o640); err != nil {
 		return nil, counts{}, err
 	}
-	data, err := os.ReadFile(tmp)
+	data, err := grype.ReadOutput(tmp, "Grype's SBOM", maxSBOMSize)
 	if err == nil {
 		data, err = grype.StripSBOM(data)
 	}
@@ -121,7 +121,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 		n, err = countPackages(data)
 	}
 	if err == nil {
-		err = run.WriteFile(filepath.Join(au.d.RunDir, raw.SBOM), data, 0o640)
+		err = au.writeRaw(raw.SBOM, data)
 	}
 	if err != nil {
 		return nil, counts{}, err
@@ -134,6 +134,21 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	}
 	au.cacheIfVerified(ctx, key, files, data, rep, rawName(o.ID, ".verify"))
 	return rep, n, nil
+}
+
+// maxSBOMSize is the largest SBOM that the Audit reads. Users control what some SBOMs hold, such
+// as an app directory's lockfile, and reading one takes up to 13 times its size: a package-lock.json
+// of 50,000 packages gives a 72 MB SBOM. The largest real SBOMs are about 15 MB, of a 5 GB image.
+var maxSBOMSize int64 = 32 << 20 // lowered by tests
+
+// writeRaw writes an SBOM to the run folder as name, leaving the run folder's file system the floor
+// that copies leave the cache.
+func (au *auditor) writeRaw(name string, data []byte) error {
+	path := filepath.Join(au.d.RunDir, name)
+	if err := aboveFloor(filepath.Dir(path), int64(len(data)), errRunFolderFull); err != nil {
+		return err
+	}
+	return run.WriteFile(path, data, 0o640)
 }
 
 // counts is how many packages an SBOM holds, and how many of them Syft read from a distribution's
@@ -190,7 +205,7 @@ func (e badSBOM) Unwrap() error { return e.error }
 
 // readCached reads and decodes a cached SBOM.
 func readCached(path string) ([]byte, counts, error) {
-	data, err := os.ReadFile(path)
+	data, err := grype.ReadOutput(path, "the cached SBOM", maxSBOMSize)
 	if err != nil {
 		return nil, counts{}, badSBOM{err}
 	}
@@ -245,6 +260,9 @@ func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []stri
 	raw := filepath.Join(au.scanDir(), name+".grype.json")
 	defer os.Remove(sbom)
 	defer os.Remove(raw)
+	if hasRoom(au.scanDir(), int64(len(data))) != nil {
+		return
+	}
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
 		return
 	}
@@ -435,7 +453,7 @@ func asFile(rc io.ReadCloser, err error) (*os.File, error) {
 
 // matchSBOM keeps a copy of an SBOM in the run folder and matches it.
 func (au *auditor) matchSBOM(ctx context.Context, sbom string, data []byte, raw *Raw) (*grype.Report, error) {
-	if err := run.WriteFile(filepath.Join(au.d.RunDir, raw.SBOM), data, 0o640); err != nil {
+	if err := au.writeRaw(raw.SBOM, data); err != nil {
 		return nil, err
 	}
 	rawPath := filepath.Join(au.d.RunDir, raw.Grype)

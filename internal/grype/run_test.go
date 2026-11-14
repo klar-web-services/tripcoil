@@ -235,3 +235,21 @@ func TestScanTakesPlainSourcesByAbsolutePath(t *testing.T) {
 		}
 	}
 }
+
+// A report larger than the cap is not read: users control what some reports hold.
+func TestReportsAboveTheCapAreNotRead(t *testing.T) {
+	old := maxReportSize
+	maxReportSize = 100
+	defer func() { maxReportSize = old }()
+	r, dir, _ := newRunner(t) // the fake's report is longer than 100 bytes
+	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
+		t.Fatalf("scan: %v", err)
+	}
+	if _, err := r.Match(context.Background(), filepath.Join(dir, "b"), filepath.Join(dir, "a")); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
+		t.Fatalf("match: %v", err)
+	}
+	maxReportSize = old
+	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+		t.Fatal(err)
+	}
+}

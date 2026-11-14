@@ -35,8 +35,9 @@ const (
 )
 
 var (
-	errCacheFull   = errors.New("the cache file system has too little free space for a copy")
-	errFileChanged = errors.New("the file changed since the inventory")
+	errCacheFull     = errors.New("the cache file system has too little free space for a copy")
+	errRunFolderFull = errors.New("the run folder's file system has too little free space for Grype's output")
+	errFileChanged   = errors.New("the file changed since the inventory")
 )
 
 func errTooLarge(name string) error {
@@ -115,14 +116,18 @@ func readSmall(path string, limit int64) ([]byte, error) {
 }
 
 // hasRoom checks that size bytes fit on the cache file system that holds dir, above its floor.
-func hasRoom(dir string, size int64) error {
+func hasRoom(dir string, size int64) error { return aboveFloor(dir, size, errCacheFull) }
+
+// aboveFloor checks that size bytes fit on the file system that holds dir, above the floor that
+// copies leave the cache, and returns full when they do not.
+func aboveFloor(dir string, size int64, full error) error {
 	free, total, err := cacheSpace(dir)
 	if err != nil {
 		return err
 	}
 	floor := min(total/100*cacheFloorPercent, maxCacheFloor)
 	if free <= floor || uint64(size) > free-floor {
-		return errCacheFull
+		return full
 	}
 	return nil
 }

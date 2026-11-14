@@ -98,7 +98,7 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	if err != nil {
 		return nil, nil, err
 	}
-	data, err := os.ReadFile(out)
+	data, err := grype.ReadOutput(out, "Grype's SBOM", maxSBOMSize)
 	if err == nil {
 		data, err = grype.StripSBOM(data)
 	}
@@ -137,7 +137,7 @@ func (au *auditor) keepPackages(rep *grype.Report, data []byte, raw *Raw) (*gryp
 	if err := run.Share(filepath.Join(au.d.RunDir, raw.Grype), 0o640); err != nil {
 		return nil, nil, err
 	}
-	if err := run.WriteFile(filepath.Join(au.d.RunDir, raw.SBOM), data, 0o640); err != nil {
+	if err := au.writeRaw(raw.SBOM, data); err != nil {
 		return nil, nil, err
 	}
 	comps, err := grype.SBOMPackages(data)

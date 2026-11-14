@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/klar-web-services/tripcoil/internal/grype"
 )
 
 // A user can swap a FIFO in for a directory of an app directory, over and over, while the tree is
@@ -166,5 +169,68 @@ func TestCopyNamesAreNeverArchives(t *testing.T) {
 	}
 	if k, _, _ := au.cacheKey(context.Background(), inv.Origins[7]); k != keyOf("jar", "", "app.jar") {
 		t.Errorf("jar cache key %s", k)
+	}
+}
+
+// An SBOM larger than the cap fails its origin before it is read: a lockfile of 50,000 packages
+// gives a 72 MB SBOM, which takes 600 MB to read.
+func TestSBOMsAboveTheCapFailTheOrigin(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	shop := "local-directory:" + filepath.Join(root, "srv/shop")
+	for i := range 200 {
+		v := fmt.Sprintf("1.0.%d", i)
+		g.sboms[shop] = append(g.sboms[shop], grype.Component{Name: "left-pad", Version: v, PURL: "pkg:npm/left-pad@" + v})
+	}
+	old := maxSBOMSize
+	maxSBOMSize = 8192
+	defer func() { maxSBOMSize = old }()
+	runDir := t.TempDir()
+	a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
+	for _, o := range a.Origins {
+		switch {
+		case o.ID == "appdir:/srv/shop" && (o.Status != ScanFailed || o.Error != "Grype's SBOM is larger than 8192 bytes"):
+			t.Errorf("shop: %+v", o)
+		case o.ID != "appdir:/srv/shop" && o.Status == ScanFailed:
+			t.Errorf("%s failed: %s", o.ID, o.Error)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(runDir, "raw", rawName("appdir:/srv/shop", "*"))); len(left) > 0 {
+		t.Errorf("left in the run folder: %q", left)
+	}
+}
+
+// The SBOMs written to the run folder leave its file system the floor, and so do cache entries
+// the cache's: Grype's outputs depend on files that users control.
+func TestRawFilesAndCacheEntriesKeepTheFloor(t *testing.T) {
+	old := cacheSpace
+	defer func() { cacheSpace = old }()
+	root, cache, inv := host(t)
+	runDir := t.TempDir()
+	cacheSpace = func(dir string) (uint64, uint64, error) {
+		if strings.HasPrefix(dir, runDir) {
+			return 1000, 10000, nil // at the floor
+		}
+		return 1 << 40, 1 << 41, nil
+	}
+	a := Run(context.Background(), deps(root, cache, runDir, hostScanner(root, cache), fakeKernel{}), inv)
+	for _, o := range a.Origins {
+		if o.Status != Unresolved && o.Error != errRunFolderFull.Error() {
+			t.Errorf("a full run folder: %s %s %q", o.ID, o.Status, o.Error)
+		}
+	}
+	root, cache, inv = host(t)
+	cacheSpace = func(dir string) (uint64, uint64, error) {
+		if strings.HasPrefix(dir, filepath.Join(cache, "sbom")) {
+			return 1000, 10000, nil
+		}
+		return 1 << 40, 1 << 41, nil
+	}
+	a = Run(context.Background(), deps(root, cache, t.TempDir(), hostScanner(root, cache), fakeKernel{}), inv)
+	if a.Status != Complete {
+		t.Errorf("a full cache only costs the cache: %s %v", a.Status, a.Errors)
+	}
+	if cached, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*")); len(cached) > 0 {
+		t.Errorf("cached below the floor: %q", cached)
 	}
 }

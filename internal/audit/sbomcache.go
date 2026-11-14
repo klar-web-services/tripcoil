@@ -45,9 +45,12 @@ func (c sbomCache) get(key string) (string, bool) {
 	return p, true
 }
 
-// put stores an SBOM in the cache as key.
+// put stores an SBOM in the cache as key, leaving the cache file system its floor.
 func (c sbomCache) put(key string, data []byte) error {
 	if err := os.MkdirAll(c.dir(), 0o700); err != nil {
+		return err
+	}
+	if err := hasRoom(c.dir(), int64(len(data))); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(c.dir(), ".new-*")

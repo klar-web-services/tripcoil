@@ -21,6 +21,12 @@ var (
 	errLowSpace     = errors.New("the cache file system ran low on space while Grype ran")
 )
 
+// maxReportSize is the largest report that Scan and Match read. Users control what some reports
+// hold, such as an app directory's lockfile, and parsing one takes about twice its size. The
+// largest real reports are about 45 MB: an image with 3,000 matches, or a kernel package matched
+// years behind.
+var maxReportSize int64 = 128 << 20 // lowered by tests
+
 // spaceCheckEvery is how often HasRoom is asked while Grype runs.
 var spaceCheckEvery = 500 * time.Millisecond // lowered by tests
 
@@ -44,7 +50,7 @@ func (r *Runner) Scan(ctx context.Context, source, raw, sbom string) (*Report, e
 	if err := r.run(ctx, []string{source, "-o", "json=" + raw, "-o", "cyclonedx-json=" + sbom}, io.Discard); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(raw)
+	data, err := ReadOutput(raw, "Grype's report", maxReportSize)
 	if err != nil {
 		return nil, err
 	}
@@ -56,11 +62,29 @@ func (r *Runner) Match(ctx context.Context, sbom, raw string) (*Report, error) {
 	if err := r.run(ctx, []string{"sbom:" + sbom, "-o", "json=" + raw}, io.Discard); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(raw)
+	data, err := ReadOutput(raw, "Grype's report", maxReportSize)
 	if err != nil {
 		return nil, err
 	}
 	return Parse(data)
+}
+
+// ReadOutput reads a file that Grype wrote, named what in errors, unless it is larger than limit
+// bytes: then it is not read at all.
+func ReadOutput(path, what string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() > limit {
+		return nil, fmt.Errorf("%s is larger than %d bytes", what, limit)
+	}
+	return io.ReadAll(io.LimitReader(f, limit))
 }
 
 // dbUpdateTimeout bounds a database update: about 3 GB, at the idle IO class.
