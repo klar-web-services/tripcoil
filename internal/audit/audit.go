@@ -81,6 +81,8 @@ type auditor struct {
 	seen  map[string]bool          // the IDs of the findings so far
 	reads *readBudget              // what the Audit may still read from files
 
+	kernelGap string // why the running kernel's package is unidentified, when withKernel says so
+
 	mounts     []string // the mount points, read at the first app directory (see mountBelow)
 	mountsErr  error
 	mountsRead bool

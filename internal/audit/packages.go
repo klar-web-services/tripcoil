@@ -3,9 +3,11 @@ package audit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
@@ -57,6 +59,8 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 			continue
 		case res.Packages == 0:
 			res.Status, res.Reason = Unidentified, "the package tool knows it, but Grype did not read it from the package database"
+		case kernel && au.kernelGap != "":
+			res.Status, res.Reason = Unidentified, au.kernelGap
 		}
 		au.a.Origins = append(au.a.Origins, res)
 	}
@@ -83,6 +87,9 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	}
 	if sbom, ok := au.cache.get(key); ok {
 		data, _, err := readCached(sbom)
+		if err == nil {
+			data, _, err = au.runningKernel(data)
+		}
 		var rep *grype.Report
 		var comps []grype.Component
 		if err == nil {
@@ -105,31 +112,72 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	if err != nil {
 		return nil, nil, err
 	}
-	au.cacheIfVerified(ctx, key, nil, data, rep, packagesID+".verify")
-	if changed, err := au.kernelChanged(data); err != nil || changed {
-		if err != nil {
-			return nil, nil, err
+	verified := au.cacheIfVerified(ctx, key, nil, data, rep, packagesID+".verify")
+	running, kernel, err := au.runningKernel(data)
+	switch {
+	case err != nil:
+		return nil, nil, err
+	case kernel == "":
+		return au.keepPackages(rep, data, raw)
+	case verified:
+		return au.matchPackages(ctx, running, raw)
+	}
+	// Matching the SBOM does not give what the scan gave, so only the kernel package's matches come
+	// from matching it, and the scan's report stays in the run folder.
+	matched, err := au.match(ctx, running, filepath.Join(au.scanDir(), "packages-match.grype.json"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return au.keepPackages(au.withKernel(rep, matched, kernel), running, raw)
+}
+
+// withKernel is the scan's report with the matches of the running kernel's package, by name,
+// taken from matched instead: the report of matching the SBOM in which runningKernel changed that
+// package. When matched names another distribution than the scan, no data applies to them, and
+// the package is unidentified (see kernelGap).
+func (au *auditor) withKernel(scan, matched *grype.Report, kernel string) *grype.Report {
+	out := *scan
+	out.Matches = slices.DeleteFunc(slices.Clone(scan.Matches), func(m grype.Match) bool { return m.Artifact.Name == kernel })
+	if matched.Distro != scan.Distro || matched.DistroVersion != scan.DistroVersion {
+		au.kernelGap = fmt.Sprintf("Grype recognised %s, not %s, when matching the kernel package at its running version, so the distribution's vulnerability data does not apply", distroName(matched), distroName(scan))
+		return &out
+	}
+	for _, m := range matched.Matches {
+		if m.Artifact.Name == kernel {
+			out.Matches = append(out.Matches, m)
 		}
-		return au.matchPackages(ctx, data, raw)
+	}
+	return &out
+}
+
+func distroName(r *grype.Report) string {
+	if r.Distro == "" {
+		return "no distribution"
+	}
+	return strings.TrimSpace(r.Distro + " " + r.DistroVersion)
+}
+
+// matchPackages matches a package SBOM in which runningKernel changed the running kernel's
+// package, and leaves Grype's report and the SBOM in the run folder.
+func (au *auditor) matchPackages(ctx context.Context, data []byte, raw *Raw) (*grype.Report, []grype.Component, error) {
+	rep, err := au.match(ctx, data, filepath.Join(au.d.RunDir, raw.Grype))
+	if err != nil {
+		return nil, nil, err
 	}
 	return au.keepPackages(rep, data, raw)
 }
 
-// matchPackages matches a package SBOM after changing the running kernel's package.
-func (au *auditor) matchPackages(ctx context.Context, data []byte, raw *Raw) (*grype.Report, []grype.Component, error) {
-	data, _, err := au.runningKernel(data)
-	if err != nil {
-		return nil, nil, err
-	}
+// match matches a package SBOM, writing Grype's report to rawPath.
+func (au *auditor) match(ctx context.Context, data []byte, rawPath string) (*grype.Report, error) {
 	sbom := filepath.Join(au.scanDir(), "packages-match.cdx.json")
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	rep, err := au.d.Grype.Match(ctx, sbom, filepath.Join(au.d.RunDir, raw.Grype))
+	rep, err := au.d.Grype.Match(ctx, sbom, rawPath)
 	if err != nil {
-		return nil, nil, rejected(err)
+		return nil, rejected(err)
 	}
-	return au.keepPackages(rep, data, raw)
+	return rep, nil
 }
 
 // keepPackages leaves the report and the matched SBOM in the run folder and lists its packages.
@@ -142,12 +190,6 @@ func (au *auditor) keepPackages(rep *grype.Report, data []byte, raw *Raw) (*gryp
 	}
 	comps, err := grype.SBOMPackages(data)
 	return rep, comps, err
-}
-
-// kernelChanged reports whether runningKernel changes the SBOM.
-func (au *auditor) kernelChanged(data []byte) (bool, error) {
-	_, changed, err := au.runningKernel(data)
-	return changed, err
 }
 
 func (au *auditor) failPackages(ctx context.Context, origins []inventory.Origin, err error) {
@@ -209,11 +251,11 @@ func (au *auditor) kernelPackage(o inventory.Origin) (running, source string, ok
 	return "", "", false
 }
 
-// runningKernel changes the running kernel's package in an SBOM as kernelPackage says, and reports
-// whether it changed anything. When the SBOM does not hold the package at the version the
-// Inventory saw, because it was upgraded in place since, the SBOM stays as it is: packages()
+// runningKernel changes the running kernel's package in an SBOM as kernelPackage says, and returns
+// the package's name when it changed it. When the SBOM does not hold the package at the version
+// the Inventory saw, because it was upgraded in place since, the SBOM stays as it is: packages()
 // then fails the kernel's origin alone.
-func (au *auditor) runningKernel(data []byte) ([]byte, bool, error) {
+func (au *auditor) runningKernel(data []byte) ([]byte, string, error) {
 	for _, o := range au.inv.Origins {
 		running, source, ok := au.kernelPackage(o)
 		if !ok {
@@ -221,9 +263,9 @@ func (au *auditor) runningKernel(data []byte) ([]byte, bool, error) {
 		}
 		out, n, err := grype.SetKernel(data, o.Name, o.Version, running, source)
 		if err != nil || n == 0 {
-			return data, false, err
+			return data, "", err
 		}
-		return out, true, nil
+		return out, o.Name, nil
 	}
-	return data, false, nil
+	return data, "", nil
 }

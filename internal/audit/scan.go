@@ -226,33 +226,33 @@ func rejected(err error) error {
 }
 
 // cacheIfVerified caches a stripped SBOM under key when matching it gives what the scan gave
-// (see sameMatches). Matching an SBOM can lose a derivative's distribution, or match some
-// packages otherwise than a scan, so the SBOM is matched once, exactly as it would be cached, as
-// name.cdx.json in the scan folder; grype.Matchable first rules out the cases known to differ.
-// An origin whose SBOM is not cached is scanned every run. When files is set, every package must
-// have been read from one of them, the lockfiles and manifests whose content an app directory's
-// key hashes: the rest of its tree is fingerprinted by size, inode and ctime only, which a file
-// rewritten in place within one tick of a coarse file system clock keeps. The cache only saves
-// time, so a failed match or write is not an error.
-func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []string, data []byte, scan *grype.Report, name string) {
+// (see sameMatches), and reports whether it did. Matching an SBOM can lose a derivative's
+// distribution, or match some packages otherwise than a scan, so the SBOM is matched once, exactly
+// as it would be cached, as name.cdx.json in the scan folder; grype.Matchable first rules out the
+// cases known to differ. An origin whose SBOM is not cached is scanned every run. When files is
+// set, every package must have been read from one of them, the lockfiles and manifests whose
+// content an app directory's key hashes: the rest of its tree is fingerprinted by size, inode and
+// ctime only, which a file rewritten in place within one tick of a coarse file system clock keeps.
+// The cache only saves time, so a failed match or write is not an error.
+func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []string, data []byte, scan *grype.Report, name string) bool {
 	if key == "" {
-		return
+		return false
 	}
 	if ok, err := grype.Matchable(data); err != nil || !ok {
-		return
+		return false
 	}
 	if files != nil {
 		locations, err := grype.SBOMLocations(data)
 		if err != nil {
-			return
+			return false
 		}
 		for _, pkg := range locations {
 			if len(pkg) == 0 {
-				return // a package without a file it came from
+				return false // a package without a file it came from
 			}
 			for _, l := range pkg {
 				if !slices.Contains(files, l) {
-					return
+					return false
 				}
 			}
 		}
@@ -262,16 +262,17 @@ func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []stri
 	defer os.Remove(sbom)
 	defer os.Remove(raw)
 	if hasRoom(au.scanDir(), int64(len(data))) != nil {
-		return
+		return false
 	}
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
-		return
+		return false
 	}
 	rep, err := au.d.Grype.Match(ctx, sbom, raw)
 	if err != nil || !sameMatches(rep, scan) {
-		return
+		return false
 	}
 	_ = au.cache.put(key, data)
+	return true
 }
 
 // sameMatches reports whether two reports name the same distribution and hold the same set of

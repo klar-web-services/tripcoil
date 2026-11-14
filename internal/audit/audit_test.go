@@ -373,12 +373,21 @@ func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 			tc.setup(g, inv)
 			runDir := t.TempDir()
 			a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
-			if a.Status != Complete || len(a.Errors) != 0 || len(a.Findings) != 8 {
-				t.Fatalf("audit %s, errors %+v, %d findings", a.Status, a.Errors, len(a.Findings))
+			// Matched against another distribution, the kernel package has no matches at its
+			// running version: it is unidentified.
+			findings, kernel := 8, Scanned
+			if strings.HasPrefix(tc.name, "another distribution") {
+				findings, kernel = 7, Unidentified
+			}
+			if a.Status != Complete || len(a.Errors) != 0 || len(a.Findings) != findings || statuses(a)[kernelO] != kernel {
+				t.Fatalf("audit %s, errors %+v, %d findings, statuses %v", a.Status, a.Errors, len(a.Findings), statuses(a))
 			}
 			f := byVuln(a)
 			if _, ok := f["CVE-2026-5000"]; ok || !slices.Equal(f["GHSA-35jh-r3h4-6jhm"].Fix.Versions, []string{"4.17.21"}) {
 				t.Errorf("findings %+v: they are the scan's", a.Findings)
+			}
+			if s := f["CVE-2026-1234"]; !slices.Equal(s.Fix.Versions, []string{"3.0.16-1~deb12u1"}) || s.Package.Location != "/where/libssl3" {
+				t.Errorf("libssl3 finding %+v: it is the scan's", s)
 			}
 			if got := cachedKinds(cache); !slices.Equal(got, tc.cached) {
 				t.Errorf("cached SBOMs %v, want %v", got, tc.cached)
