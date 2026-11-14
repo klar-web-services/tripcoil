@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -113,7 +114,7 @@ var maxTreeEntries = 200_000 // lowered by tests
 // be: every app directory is cataloged at least daily. Without a lockfile there is no key, and the
 // directory is cataloged every run; so too when one of the files is not a regular file of a real
 // file system (Grype skips those) or is too large, or when the tree cannot be fingerprinted.
-func appDirKey(dir, day string) (string, []string, error) {
+func appDirKey(ctx context.Context, dir, day string) (string, []string, error) {
 	parts := []string{dir, day}
 	var files []string
 	locked := false
@@ -133,7 +134,7 @@ func appDirKey(dir, day string) (string, []string, error) {
 	if !locked {
 		return "", nil, nil
 	}
-	tree, err := treeFingerprint(dir)
+	tree, err := treeFingerprint(ctx, dir)
 	if err != nil {
 		return "", nil, nil
 	}
@@ -144,8 +145,10 @@ func appDirKey(dir, day string) (string, []string, error) {
 // following symbolic links: Grype does not follow them out of the directory either. Unlike mtime,
 // ctime changes on every write or rename, and users cannot set it: npm writes package files with
 // a fixed mtime. A directory of more than maxTreeEntries entries has no fingerprint. Directories
-// are read in chunks, so the walk stops at the cap without reading a huge one whole.
-func treeFingerprint(dir string) (string, error) {
+// are read in chunks, so the walk stops at the cap without reading a huge one whole. Nor has a
+// directory with an entry on another file system: the walk does not go into a mount, which may
+// hang, such as an NFS mount whose server is gone.
+func treeFingerprint(ctx context.Context, dir string) (string, error) {
 	fi, err := os.Lstat(dir)
 	switch {
 	case err != nil:
@@ -153,7 +156,11 @@ func treeFingerprint(dir string) (string, error) {
 	case !fi.IsDir():
 		return "", fmt.Errorf("%s is not a directory", dir) // such as a link to one
 	}
-	w := treeWalk{h: sha256.New(), n: 1}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("%s has no inode", dir)
+	}
+	w := treeWalk{ctx: ctx, dev: st.Dev, h: sha256.New(), n: 1}
 	if err := w.walk(dir, ".", fi); err != nil {
 		return "", err
 	}
@@ -162,15 +169,23 @@ func treeFingerprint(dir string) (string, error) {
 
 // treeWalk is one walk of treeFingerprint.
 type treeWalk struct {
-	h hash.Hash
-	n int // the entries read so far
+	ctx context.Context
+	dev uint64 // the device of the directory
+	h   hash.Hash
+	n   int // the entries read so far
 }
 
 // walk hashes an entry, then the entries below it, in name order.
 func (w *treeWalk) walk(path, rel string, fi fs.FileInfo) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
 	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
+	switch {
+	case !ok:
 		return fmt.Errorf("%s has no inode", path)
+	case st.Dev != w.dev:
+		return fmt.Errorf("%s is on another file system", path)
 	}
 	fmt.Fprintf(w.h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, fi.Mode().Type(), fi.Size(), st.Ino, st.Ctim.Nano())
 	if !fi.IsDir() {
@@ -202,6 +217,9 @@ func (w *treeWalk) readDir(path string) ([]fs.DirEntry, error) {
 	defer f.Close()
 	var out []fs.DirEntry
 	for {
+		if err := w.ctx.Err(); err != nil {
+			return nil, err
+		}
 		chunk, err := f.ReadDir(4096)
 		if w.n += len(chunk); w.n > maxTreeEntries {
 			return nil, fmt.Errorf("the tree has more than %d entries", maxTreeEntries)

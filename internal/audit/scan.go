@@ -80,7 +80,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 		}
 		o.SHA256 = sha // a jar is keyed and copied like a binary
 	}
-	key, files, err := au.cacheKey(o)
+	key, files, err := au.cacheKey(ctx, o)
 	if err != nil {
 		return nil, counts{}, err
 	}
@@ -127,7 +127,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	}
 	if key != "" {
 		// The SBOM of an app directory that changed while Grype read it is of neither key.
-		if again, _, err := au.cacheKey(o); err != nil || again != key {
+		if again, _, err := au.cacheKey(ctx, o); err != nil || again != key {
 			key = ""
 		}
 	}
@@ -275,7 +275,7 @@ func sameMatches(a, b *grype.Report) bool {
 // run, such as an app directory without a lockfile (see appDirKey). For an app directory it also
 // returns the files the key hashes, as Grype names its locations. A binary's or jar's key holds
 // its file name too, because the SBOM depends on it (see source).
-func (au *auditor) cacheKey(o inventory.Origin) (string, []string, error) {
+func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
 		return keyOf("binary", o.SHA256, fileName(o)), nil, nil
@@ -285,7 +285,7 @@ func (au *auditor) cacheKey(o inventory.Origin) (string, []string, error) {
 		if o.Jar {
 			return keyOf("jar", o.SHA256, fileName(o)), nil, nil
 		}
-		return appDirKey(filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"))
+		return appDirKey(ctx, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"))
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
