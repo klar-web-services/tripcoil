@@ -100,6 +100,8 @@ type Process struct {
 type Compose struct {
 	Project string `json:"project,omitempty"`
 	Service string `json:"service,omitempty"`
+	// WorkingDir is the directory `docker compose` ran in.
+	WorkingDir string `json:"workingDir,omitempty"`
 }
 
 // Port is a published container port.

@@ -47,7 +47,7 @@ func engine(ping int) http.Handler {
 		// The second container is removed before it is inspected: its inspect answers 404. The third
 		// stops before it is inspected: its inspect answers that it is not running.
 		w.Write([]byte(`[{"Id":"` + shopID + `","Names":["/shop-web-1"],"Image":"ghcr.io/acme/shop:2026.11.3","ImageID":"sha256:abc",` +
-			`"State":"running","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"},` +
+			`"State":"running","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/shop"},` +
 			`"Ports":[{"IP":"::","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":9229,"Type":"tcp"},` +
 			`{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8081,"Type":"tcp"},{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8080,"Type":"udp"},` +
 			`{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"IP":"0.0.0.0","PrivatePort":443,"PublicPort":8443,"Type":"tcp"}]},` +
@@ -59,7 +59,7 @@ func engine(ping int) http.Handler {
 	})
 	mux.HandleFunc("/containers/"+shopID+"/json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"Id":"` + shopID + `","Name":"/shop-web-1","Image":"sha256:abc","State":{"Running":true,"Pid":2201},` +
-			`"Config":{"User":"node","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}},` +
+			`"Config":{"User":"node","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/shop"}},` +
 			`"HostConfig":{"Privileged":false,"NetworkMode":"shop_default"},` +
 			`"Mounts":[{"Type":"bind","Source":"/srv/shop/uploads","Destination":"/app/uploads","RW":true},` +
 			`{"Type":"volume","Source":"/var/lib/docker/volumes/shop_cache/_data","Destination":"/app/.cache","RW":true}]}`))
@@ -83,7 +83,7 @@ func TestDockerContainers(t *testing.T) {
 		it.Image != "ghcr.io/acme/shop:2026.11.3" || it.ImageID != "sha256:abc" || it.User != "node" || it.NetworkMode != "shop_default" {
 		t.Fatalf("item %+v", it)
 	}
-	if it.Compose == nil || *it.Compose != (Compose{Project: "shop", Service: "web"}) {
+	if it.Compose == nil || *it.Compose != (Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop"}) {
 		t.Fatalf("compose %+v", it.Compose)
 	}
 	// Docker builds both lists from maps, so they are sorted for identical runs to be identical.
