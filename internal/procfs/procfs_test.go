@@ -273,3 +273,29 @@ func TestOpenRefusesNonRegularFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestMapFileID(t *testing.T) {
+	f, root := fixture(t)
+	real := filepath.Join(root, "usr/lib/libc.so.6")
+	if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("libc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mf := filepath.Join(root, "proc/42/map_files")
+	if err := os.MkdirAll(mf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(mf, "7f9474200000-7f9474224000")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.MapFileID(42, Mapping{Start: "7f9474200000", End: "7f9474224000", Path: "/usr/lib/libc.so.6"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, _ := os.Stat(real)
+	if want, ok := IDOf(fi); !ok || got != want {
+		t.Fatalf("%+v, want %+v", got, want)
+	}
+}

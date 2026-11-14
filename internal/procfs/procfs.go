@@ -218,6 +218,15 @@ func (f FS) ExeFileID(pid int) (FileID, error) {
 	return f.statID(f.proc(pid, "exe"))
 }
 
+// MapFileID identifies a mapped file (through /proc, so also in another root).
+func (f FS) MapFileID(pid int, m Mapping) (FileID, error) {
+	return f.statID(f.mapFile(pid, m))
+}
+
+func (f FS) mapFile(pid int, m Mapping) string {
+	return filepath.Join(f.proc(pid, "map_files"), strings.TrimLeft(m.Start, "0")+"-"+strings.TrimLeft(m.End, "0"))
+}
+
 // OpenExe opens the running executable, even when it was replaced on disk.
 func (f FS) OpenExe(pid int) (io.ReadCloser, error) {
 	return openRegular(f.proc(pid, "exe"))
@@ -225,7 +234,7 @@ func (f FS) OpenExe(pid int) (io.ReadCloser, error) {
 
 // OpenMapFile opens a mapped file through /proc/<pid>/map_files, even when it was replaced.
 func (f FS) OpenMapFile(pid int, m Mapping) (io.ReadCloser, error) {
-	return openRegular(filepath.Join(f.proc(pid, "map_files"), strings.TrimLeft(m.Start, "0")+"-"+strings.TrimLeft(m.End, "0")))
+	return openRegular(f.mapFile(pid, m))
 }
 
 // openRegular opens a file only if it is a regular file. A process can map a FIFO or a device:

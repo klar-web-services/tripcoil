@@ -496,3 +496,42 @@ func TestProcessCollectorUnresolvedOriginsAreStable(t *testing.T) {
 		}
 	})
 }
+
+func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
+	root := files(t, map[string]string{"usr/sbin/sshd": "sshd", "usr/bin/tool": "tool", "usr/lib/libc.so.6": "libc"})
+	src := fakeSource{
+		// sshd's chrooted pre-authentication child maps the host's own C library.
+		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, exeID: fileID(t, root, "usr/sbin/sshd"),
+			maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
+		// A container runs the host's executable, bind-mounted, with its own C library.
+		70: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, exeID: fileID(t, root, "usr/bin/tool"),
+			maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
+	}
+	tool := hostTool()
+	tool.owners["/usr/bin/tool"] = pkgtool.Package{Name: "tool", Version: "1", Arch: "amd64", Type: "deb"}
+	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(it Item) []string {
+		var out []string
+		for _, id := range it.Origins {
+			o := originByID(res.origins, id)
+			out = append(out, o.Kind+":"+o.Name+strings.Join(o.Paths, ","))
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := names(byName(res.items, "sshd")); !slices.Equal(got, []string{"package:libc6", "package:openssh-server"}) {
+		t.Fatalf("sshd origins %q", got)
+	}
+	if got := names(byName(res.items, "tool")); !slices.Equal(got, []string{"package:tool", "unresolved:" + libc.Path}) {
+		t.Fatalf("tool origins %q: its C library is not the host's", got)
+	}
+	for _, id := range byName(res.items, "tool").Origins {
+		if o := originByID(res.origins, id); o.Kind == OriginUnresolved && !strings.Contains(o.Reason, "another root") {
+			t.Fatalf("reason %q", o.Reason)
+		}
+	}
+}

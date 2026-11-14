@@ -65,6 +65,13 @@ func (s fakeSource) ExeFileID(pid int) (procfs.FileID, error) {
 	return s[pid].exeID, nil
 }
 
+func (s fakeSource) MapFileID(pid int, m procfs.Mapping) (procfs.FileID, error) {
+	if s[pid].mapIDs[m.Path] == (procfs.FileID{}) {
+		return procfs.FileID{}, errors.New("unknown")
+	}
+	return s[pid].mapIDs[m.Path], nil
+}
+
 func (s fakeSource) Cmdline(pid int) ([]string, error) { return s[pid].cmdline, nil }
 func (s fakeSource) Cwd(pid int) (string, error)       { return s[pid].cwd, nil }
 func (s fakeSource) UID(pid int) (int, error)          { return s[pid].uid, nil }

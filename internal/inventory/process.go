@@ -23,6 +23,7 @@ type Source interface {
 	PIDs() ([]int, error)
 	Exe(pid int) (string, bool, error)
 	ExeFileID(pid int) (procfs.FileID, error)
+	MapFileID(pid int, m procfs.Mapping) (procfs.FileID, error)
 	Cmdline(pid int) ([]string, error)
 	Cwd(pid int) (string, error)
 	UID(pid int) (int, error)
@@ -74,8 +75,10 @@ type rawProcess struct {
 	started    time.Time
 	unit       string
 	libs       []procfs.Mapping
-	libLimit   string // why some libraries were not taken, if some were not
-	unresolved string // why the origin cannot be resolved, if it cannot
+	otherRoot  bool     // its root directory is not the host's
+	notHost    []string // libraries of a process in another root that are not the host's files
+	libLimit   string   // why some libraries were not taken, if some were not
+	unresolved string   // why the origin cannot be resolved, if it cannot
 }
 
 type processResult struct {
@@ -153,8 +156,11 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 	case strings.HasPrefix(exe, "/snap/"):
 		p.unresolved = "it runs from a snap, and snaps are not audited in v1"
 	default:
-		if same, err := c.src.SameRootAsInit(pid); err == nil && !same && !c.runsHostFile(pid, exe) {
-			p.unresolved = "it runs in another root file system (a container runtime other than Docker, systemd-nspawn or a chroot)"
+		if same, err := c.src.SameRootAsInit(pid); err == nil && !same {
+			p.otherRoot = true
+			if !c.runsHostFile(pid, exe) {
+				p.unresolved = "it runs in another root file system (a container runtime other than Docker, systemd-nspawn or a chroot)"
+			}
 		}
 	}
 	if p.unresolved != "" {
@@ -166,7 +172,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 		if m.Path == exe || !isSharedLibrary(m.Path) {
 			continue
 		}
-		if len(p.libs) == processLibraryCap {
+		if len(p.libs)+len(p.notHost) == processLibraryCap {
 			p.libLimit = fmt.Sprintf("it maps more than %d shared libraries, and the others were not inventoried", processLibraryCap)
 			break
 		}
@@ -177,6 +183,12 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 			}
 			c.libPaths[m.Path] = true
 		}
+		if p.otherRoot {
+			if id, err := c.src.MapFileID(pid, m); err != nil || !c.isHostFile(m.Path, id) {
+				p.notHost = append(p.notHost, m.Path)
+				continue
+			}
+		}
 		p.libs = append(p.libs, m)
 	}
 	return p, "", true
@@ -184,18 +196,21 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 
 // runsHostFile reports whether a process in another root runs the host's own file at exe, as a
 // chrooted daemon does (sshd's pre-authentication child, Postfix's daemons). Such a process is
-// resolved like a host process: its executable and libraries are the host's.
+// resolved like a host process: its executable is the host's, and so are the libraries it maps
+// that are the host's files. A container that runs a bind-mounted host executable maps its own.
 func (c *processCollector) runsHostFile(pid int, exe string) bool {
-	running, err := c.src.ExeFileID(pid)
-	if err != nil {
-		return false
-	}
-	fi, err := os.Stat(filepath.Join(c.root, exe))
+	id, err := c.src.ExeFileID(pid)
+	return err == nil && c.isHostFile(exe, id)
+}
+
+// isHostFile reports whether the host's file at path is the file id.
+func (c *processCollector) isHostFile(path string, id procfs.FileID) bool {
+	fi, err := os.Stat(filepath.Join(c.root, path))
 	if err != nil {
 		return false
 	}
 	host, ok := procfs.IDOf(fi)
-	return ok && host == running
+	return ok && host == id
 }
 
 func (c *processCollector) userName(uid int) string {
@@ -311,6 +326,10 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			continue // covered by the app directory
 		}
 		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, c.opener(p, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) }))
+	}
+	for _, path := range p.notHost {
+		b.link(d, Origin{ID: UnresolvedOriginID("another root:" + path), Kind: OriginUnresolved,
+			Reason: "it runs in another root file system, and the library is not the host's file at that path", Paths: []string{path}})
 	}
 	if p.libLimit != "" {
 		b.link(d, Origin{ID: UnresolvedOriginID("libraries:" + p.libLimit), Kind: OriginUnresolved, Reason: p.libLimit})
