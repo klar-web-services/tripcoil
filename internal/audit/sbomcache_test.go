@@ -3,6 +3,7 @@ package audit
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -152,5 +153,29 @@ func TestAppDirKeyWithoutKey(t *testing.T) {
 	os.Symlink(files(t, map[string]string{"package-lock.json": lock}), link)
 	if k, _, err := appDirKey(link, "2026-11-14"); k != "" || err != nil {
 		t.Fatalf("a link: %q %v", k, err)
+	}
+}
+
+// A directory is read in chunks, and the walk stops at the cap: a huge one is never read whole.
+func TestTreeFingerprintStopsAtTheCap(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "a"), 0o755)
+	for i := range 30_000 {
+		f, err := os.Create(filepath.Join(dir, "a", strconv.Itoa(i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	old := maxTreeEntries
+	defer func() { maxTreeEntries = old }()
+	maxTreeEntries = 100
+	allocs := testing.AllocsPerRun(1, func() {
+		if _, err := treeFingerprint(dir); err == nil {
+			t.Error("a fingerprint above the cap")
+		}
+	})
+	if allocs > 20_000 {
+		t.Fatalf("%.0f allocations: the walk read the directory of 30,000 entries whole", allocs)
 	}
 }

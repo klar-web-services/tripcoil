@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -141,34 +143,76 @@ func appDirKey(dir, day string) (string, []string, error) {
 // treeFingerprint hashes the path, type, size, inode and ctime of every entry below dir, without
 // following symbolic links: Grype does not follow them out of the directory either. Unlike mtime,
 // ctime changes on every write or rename, and users cannot set it: npm writes package files with
-// a fixed mtime. A directory of more than maxTreeEntries entries has no fingerprint.
+// a fixed mtime. A directory of more than maxTreeEntries entries has no fingerprint. Directories
+// are read in chunks, so the walk stops at the cap without reading a huge one whole.
 func treeFingerprint(dir string) (string, error) {
-	h := sha256.New()
-	n := 0
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		switch {
-		case err != nil:
-			return err
-		case path == dir && !d.IsDir():
-			return fmt.Errorf("%s is not a directory", dir) // such as a link to one
-		}
-		if n++; n > maxTreeEntries {
-			return fmt.Errorf("%s has more than %d entries", dir, maxTreeEntries)
-		}
-		fi, err := d.Info()
+	fi, err := os.Lstat(dir)
+	switch {
+	case err != nil:
+		return "", err
+	case !fi.IsDir():
+		return "", fmt.Errorf("%s is not a directory", dir) // such as a link to one
+	}
+	w := treeWalk{h: sha256.New(), n: 1}
+	if err := w.walk(dir, ".", fi); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(w.h.Sum(nil)), nil
+}
+
+// treeWalk is one walk of treeFingerprint.
+type treeWalk struct {
+	h hash.Hash
+	n int // the entries read so far
+}
+
+// walk hashes an entry, then the entries below it, in name order.
+func (w *treeWalk) walk(path, rel string, fi fs.FileInfo) error {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("%s has no inode", path)
+	}
+	fmt.Fprintf(w.h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, fi.Mode().Type(), fi.Size(), st.Ino, st.Ctim.Nano())
+	if !fi.IsDir() {
+		return nil
+	}
+	entries, err := w.readDir(path)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		fi, err := e.Info() // of the entry itself, as lstat
 		if err != nil {
 			return err
 		}
-		st, ok := fi.Sys().(*syscall.Stat_t)
-		if !ok {
-			return fmt.Errorf("%s has no inode", path)
+		if err := w.walk(filepath.Join(path, e.Name()), filepath.Join(rel, e.Name()), fi); err != nil {
+			return err
 		}
-		rel, _ := filepath.Rel(dir, path)
-		fmt.Fprintf(h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, fi.Mode().Type(), fi.Size(), st.Ino, st.Ctim.Nano())
-		return nil
-	})
-	if err != nil {
-		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return nil
+}
+
+// readDir reads a directory's entries, sorted by name, and fails as soon as the walk has read more
+// than maxTreeEntries.
+func (w *treeWalk) readDir(path string) ([]fs.DirEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out []fs.DirEntry
+	for {
+		chunk, err := f.ReadDir(4096)
+		if w.n += len(chunk); w.n > maxTreeEntries {
+			return nil, fmt.Errorf("the tree has more than %d entries", maxTreeEntries)
+		}
+		out = append(out, chunk...)
+		switch {
+		case errors.Is(err, io.EOF):
+			slices.SortFunc(out, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+			return out, nil
+		case err != nil:
+			return nil, err
+		}
+	}
 }
