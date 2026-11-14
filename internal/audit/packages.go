@@ -58,6 +58,10 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 			au.failOrigin(o, errors.New("the kernel package changed since the inventory, so the kernel is audited at the next run"))
 			continue
 		case res.Packages == 0:
+			if err := packageChanged(o, au.originVersion(o), comps); err != nil {
+				au.failOrigin(o, err)
+				continue
+			}
 			res.Status, res.Reason = Unidentified, "the package tool knows it, but Grype did not read it from the package database"
 		case kernel && au.kernelGap != "":
 			res.Status, res.Reason = Unidentified, au.kernelGap
@@ -67,6 +71,26 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	au.addFindings(rep.Matches, raw.Grype, func(m grype.Match) (string, bool) {
 		return owner(m.Artifact.Name, m.Artifact.Version, m.Artifact.PURL)
 	})
+}
+
+// packageChanged says how a package origin changed since the Inventory when the package database
+// no longer holds it as the Inventory saw it: at another version with its name and architecture,
+// or not at all. It returns nil for a package Grype holds by name but does not tell apart.
+func packageChanged(o inventory.Origin, version string, comps []grype.Component) error {
+	named := false
+	for _, c := range comps {
+		if c.Name != o.Name {
+			continue
+		}
+		named = true
+		if arch := purlArch(c.PURL); (arch == "" || o.Arch == "" || arch == o.Arch) && c.Version != version {
+			return errors.New("the package changed since the inventory, so it is audited at the next run")
+		}
+	}
+	if !named {
+		return errors.New("the package was removed since the inventory")
+	}
+	return nil
 }
 
 // scanPackages stages the package database and returns its matches and packages: from its cached

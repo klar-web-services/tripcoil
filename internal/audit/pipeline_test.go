@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -89,5 +90,49 @@ func TestAuditPURLWithoutTheDistroQualifier(t *testing.T) {
 	}
 	if len(miss) != 8 {
 		t.Errorf("%d findings", len(miss))
+	}
+}
+
+// A package upgraded or removed between the Inventory and the Audit fails its origin, as the
+// kernel's does: it is audited at the next run. Only a package that Grype holds by name but does
+// not tell apart, here without its architecture, is unidentified.
+func TestAuditPackageChangedSinceTheInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func([]grype.Component) []grype.Component
+		error  string
+	}{
+		{"upgraded", func(c []grype.Component) []grype.Component {
+			c[0].Version = "3.0.16-1~deb12u1"
+			c[0].PURL = "pkg:deb/debian/libssl3@3.0.16-1~deb12u1?arch=amd64&distro=debian-12"
+			return c
+		}, "libssl3 3.0.15-1~deb12u1: the package changed since the inventory, so it is audited at the next run"},
+		{"removed", func(c []grype.Component) []grype.Component { return c[1:] },
+			"libssl3 3.0.15-1~deb12u1: the package was removed since the inventory"},
+		{"read without its architecture", func(c []grype.Component) []grype.Component {
+			c[0].PURL = "pkg:deb/debian/libssl3@3.0.15-1~deb12u1?distro=debian-12"
+			return c
+		}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, cache, inv := host(t)
+			g := hostScanner(root, cache)
+			staging := "dir:" + filepath.Join(cache, "staging")
+			g.sboms[staging] = tc.change(slices.Clone(g.sboms[staging]))
+			a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+			st := statuses(a)
+			if st[kernelO] != Scanned || st[apiO] != Scanned {
+				t.Fatalf("statuses %v", st)
+			}
+			if tc.error == "" {
+				if a.Status != Complete || len(a.Errors) != 0 || st[libsslO] != Unidentified {
+					t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
+				}
+				return
+			}
+			if a.Status != Partial || len(a.Errors) != 1 || a.Errors[0].Message != tc.error || st[libsslO] != ScanFailed {
+				t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
+			}
+		})
 	}
 }
