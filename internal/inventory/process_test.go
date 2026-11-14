@@ -554,8 +554,9 @@ func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
 		// sshd's chrooted pre-authentication child maps the host's own C library.
 		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", rootID: fileID(t, root, "run/sshd"),
 			exeID: fileID(t, root, "usr/sbin/sshd"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
-		// A container runs the host's executable, bind-mounted: its root is not a host directory.
-		70: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/containers/tool", exeID: fileID(t, root, "usr/bin/tool")},
+		// A container runs the host's executable, bind-mounted, with its own C library.
+		70: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/containers/tool", exeID: fileID(t, root, "usr/bin/tool"),
+			maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
 		// A chroot in a host directory runs the host's executable, but maps another C library.
 		71: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/tool", rootID: fileID(t, root, "var/lib/tool"),
 			exeID: fileID(t, root, "usr/bin/tool"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
@@ -579,21 +580,14 @@ func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
 	if got := names(byName(res.items, "sshd")); !slices.Equal(got, []string{"package:libc6", "package:openssh-server"}) {
 		t.Fatalf("sshd origins %q", got)
 	}
-	for _, it := range res.items {
-		if it.Name != "tool" {
-			continue
-		}
-		want := []string{"package:tool", "unresolved:" + libc.Path} // its C library is not the host's
-		if it.Processes[0].PID == 70 {
-			want = []string{"unresolved:/usr/bin/tool"}
-		}
-		if got := names(it); len(it.Processes) != 1 || !slices.Equal(got, want) {
-			t.Errorf("tool %d origins %q, want %q", it.Processes[0].PID, got, want)
-		}
-		for _, id := range it.Origins {
-			if o := originByID(res.origins, id); o.Kind == OriginUnresolved && !strings.Contains(o.Reason, "another root") {
-				t.Errorf("reason %q", o.Reason)
-			}
+	it := byName(res.items, "tool")
+	want := []string{"package:tool", "unresolved:" + libc.Path} // their C library is not the host's
+	if got := names(it); len(it.Processes) != 2 || !slices.Equal(got, want) {
+		t.Fatalf("tool %+v origins %q, want %q", it.Processes, got, want)
+	}
+	for _, id := range it.Origins {
+		if o := originByID(res.origins, id); o.Kind == OriginUnresolved && !strings.Contains(o.Reason, "another root") {
+			t.Errorf("reason %q", o.Reason)
 		}
 	}
 }
@@ -790,5 +784,34 @@ func TestProcessCollectorSkipsTheDynamicLinkerCache(t *testing.T) {
 	slices.Sort(want)
 	if !slices.Equal(it.Origins, want) || len(it.RestartNeeded) != 0 {
 		t.Fatalf("origins %v restartNeeded %v, want %v and no restart: ld.so.cache is not a library", it.Origins, it.RestartNeeded, want)
+	}
+}
+
+func TestProcessCollectorSandboxRunsHostFile(t *testing.T) {
+	root := files(t, map[string]string{"usr/lib/chromium/chromium": "chromium", "usr/lib/libc.so.6": "libc", "usr/sbin/sshd": "sshd", "run/sshd/.keep": ""})
+	src := fakeSource{
+		// Chromium's zygote and renderers (and headless Chrome on servers) chroot into the emptied
+		// /proc/<pid>/fdinfo of a helper that has exited: not a host directory.
+		40: {cmdline: []string{"/usr/lib/chromium/chromium", "--type=zygote"}, exe: "/usr/lib/chromium/chromium", otherRoot: true, root: "/proc/38/fdinfo",
+			exeID: fileID(t, root, "usr/lib/chromium/chromium"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
+		// sshd's chrooted child in an LXC container runs the container's own sshd.
+		90: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", rootID: procfs.FileID{Dev: 99, Ino: 5}, exeID: procfs.FileID{Dev: 99, Ino: 6}},
+	}
+	tool := hostTool()
+	tool.owners["/usr/lib/chromium/chromium"] = pkgtool.Package{Name: "chromium", Version: "131.0.6778.85-1", Arch: "amd64", Type: "deb"}
+	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	chromium := byName(res.items, "chromium")
+	want := []string{PackageOriginID(debian, tool.owners["/usr/lib/chromium/chromium"]), PackageOriginID(debian, pkgLibc)}
+	slices.Sort(want)
+	if !slices.Equal(chromium.Origins, want) {
+		t.Fatalf("chromium origins %v, want %v: it runs the host's own file", chromium.Origins, want)
+	}
+	sshd := byName(res.items, "sshd")
+	if o := originByID(res.origins, sshd.Origins[0]); len(sshd.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "another root") {
+		t.Fatalf("container sshd %+v, origin %+v", sshd, o)
 	}
 }

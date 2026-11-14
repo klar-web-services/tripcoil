@@ -195,19 +195,21 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 // chrooted daemon does (sshd's pre-authentication child, Postfix's daemons, haproxy): it executed
 // that file before it chrooted, so the file lies outside its root. Such a process is resolved
 // like a host process: its executable is the host's, and so are the libraries it maps that are
-// the host's files. A process in a plain chroot runs a file inside its root, whose packages the
-// host does not know; a chroot inside a container (LXC) has a root that only names a host path,
-// and a container that runs a bind-mounted host executable maps its own libraries.
+// the host's files. So is a sandboxed Chromium or Electron process, whose root is an emptied
+// /proc/<pid>/fdinfo. A process in a plain chroot runs a file inside its root, whose packages the
+// host does not know, and a container that runs a bind-mounted host executable maps its own
+// libraries.
 func (c *processCollector) runsHostFile(pid int, exe string, deleted bool) bool {
 	root, err := c.src.RootDir(pid)
 	if err != nil || root == "/" || within(exe, root) {
 		return false
 	}
-	if id, err := c.src.RootFileID(pid); err != nil || !c.isHostFile(root, id) {
-		return false
-	}
 	if deleted {
-		return true // the host's file at exe was replaced, as by an upgrade of the daemon
+		// The host's file at exe was replaced, as by an upgrade of the daemon, so only its root
+		// can tell a host chroot from a chroot inside a container (LXC), whose root only names a
+		// host path.
+		id, err := c.src.RootFileID(pid)
+		return err == nil && c.isHostFile(root, id)
 	}
 	id, err := c.src.ExeFileID(pid)
 	return err == nil && c.isHostFile(exe, id)
