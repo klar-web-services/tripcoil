@@ -844,3 +844,17 @@ func TestProcessCollectorFindsDockerd(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessCollectorSnapsOnArchAndFedora(t *testing.T) {
+	// Arch and Fedora mount snaps under /var/lib/snapd/snap; /snap is at most a symlink to it.
+	src := fakeSource{50: {cmdline: []string{"lxd"}, exe: "/var/lib/snapd/snap/lxd/123/bin/lxd"}}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := byName(res.items, "lxd")
+	if o := originByID(res.origins, it.Origins[0]); len(it.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "snap") {
+		t.Fatalf("lxd %+v, origin %+v", it, o)
+	}
+}

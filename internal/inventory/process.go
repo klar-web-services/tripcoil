@@ -153,7 +153,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 	switch {
 	case exeErr != nil:
 		p.unresolved = fmt.Sprintf("its executable cannot be read (%s)", errReason(exeErr))
-	case strings.HasPrefix(exe, "/snap/"):
+	case within(exe, "/snap"), within(exe, "/var/lib/snapd/snap"):
 		p.unresolved = "it runs from a snap, and snaps are not audited in v1"
 	default:
 		if same, err := c.src.SameRootAsInit(pid); err == nil && !same {
