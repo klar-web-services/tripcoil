@@ -34,6 +34,11 @@ func TestLockWaitsForTheHolder(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second lock did not report waiting")
 	}
+	select {
+	case <-got:
+		t.Fatal("the second lock was granted while the first was held")
+	case <-time.After(200 * time.Millisecond):
+	}
 	unlock()
 	select {
 	case u := <-got:
