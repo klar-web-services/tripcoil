@@ -82,6 +82,39 @@ func TestDpkgInstalledAndCompare(t *testing.T) {
 	}
 }
 
+func TestDpkgPackageStates(t *testing.T) {
+	f := &fakeRunner{t: t, resp: map[string]Result{
+		"dpkg-query -W -f " + dpkgFormat + " linux-image-*": out("hi \tlinux-image-6.1.0-28-amd64\tlinux-image-6.1.0-28-amd64\tamd64\t6.1.119-1\n" +
+			"iW \tlinux-image-6.1.0-29-amd64\tlinux-image-6.1.0-29-amd64\tamd64\t6.1.123-1\n" +
+			"rc \tlinux-image-6.1.0-25-amd64\tlinux-image-6.1.0-25-amd64\tamd64\t6.1.106-3\n"),
+		"dpkg-query -S /usr/bin/kubelet /usr/sbin/update-initramfs /etc/php/8.1/mods-available/pdo.ini": out("kubelet: /usr/bin/kubelet\n" +
+			"initramfs-tools: /usr/sbin/update-initramfs\nphp8.1-common: /etc/php/8.1/mods-available/pdo.ini\n"),
+		"dpkg-query -W -f " + dpkgFormat + " initramfs-tools kubelet php8.1-common": out("hi \tkubelet\tkubelet\tamd64\t1.31.2-1.1\n" +
+			"it \tinitramfs-tools\tinitramfs-tools\tall\t0.142\nrc \tphp8.1-common\tphp8.1-common\tamd64\t8.1.31-1\n"),
+		"dpkg-query -S /etc/php": out("php8.1-common, php8.2-common: /etc/php\n"),
+		"dpkg-query -W -f " + dpkgFormat + " php8.1-common php8.2-common": out("rc \tphp8.1-common\tphp8.1-common\tamd64\t8.1.31-1\n" +
+			"ii \tphp8.2-common\tphp8.2-common\tamd64\t8.2.26-1\n"),
+	}}
+	d := dpkg{f.run}
+	pkgs, err := d.Installed(ctx, "linux-image-*")
+	if err != nil || len(pkgs) != 2 || pkgs[0].Name != "linux-image-6.1.0-28-amd64" || pkgs[1].Name != "linux-image-6.1.0-29-amd64" {
+		t.Errorf("Installed: %+v %v", pkgs, err)
+	}
+	got, err := d.Owners(ctx, []string{"/usr/bin/kubelet", "/usr/sbin/update-initramfs", "/etc/php/8.1/mods-available/pdo.ini"})
+	want := map[string]Package{
+		"/usr/bin/kubelet":           {Name: "kubelet", Version: "1.31.2-1.1", Arch: "amd64", Type: "deb"},
+		"/usr/sbin/update-initramfs": {Name: "initramfs-tools", Version: "0.142", Arch: "all", Type: "deb"},
+	}
+	if err != nil || !maps.Equal(got, want) {
+		t.Errorf("Owners: %+v %v", got, err)
+	}
+	got, err = d.Owners(ctx, []string{"/etc/php"})
+	want = map[string]Package{"/etc/php": {Name: "php8.2-common", Version: "8.2.26-1", Arch: "amd64", Type: "deb"}}
+	if err != nil || !maps.Equal(got, want) {
+		t.Errorf("Owners with two listed owners: %+v %v", got, err)
+	}
+}
+
 func TestRPM(t *testing.T) {
 	f := &fakeRunner{t: t, resp: map[string]Result{
 		"rpm -qf --qf " + rpmFormat + " /usr/bin/rpm":                                            out("rpm\t0\t4.16.1.3\t40.el9\tx86_64\n"),

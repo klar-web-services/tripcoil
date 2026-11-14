@@ -25,7 +25,7 @@ func (d dpkg) Check(ctx context.Context) error {
 }
 
 func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, error) {
-	owner := map[string]string{} // path -> binary package name, such as libc6:amd64
+	owners := map[string][]string{} // path -> listed binary package names, such as libc6:amd64
 	for _, chunk := range chunks(paths, 200) {
 		res, err := d.run(ctx, "dpkg-query", append([]string{"-S"}, chunk...)...)
 		if err != nil {
@@ -50,21 +50,27 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 			if !want[path] {
 				continue
 			}
-			first, _, _ := strings.Cut(line[:i], ",")
-			owner[path] = strings.TrimSpace(first)
+			names := strings.Split(line[:i], ",")
+			for j := range names {
+				names[j] = strings.TrimSpace(names[j])
+			}
+			owners[path] = names
 		}
 	}
 	out := map[string]Package{}
-	if len(owner) == 0 {
+	if len(owners) == 0 {
 		return out, nil
 	}
-	pkgs, err := d.query(ctx, uniqueSorted(owner))
+	pkgs, err := d.query(ctx, uniqueSorted(owners))
 	if err != nil {
 		return nil, err
 	}
-	for path, name := range owner {
-		if p, ok := pkgs[name]; ok {
-			out[path] = p
+	for path, names := range owners {
+		for _, name := range names {
+			if p, ok := pkgs[name]; ok {
+				out[path] = p
+				break
+			}
 		}
 	}
 	return out, nil
@@ -88,7 +94,9 @@ type dpkgEntry struct {
 	pkg    Package
 }
 
-// list runs dpkg-query -W and keeps installed packages ("ii").
+// list runs dpkg-query -W and keeps the packages whose files are on disk: status (the second
+// letter of db:Status-Abbrev) installed, triggers awaited or pending, unpacked or half-configured.
+// The first letter is the wanted action, so a held package ("hi") is kept.
 func (d dpkg) list(ctx context.Context, patterns ...string) ([]dpkgEntry, error) {
 	res, err := d.run(ctx, "dpkg-query", append([]string{"-W", "-f", dpkgFormat}, patterns...)...)
 	if err != nil {
@@ -100,7 +108,7 @@ func (d dpkg) list(ctx context.Context, patterns ...string) ([]dpkgEntry, error)
 	var out []dpkgEntry
 	for _, line := range lines(res.Stdout) {
 		f := strings.Split(line, "\t")
-		if len(f) != 5 || !strings.HasPrefix(f[0], "ii") {
+		if len(f) != 5 || len(f[0]) < 2 || !strings.ContainsRune("iWtUF", rune(f[0][1])) {
 			continue
 		}
 		out = append(out, dpkgEntry{binary: f[1], pkg: Package{Name: f[2], Arch: f[3], Version: f[4], Type: "deb"}})

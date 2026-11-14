@@ -92,10 +92,12 @@ func chunks(paths []string, n int) [][]string {
 	return out
 }
 
-func uniqueSorted(m map[string]string) []string {
+func uniqueSorted(m map[string][]string) []string {
 	set := map[string]bool{}
-	for _, v := range m {
-		set[v] = true
+	for _, vs := range m {
+		for _, v := range vs {
+			set[v] = true
+		}
 	}
 	out := make([]string, 0, len(set))
 	for v := range set {
