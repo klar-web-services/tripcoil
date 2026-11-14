@@ -22,7 +22,8 @@ type Client struct{ hc *http.Client }
 
 // New returns a client for the unix socket at path.
 func New(socket string) *Client {
-	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	// Without keep-alives no idle connection outlives a run of the daemon.
+	tr := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, "unix", socket)
 	}}
