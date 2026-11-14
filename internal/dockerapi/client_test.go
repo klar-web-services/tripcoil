@@ -57,6 +57,9 @@ func TestNoConnectionLeftOpen(t *testing.T) {
 		if _, err := c.Inspect(ctx, "web"); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := c.InspectImage(ctx, "sha256:1111"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for deadline := time.Now().Add(2 * time.Second); open.Load() != 0; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {

@@ -21,6 +21,7 @@ type DockerAPI interface {
 	Ping(ctx context.Context) error
 	Containers(ctx context.Context) ([]dockerapi.Summary, error)
 	Inspect(ctx context.Context, id string) (dockerapi.Detail, error)
+	InspectImage(ctx context.Context, id string) (dockerapi.Image, error)
 }
 
 // dockerSocket picks the socket from DOCKER_HOST, or the default.
@@ -109,12 +110,7 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 			Image: ref, ImageID: s.ImageID, User: d.Config.User, Privileged: d.HostConfig.Privileged, NetworkMode: d.HostConfig.NetworkMode,
 			Notes: []string{problem.ImageOnly},
 		}
-		if project, service := d.Config.Labels["com.docker.compose.project"], d.Config.Labels["com.docker.compose.service"]; project != "" || service != "" {
-			it.Compose = &Compose{Project: project, Service: service, WorkingDir: d.Config.Labels["com.docker.compose.project.working_dir"]}
-			if files := d.Config.Labels["com.docker.compose.project.config_files"]; files != "" {
-				it.Compose.ConfigFiles = strings.Split(files, ",")
-			}
-		}
+		it.Compose = compose(ctx, api, s.ImageID, d.Config.Labels)
 		for _, p := range s.Ports {
 			if p.PublicPort != 0 {
 				it.Ports = append(it.Ports, Port{IP: p.IP, HostPort: p.PublicPort, ContainerPort: p.PrivatePort, Protocol: p.Type})
@@ -149,6 +145,32 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return items, out, problems
+}
+
+// compose reads a container's Compose labels, or nil. A container inherits its image's labels, so
+// an image can name any project, directory or file. When the directory or file label equals the
+// image's own, or the image cannot be read, there is no Compose info. The project and service may
+// equal the image's: Compose writes them onto the images it builds.
+func compose(ctx context.Context, api DockerAPI, imageID string, labels map[string]string) *Compose {
+	project, service := labels["com.docker.compose.project"], labels["com.docker.compose.service"]
+	if project == "" && service == "" {
+		return nil
+	}
+	img, err := api.InspectImage(ctx, imageID)
+	if err != nil {
+		return nil
+	}
+	const dir, files = "com.docker.compose.project.working_dir", "com.docker.compose.project.config_files"
+	for _, k := range []string{dir, files} {
+		if v, ok := img.Config.Labels[k]; ok && v == labels[k] {
+			return nil
+		}
+	}
+	c := &Compose{Project: project, Service: service, WorkingDir: labels[dir]}
+	if f := labels[files]; f != "" {
+		c.ConfigFiles = strings.Split(f, ",")
+	}
+	return c
 }
 
 // stillRunning counts the containers outside accounted with a process that still runs in them:

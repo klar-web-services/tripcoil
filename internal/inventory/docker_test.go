@@ -66,6 +66,10 @@ func engine(ping int) http.Handler {
 			`"Mounts":[{"Type":"bind","Source":"/srv/shop/uploads","Destination":"/app/uploads","RW":true},` +
 			`{"Type":"volume","Source":"/var/lib/docker/volumes/shop_cache/_data","Destination":"/app/.cache","RW":true}]}`))
 	})
+	// Compose writes the project and service onto the images it builds.
+	mux.HandleFunc("/images/sha256:abc/json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"Id":"sha256:abc","Config":{"Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.version":"2.40.3"}}}`))
+	})
 	return mux
 }
 
@@ -110,6 +114,39 @@ func TestDockerContainers(t *testing.T) {
 	want := Origin{ID: "image:sha256:abc", Kind: OriginImage, ImageID: "sha256:abc", Ref: "ghcr.io/acme/shop:2026.11.3"}
 	if len(origins) != 1 || origins[0].ID != want.ID || origins[0].Ref != want.Ref || !slices.Equal(it.Origins, []string{want.ID}) {
 		t.Fatalf("origins %+v", origins)
+	}
+}
+
+// A container inherits its image's labels, so an image can name any Compose directory or file.
+func TestDockerComposeLabelsOfTheImage(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		kept   bool
+	}{
+		{"the image names the files", http.StatusOK, `{"Id":"sha256:abc","Config":{"Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web",` +
+			`"com.docker.compose.project.config_files":"/srv/shop/compose.yml,/srv/shop/compose.prod.yml"}}}`, false},
+		{"the image names the directory", http.StatusOK, `{"Id":"sha256:abc","Config":{"Labels":{"com.docker.compose.project.working_dir":"/srv/shop"}}}`, false},
+		{"Compose replaced the image's files", http.StatusOK, `{"Id":"sha256:abc","Config":{"Labels":{"com.docker.compose.project.config_files":"/tmp/evil.yml"}}}`, true},
+		{"the image is gone", http.StatusNotFound, `{"message":"No such image: sha256:abc"}`, false},
+		{"the image cannot be read", http.StatusInternalServerError, `{"message":"boom"}`, false},
+	}
+	for _, c := range cases {
+		sock := dockerServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/images/sha256:abc/json" {
+				engine(http.StatusOK).ServeHTTP(w, r)
+				return
+			}
+			w.WriteHeader(c.status)
+			w.Write([]byte(c.body))
+		}))
+		items, _, p := collectDocker(context.Background(), "unix://"+sock, true, connect, map[string][]int{shopID: {2201}}, fakeSource{})
+		if len(items) != 1 || len(p) != 0 {
+			t.Errorf("%s: items %+v problems %+v", c.name, items, p)
+		} else if (items[0].Compose != nil) != c.kept {
+			t.Errorf("%s: compose %+v", c.name, items[0].Compose)
+		}
 	}
 }
 

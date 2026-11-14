@@ -131,7 +131,7 @@ func (r remediation) restart(origin string) string {
 		case pid1 && (it.Name == "systemd" || r.init == "systemd"):
 			how := "systemctl daemon-reexec"
 			if len(it.Processes) > 1 {
-				how += "; each logged-in user: systemctl --user daemon-reexec"
+				how += "; for each user manager: systemctl --user -M <user>@ daemon-reexec"
 			}
 			names = append(names, "systemd ("+how+")")
 		case len(own) == 0:
@@ -180,9 +180,11 @@ var (
 // composeRecreate is the command that recreates a container's Compose service, or "". The Compose
 // labels it is built from can come from the image, and an admin may run the command as root, so
 // it is only written when every part follows the rules above. When the directory or a file breaks
-// them, there is no command at all: without that part, the command would depend on where it is run.
+// them, or there is no file, there is no command at all: without that part, the command would
+// depend on where it is run, and Compose also searches the parent directories. Compose always
+// records its files, so labels without them came from the image.
 func composeRecreate(c *inventory.Compose) string {
-	if c == nil || !composeProject.MatchString(c.Project) || !composeService.MatchString(c.Service) {
+	if c == nil || len(c.ConfigFiles) == 0 || !composeProject.MatchString(c.Project) || !composeService.MatchString(c.Service) {
 		return ""
 	}
 	cmd := "docker compose -p " + c.Project

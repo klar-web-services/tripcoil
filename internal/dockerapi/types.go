@@ -31,6 +31,12 @@ type Detail struct {
 	Mounts     []Mount    `json:"Mounts"`
 }
 
+// Image is GET /images/{id}/json, the fields Tripcoil reads.
+type Image struct {
+	ID     string `json:"Id"`
+	Config Config `json:"Config"`
+}
+
 type State struct {
 	Running bool `json:"Running"`
 	Pid     int  `json:"Pid"`

