@@ -95,15 +95,16 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 
 // packageChanged says how a package origin changed since the Inventory when the package database
 // no longer holds it as the Inventory saw it: at another version with its name and architecture,
-// or not at all. It returns nil for a package Grype holds by name but does not tell apart.
+// or not at all. A package without an architecture on either side may be of any. It returns nil
+// for a package Grype holds by name but does not tell apart.
 func packageChanged(o inventory.Origin, version string, comps []grype.Component) error {
 	named := false
 	for _, c := range comps {
-		if c.Name != o.Name {
+		if arch := purlArch(c.PURL); c.Name != o.Name || (arch != "" && o.Arch != "" && arch != o.Arch) {
 			continue
 		}
 		named = true
-		if arch := purlArch(c.PURL); (arch == "" || o.Arch == "" || arch == o.Arch) && c.Version != version {
+		if c.Version != version {
 			return errors.New("the package changed since the inventory, so it is audited at the next run")
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/osrel"
+	"github.com/klar-web-services/tripcoil/internal/pkgtool"
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
@@ -168,6 +169,22 @@ func TestAuditPackageChangedSinceTheInventory(t *testing.T) {
 				t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
 			}
 		})
+	}
+}
+
+// A package of one architecture removed since the Inventory fails its origin, also while the same
+// package of another architecture stays: libssl3:i386 next to libssl3:amd64.
+func TestAuditMultiarchPackageRemovedSinceTheInventory(t *testing.T) {
+	root, cache, inv := host(t)
+	i386 := pkgtool.Package{Name: "libssl3", Version: "3.0.15-1~deb12u1", Arch: "i386", Type: "deb"}
+	i386O := inventory.PackageOriginID(debian, i386)
+	inv.Origins = append(inv.Origins, inventory.Origin{ID: i386O, Kind: inventory.OriginPackage, Name: i386.Name, Version: i386.Version, Arch: "i386", Type: "deb"})
+	inv.Items = append(inv.Items, inventory.Item{ID: "proc:wine", Kind: inventory.KindProcess, Name: "wine", Origins: []string{i386O}})
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), hostScanner(root, cache), fakeKernel{}), inv)
+	st := statuses(a)
+	if a.Status != Partial || len(a.Errors) != 1 || a.Errors[0].Message != "libssl3 3.0.15-1~deb12u1: the package was removed since the inventory" ||
+		st[i386O] != ScanFailed || st[libsslO] != Scanned {
+		t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
 	}
 }
 
