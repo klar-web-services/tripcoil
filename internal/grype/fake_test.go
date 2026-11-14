@@ -41,6 +41,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 if [ -n "$FAKE_GRYPE_STDERR" ]; then printf '%s\n' "$FAKE_GRYPE_STDERR" >&2; fi
+if [ -n "$FAKE_GRYPE_PID" ]; then echo $$ > "$FAKE_GRYPE_PID"; fi
 if [ -n "$FAKE_GRYPE_SLEEP" ]; then exec sleep "$FAKE_GRYPE_SLEEP"; fi
 exit "${FAKE_GRYPE_EXIT:-0}"
 `
@@ -52,7 +53,8 @@ exit "${FAKE_GRYPE_EXIT:-0}"
 // -o cyclonedx-json=. FAKE_GRYPE_STATUS and FAKE_GRYPE_STATUS_EXIT are the output and exit code
 // of "db status", FAKE_GRYPE_SEARCH the output of "db search". FAKE_GRYPE_DB is the database
 // directory: "db update" lists it to "<log>.db" and leaves a half-unpacked grype-db-download2 in
-// it. FAKE_GRYPE_EXIT, FAKE_GRYPE_STDERR and FAKE_GRYPE_SLEEP apply to every other command.
+// it. FAKE_GRYPE_EXIT, FAKE_GRYPE_STDERR and FAKE_GRYPE_SLEEP apply to every other command, and
+// FAKE_GRYPE_PID receives its process ID, which stays that of the sleep.
 func fakeGrype(t testing.TB) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "grype")

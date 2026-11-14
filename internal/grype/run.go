@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.yaml.in/yaml/v3"
@@ -213,7 +215,13 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = 10 * time.Second
+	// Grype dies with Tripcoil, also when Tripcoil is killed. The kernel sends the signal when the
+	// thread that started Grype exits, so the goroutine keeps that thread until Grype has ended:
+	// the Go runtime ends a thread when a goroutine that locked it exits.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	runtime.LockOSThread()
 	err = cmd.Run()
+	runtime.UnlockOSThread()
 	if err == nil {
 		return nil
 	}

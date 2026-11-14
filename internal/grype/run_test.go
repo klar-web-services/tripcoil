@@ -1,12 +1,17 @@
 package grype
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -252,4 +257,56 @@ func TestReportsAboveTheCapAreNotRead(t *testing.T) {
 	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Grype dies with Tripcoil, also when Tripcoil is killed with SIGKILL, which it cannot handle. The
+// test runs Tripcoil's side in a child process, kills it, and watches Grype.
+func TestGrypeDiesWithTripcoil(t *testing.T) {
+	if dir := os.Getenv("TRIPCOIL_TEST_GRYPE_DIR"); dir != "" {
+		r := &Runner{Binary: filepath.Join(dir, "grype"), CacheDir: filepath.Join(dir, "cache"),
+			Environ: append(os.Environ(), "FAKE_GRYPE_SLEEP=60", "FAKE_GRYPE_PID="+filepath.Join(dir, "grype.pid"))}
+		r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b"))
+		return
+	}
+	dir := t.TempDir()
+	if err := os.Rename(fakeGrype(t), filepath.Join(dir, "grype")); err != nil {
+		t.Fatal(err)
+	}
+	tripcoil := exec.Command(os.Args[0], "-test.run=^TestGrypeDiesWithTripcoil$")
+	tripcoil.Env = append(os.Environ(), "TRIPCOIL_TEST_GRYPE_DIR="+dir)
+	if err := tripcoil.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := 0
+	for range 500 {
+		if data, err := os.ReadFile(filepath.Join(dir, "grype.pid")); err == nil {
+			if pid, _ = strconv.Atoi(strings.TrimSpace(string(data))); pid > 0 {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	tripcoil.Process.Kill()
+	tripcoil.Wait()
+	if pid == 0 {
+		t.Fatal("Grype did not start")
+	}
+	defer syscall.Kill(pid, syscall.SIGKILL)
+	for range 500 {
+		if !running(pid) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Grype (PID %d) outlived Tripcoil", pid)
+}
+
+// running reports whether a process exists and is not a zombie.
+func running(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	i := bytes.LastIndexByte(data, ')') // the state follows the command name
+	return i+2 < len(data) && data[i+2] != 'Z'
 }
