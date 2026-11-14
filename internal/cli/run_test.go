@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klar-web-services/tripcoil/internal/audit"
+	"github.com/klar-web-services/tripcoil/internal/config"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/problem"
 	"github.com/klar-web-services/tripcoil/internal/run"
@@ -29,8 +31,25 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		configPath: filepath.Join(t.TempDir(), "tripcoil.yaml"),
 		stateDir:   t.TempDir(),
 		collect:    func(context.Context, string) (*inventory.Inventory, error) { return inv, err },
-		interrupts: func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+		audit: func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
+			return sampleAudit(audit.Complete)
+		},
+		lowerPriority: func() error { return nil },
+		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
 	}
+}
+
+// sampleAudit is an audit of sampleInventory with one finding.
+func sampleAudit(status string, errs ...problem.Problem) *audit.Audit {
+	a := &audit.Audit{SchemaVersion: "1", Status: status,
+		Grype:    audit.GrypeInfo{Version: "0.121.2", DBBuilt: time.Date(2026, 11, 14, 3, 0, 0, 0, time.UTC)},
+		Origins:  []audit.OriginResult{{ID: "kernel-upstream:7.3.3", Kind: "kernel-upstream", Status: audit.Scanned}},
+		Findings: []audit.Finding{}, Upgrades: []audit.Upgrade{}, Errors: append([]problem.Problem{}, errs...), Warnings: []problem.Problem{}}
+	if status != audit.Failed {
+		a.Findings = append(a.Findings, audit.Finding{ID: "f:0000000000000001", Origin: "kernel-upstream:7.3.3", Risk: audit.RiskHigh, Items: []string{"kernel"},
+			Vulnerability: audit.Vulnerability{ID: "CVE-2026-1", Severity: "High", EPSS: 0.2}, Package: audit.Package{Name: "linux", Version: "7.3.3"}, Source: "kernel-cna"})
+	}
+	return a
 }
 
 func TestRunInterrupted(t *testing.T) {
@@ -119,16 +138,25 @@ func TestRunWritesEvidence(t *testing.T) {
 	}
 	dir := filepath.Join(d.stateDir, "runs", runID)
 	rec := readRecord(t, d.stateDir)
-	if rec.Status != run.Complete || rec.Stages["inventory"] != run.StageOK || rec.Counts["items"] != 1 || rec.Trigger != "manual" || rec.Versions["tripcoil"] != "dev" {
+	if rec.Status != run.Complete || rec.Stages["inventory"] != run.StageOK || rec.Stages["audit"] != run.StageOK || rec.Counts["items"] != 1 ||
+		rec.Trigger != "manual" || rec.Versions["tripcoil"] != "dev" || rec.Versions["grype"] != "0.121.2" || rec.Versions["grypeDB"] != "2026-11-14T03:00:00Z" {
 		t.Fatalf("run.json %+v", rec)
 	}
-	if fi, err := os.Stat(filepath.Join(dir, "inventory.json")); err != nil || fi.Mode().Perm() != 0o640 {
-		t.Fatalf("inventory.json %v %v", fi, err)
+	if rec.Counts["findings"] != 1 || rec.Counts["findingsHigh"] != 1 || rec.Counts["findingsCritical"] != 0 || rec.Counts["coverageGaps"] != 0 {
+		t.Fatalf("counts %+v", rec.Counts)
+	}
+	for _, name := range []string{"inventory.json", "audit.json", "report.md"} {
+		if fi, err := os.Stat(filepath.Join(dir, name)); err != nil || fi.Mode().Perm() != 0o640 {
+			t.Fatalf("%s %v %v", name, fi, err)
+		}
+	}
+	if md, _ := os.ReadFile(filepath.Join(dir, "report.md")); !strings.HasPrefix(string(md), "⚠️ Audit only (the AI review is not part of this build): 0 critical, 1 high") {
+		t.Fatalf("report.md %s", md)
 	}
 	if target, err := os.Readlink(filepath.Join(d.stateDir, "runs", "latest")); err != nil || target != runID {
 		t.Fatalf("latest -> %q %v", target, err)
 	}
-	if want := "Run " + runID + ": complete. 1 item, 1 origin.\nEvidence: " + dir + "\n"; out.String() != want {
+	if want := "Run " + runID + ": complete. 1 item, 1 origin, 1 finding, 0 coverage gaps.\nEvidence: " + dir + "\nRead the report with: sudo tripcoil report\n"; out.String() != want {
 		t.Fatalf("stdout %q, want %q", out.String(), want)
 	}
 	if !strings.Contains(errb.String(), "does not exist yet, so the defaults apply") {
@@ -162,6 +190,95 @@ func TestRunInventoryFailed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(d.stateDir, "runs", runID, "inventory.json")); !os.IsNotExist(err) {
 		t.Fatal("no inventory.json without an inventory")
+	}
+	if rec.Stages["audit"] != run.StageSkipped {
+		t.Fatalf("audit stage %q", rec.Stages["audit"])
+	}
+	if md, _ := os.ReadFile(filepath.Join(d.stateDir, "runs", runID, "report.md")); !strings.HasPrefix(string(md), "⛔ Run incomplete: cannot inventory the host") {
+		t.Fatalf("report.md %s", md)
+	}
+}
+
+func TestRunAuditFailedOrPartial(t *testing.T) {
+	for _, tc := range []struct {
+		status, stage, run string
+		code               int
+		err                problem.Problem
+	}{
+		{audit.Failed, run.StageFailed, run.Failed, 2, problem.New(problem.Error, problem.DBStale, "audit", "the vulnerability database is 73 hours old")},
+		{audit.Partial, run.StagePartial, run.Partial, 1, problem.New(problem.Error, problem.OriginScanFailed, "audit", "/opt/api/api: Grype failed")},
+	} {
+		d := testDeps(t, sampleInventory(), nil)
+		d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
+			return sampleAudit(tc.status, tc.err)
+		}
+		var out, errb bytes.Buffer
+		if code := dispatch([]string{"run"}, &out, &errb, d); code != tc.code {
+			t.Fatalf("%s: exit %d", tc.status, code)
+		}
+		rec := readRecord(t, d.stateDir)
+		if rec.Status != tc.run || rec.Stages["audit"] != tc.stage || len(rec.Errors) != 1 || rec.Errors[0].Code != tc.err.Code {
+			t.Fatalf("%s: run.json %+v", tc.status, rec)
+		}
+		if target, err := os.Readlink(filepath.Join(d.stateDir, "runs", "latest")); err != nil || target != runID {
+			t.Fatalf("%s: latest -> %q %v", tc.status, target, err)
+		}
+	}
+}
+
+func TestRunInterruptedDuringAudit(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.interrupts = func() (context.Context, context.CancelFunc) { return ctx, cancel }
+	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
+		cancel() // Ctrl-C arrives while Grype runs
+		return sampleAudit(audit.Partial)
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	rec := readRecord(t, d.stateDir)
+	if rec.Status != run.Interrupted || rec.Stages["inventory"] != run.StageOK || rec.Stages["audit"] != run.StageFailed || rec.Errors[0].Code != problem.Interrupted {
+		t.Fatalf("run.json %+v", rec)
+	}
+	for _, name := range []string{"inventory.json", "audit.json", "report.md"} {
+		if _, err := os.Stat(filepath.Join(d.stateDir, "runs", runID, name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(d.stateDir, "runs", "latest")); !os.IsNotExist(err) {
+		t.Fatal("latest must keep pointing at the last finished run")
+	}
+}
+
+func TestRunLowersItsPriority(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	called := false
+	d.lowerPriority = func() error { called = true; return errors.New("operation not permitted") }
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 0 || !called {
+		t.Fatalf("exit %d, called %v", code, called)
+	}
+	if !strings.Contains(errb.String(), "cannot lower the run's priority: operation not permitted") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+}
+
+func TestRunReportWriteFailed(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
+		if err := os.MkdirAll(filepath.Join(d.stateDir, "runs", runID, "report.md", "x"), 0o750); err != nil { // a directory where report.md goes
+			t.Fatal(err)
+		}
+		return sampleAudit(audit.Complete)
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	if rec := readRecord(t, d.stateDir); rec.Status != run.Failed || rec.Errors[0].Code != problem.RunFolderUnwritable {
+		t.Fatalf("run.json %+v", rec)
 	}
 }
 
