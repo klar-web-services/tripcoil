@@ -189,6 +189,43 @@ func TestKernel(t *testing.T) {
 			origin: KernelUpstreamOriginID("7.3.3"),
 		},
 		{
+			name: "fedora", release: osrel.Release{ID: "fedora", VersionID: "41"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.12.9-200.fc41.x86_64", "Linux version 6.12.9-200.fc41.x86_64", "", "usr/lib/modules/6.12.9-200.fc41.x86_64")
+			},
+			tool: &fakeTool{typ: "rpm", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/6.12.9-200.fc41.x86_64/modules.builtin": {Name: "kernel-core", Version: "6.12.9-200.fc41", Arch: "x86_64", Type: "rpm"}}},
+			running: "6.12.9-200.fc41", upstream: "6.12.9",
+			origin: KernelUpstreamOriginID("6.12.9"),
+		},
+		{
+			name: "fedora rawhide release candidate", release: osrel.Release{ID: "fedora", VersionID: "42"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.13.0-0.rc7.56.fc42.x86_64", "Linux version 6.13.0-0.rc7.56.fc42.x86_64", "", "usr/lib/modules/6.13.0-0.rc7.56.fc42.x86_64")
+			},
+			tool: &fakeTool{typ: "rpm", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/6.13.0-0.rc7.56.fc42.x86_64/modules.builtin": {Name: "kernel-core", Version: "6.13.0-0.rc7.56.fc42", Arch: "x86_64", Type: "rpm"}}},
+			running: "6.13.0-0.rc7.56.fc42", upstream: "6.13-rc7",
+			origin: KernelUpstreamOriginID("6.13-rc7"),
+		},
+		{
+			name: "fedora rawhide snapshot after a release candidate", release: osrel.Release{ID: "fedora", VersionID: "42"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.13.0-0.rc7.20250117git595523945be0.58.fc42.x86_64", "Linux version 6.13.0-0.rc7.20250117git595523945be0.58.fc42.x86_64", "", "usr/lib/modules/6.13.0-0.rc7.20250117git595523945be0.58.fc42.x86_64")
+			},
+			running: "6.13.0-0.rc7.20250117git595523945be0.58.fc42.x86_64", upstream: "6.13-rc7",
+			origin: KernelUpstreamOriginID("6.13-rc7"),
+		},
+		{
+			// The kernel CNA matching rejects -rc0, so the Audit says it cannot match this kernel.
+			name: "fedora rawhide merge-window snapshot", release: osrel.Release{ID: "fedora", VersionID: "42"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64", "Linux version 6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64", "", "usr/lib/modules/6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64")
+			},
+			running: "6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64", upstream: "6.14-rc0",
+			origin: KernelUpstreamOriginID("6.14-rc0"),
+		},
+		{
 			name: "arch mainline release candidate", release: osrel.Release{ID: "arch"},
 			root: func(t *testing.T) string {
 				return kernelRoot(t, "7.4.0-rc1-1-mainline", "Linux version 7.4.0-rc1-1-mainline", "", "usr/lib/modules/7.4.0-rc1-1-mainline")

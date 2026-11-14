@@ -29,6 +29,9 @@ var (
 	debianRunning = regexp.MustCompile(`Debian (\S+) \(\d{4}-\d{2}-\d{2}\)\s*$`)
 	// upstreamLead keeps a release candidate's -rcN: 7.4.0-rc1 in 7.4.0-rc1-1-mainline.
 	upstreamLead = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?(?:-rc\d+)?`)
+	// fedoraRC finds a Fedora rawhide release candidate, 6.13-rc7 in 6.13.0-0.rc7.56.fc42.x86_64.
+	// A merge-window snapshot is -0.rc0., which gives an -rc0 the kernel CNA matching rejects.
+	fedoraRC = regexp.MustCompile(`^(\d+\.\d+)\.0-0\.(rc\d+)\.`)
 	// rpmKernelName matches the distributions' own kernel packages, as listed from the real
 	// repositories on 2026-11-14: RHEL family kernel, kernel-core, kernel-modules(-core),
 	// kernel-debug(-core), kernel-rt(-core), kernel-uki-virt, Oracle's kernel-uek(-core); Amazon
@@ -110,6 +113,10 @@ func runningVersions(family osrel.Family, rel, procVersion, signature string, pk
 			// Debian versions a release candidate as 6.13~rc7.
 			upstream = upstreamLead.FindString(strings.Replace(withoutEpoch(running), "~rc", "-rc", 1))
 			distroBuild = true
+		}
+	case osrel.Fedora:
+		if m := fedoraRC.FindStringSubmatch(rel); m != nil {
+			upstream = m[1] + "-" + m[2]
 		}
 	case osrel.Ubuntu:
 		// "Ubuntu 5.15.0-91.101-generic 5.15.131": package version plus flavor, then upstream.
