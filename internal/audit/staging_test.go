@@ -36,7 +36,7 @@ func TestStagePackageDBDebian(t *testing.T) {
 		"var/lib/dpkg/info/libc6.list": "/lib/x86_64-linux-gnu/libc.so.6\n", "etc/shadow": "root:x:",
 	})
 	dst := t.TempDir()
-	key, err := stagePackageDB(root, osrel.Debian, dst)
+	key, err := stagePackageDB(budget(), root, osrel.Debian, dst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestStagePackageDBDebian(t *testing.T) {
 	}
 	// The key follows the database.
 	os.WriteFile(filepath.Join(root, "var/lib/dpkg/status"), []byte("Package: libc6\nVersion: 2\n"), 0o644)
-	if again, _ := stagePackageDB(root, osrel.Debian, t.TempDir()); again == key {
+	if again, _ := stagePackageDB(budget(), root, osrel.Debian, t.TempDir()); again == key {
 		t.Fatal("a changed database keeps its key")
 	}
 }
@@ -61,7 +61,7 @@ func TestStagePackageDBRPMOnce(t *testing.T) {
 	os.Symlink("../../usr/lib/sysimage/rpm", filepath.Join(root, "var/lib/rpm"))
 	syscall.Mkfifo(filepath.Join(root, "usr/lib/sysimage/rpm/fifo"), 0o600)
 	dst := t.TempDir()
-	if _, err := stagePackageDB(root, osrel.Fedora, dst); err != nil {
+	if _, err := stagePackageDB(budget(), root, osrel.Fedora, dst); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := tree(t, dst), []string{"etc/os-release", "var/lib/rpm/rpmdb.sqlite"}; !slices.Equal(got, want) {
@@ -70,7 +70,7 @@ func TestStagePackageDBRPMOnce(t *testing.T) {
 	// Without the link, the database is staged from where it is, as /var/lib/rpm.
 	os.Remove(filepath.Join(root, "var/lib/rpm"))
 	dst = t.TempDir()
-	if _, err := stagePackageDB(root, osrel.Fedora, dst); err != nil {
+	if _, err := stagePackageDB(budget(), root, osrel.Fedora, dst); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := tree(t, dst), []string{"etc/os-release", "var/lib/rpm/rpmdb.sqlite"}; !slices.Equal(got, want) {
@@ -79,15 +79,15 @@ func TestStagePackageDBRPMOnce(t *testing.T) {
 }
 
 func TestStagePackageDBFailures(t *testing.T) {
-	if _, err := stagePackageDB(files(t, map[string]string{"etc/os-release": "ID=alpine\n"}), osrel.Alpine, t.TempDir()); err == nil ||
+	if _, err := stagePackageDB(budget(), files(t, map[string]string{"etc/os-release": "ID=alpine\n"}), osrel.Alpine, t.TempDir()); err == nil ||
 		!strings.Contains(err.Error(), "no package database") {
 		t.Fatalf("no database: %v", err)
 	}
 	// Without os-release Grype would match nothing, and say nothing.
-	if _, err := stagePackageDB(files(t, map[string]string{"lib/apk/db/installed": "P:musl\n"}), osrel.Alpine, t.TempDir()); err == nil {
+	if _, err := stagePackageDB(budget(), files(t, map[string]string{"lib/apk/db/installed": "P:musl\n"}), osrel.Alpine, t.TempDir()); err == nil {
 		t.Fatal("staged without os-release")
 	}
-	if _, err := stagePackageDB(t.TempDir(), osrel.Unknown, t.TempDir()); err == nil {
+	if _, err := stagePackageDB(budget(), t.TempDir(), osrel.Unknown, t.TempDir()); err == nil {
 		t.Fatal("staged an unknown distribution")
 	}
 	// Nor with an os-release that is not a regular file: only such a package database file is
@@ -95,7 +95,7 @@ func TestStagePackageDBFailures(t *testing.T) {
 	root := files(t, map[string]string{"var/lib/dpkg/status": "Package: libc6\n"})
 	os.MkdirAll(filepath.Join(root, "etc"), 0o755)
 	syscall.Mkfifo(filepath.Join(root, "etc/os-release"), 0o600)
-	if _, err := stagePackageDB(root, osrel.Debian, t.TempDir()); !errors.Is(err, procfs.ErrNotRegular) {
+	if _, err := stagePackageDB(budget(), root, osrel.Debian, t.TempDir()); !errors.Is(err, procfs.ErrNotRegular) {
 		t.Fatalf("a FIFO as os-release: %v", err)
 	}
 }
@@ -109,14 +109,14 @@ func TestStagePackageDBLimits(t *testing.T) {
 	defer func() { cacheSpace = old }()
 	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + size - 1, 10000, nil } // floor 1000
 	dst := t.TempDir()
-	if _, err := stagePackageDB(root, osrel.Debian, dst); !errors.Is(err, errCacheFull) {
+	if _, err := stagePackageDB(budget(), root, osrel.Debian, dst); !errors.Is(err, errCacheFull) {
 		t.Fatalf("staged into a full cache: %v", err)
 	}
 	if got := tree(t, dst); len(got) != 0 {
 		t.Fatalf("staged %v into a full cache", got)
 	}
 	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + size, 10000, nil }
-	if _, err := stagePackageDB(root, osrel.Debian, t.TempDir()); err != nil {
+	if _, err := stagePackageDB(budget(), root, osrel.Debian, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	cacheSpace = old
@@ -125,7 +125,7 @@ func TestStagePackageDBLimits(t *testing.T) {
 	defer func() { scanFileCap = oldCap }()
 	scanFileCap = 10
 	status := filepath.Join(root, "var/lib/dpkg/status")
-	if _, err := stagePackageDB(root, osrel.Debian, t.TempDir()); err == nil || !strings.Contains(err.Error(), status) {
+	if _, err := stagePackageDB(budget(), root, osrel.Debian, t.TempDir()); err == nil || !strings.Contains(err.Error(), status) {
 		t.Fatalf("staged a file above the cap: %v", err)
 	}
 	if _, err := copyRegular(status, filepath.Join(t.TempDir(), "status"), io.Discard); err == nil || !strings.Contains(err.Error(), status) {

@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,7 +82,7 @@ func TestAppDirKeyNeverFollowsALockfileLink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "package-lock.json"), filepath.Join(dir, "package-lock.json")); err != nil {
 		t.Fatal(err)
 	}
-	if k, _, err := appDirKey(context.Background(), dir, "2026-11-14", noMounts); k != "" || err != nil {
+	if k, _, err := appDirKey(context.Background(), budget(), dir, "2026-11-14", noMounts); k != "" || err != nil {
 		t.Fatalf("a lockfile link: %q %v", k, err)
 	}
 }
@@ -164,7 +165,7 @@ func TestCopyNamesAreNeverArchives(t *testing.T) {
 	if !slices.Contains(g.catalogs, copied) {
 		t.Fatalf("cataloged %q", g.catalogs)
 	}
-	au := &auditor{d: Deps{Root: root, Now: time.Now}}
+	au := &auditor{d: Deps{Root: root, Now: time.Now}, reads: budget()}
 	if k, _, _ := au.cacheKey(context.Background(), *o); k != keyOf("binary", o.SHA256, "libx.so.1_tar.gz") {
 		t.Errorf("cache key %s", k)
 	}
@@ -268,7 +269,7 @@ func TestCopyIsNamedAfterRootsFile(t *testing.T) {
 	if len(a.Origins) != 1 || a.Origins[0].Status != Scanned || !slices.Contains(g.catalogs, copied) {
 		t.Fatalf("cataloged %q: %+v", g.catalogs, a.Origins)
 	}
-	au := &auditor{d: Deps{Root: "/", Now: time.Now}}
+	au := &auditor{d: Deps{Root: "/", Now: time.Now}, reads: budget()}
 	if k, _, _ := au.cacheKey(context.Background(), o); k != keyOf("binary", o.SHA256, filepath.Base(system)) {
 		t.Errorf("cache key %s", k)
 	}
@@ -276,5 +277,45 @@ func TestCopyIsNamedAfterRootsFile(t *testing.T) {
 	o.Paths = []string{mine}
 	if k, _, _ := au.cacheKey(context.Background(), o); k != keyOf("binary", o.SHA256, "x") {
 		t.Errorf("cache key %s", k)
+	}
+}
+
+// The Audit's own reads of files share one budget per run, as the Inventory's: once it is spent,
+// the next origins fail.
+func TestTheAuditsReadsHaveABudget(t *testing.T) {
+	dir := files(t, map[string]string{"six": "123456", "four": "1234"})
+	six, four := filepath.Join(dir, "six"), filepath.Join(dir, "four")
+	b := &readBudget{left: 10}
+	if _, err := hashFile(context.Background(), b, six); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyVerified(context.Background(), b, six, openPath(six), sumOf("123456"), filepath.Join(dir, "copy")); !errors.Is(err, errReadBudget) {
+		t.Fatalf("a copy past the budget: %v", err)
+	}
+	if _, err := readSmall(b, four, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSmall(b, four, 100); !errors.Is(err, errReadBudget) || b.left != 0 {
+		t.Fatalf("a read past the budget: %v, %d left", err, b.left)
+	}
+	old := runReadCap
+	runReadCap = 0
+	defer func() { runReadCap = old }()
+	root, cache, inv := host(t)
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), hostScanner(root, cache), fakeKernel{}), inv)
+	byID := map[string]OriginResult{}
+	for _, o := range a.Origins {
+		byID[o.ID] = o
+	}
+	for _, id := range []string{libsslO, apiO, toolO, jarO} {
+		if o := byID[id]; o.Status != ScanFailed || !strings.Contains(o.Error, errReadBudget.Error()) {
+			t.Errorf("%s: %s %q", id, o.Status, o.Error)
+		}
+	}
+	// The Inventory's copy of a replaced file is linked, and Grype reads an app directory itself.
+	for _, id := range []string{oldO, "appdir:/srv/shop"} {
+		if o := byID[id]; o.Status != Scanned {
+			t.Errorf("%s: %s %q", id, o.Status, o.Error)
+		}
 	}
 }

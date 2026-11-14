@@ -79,6 +79,7 @@ type auditor struct {
 	cache sbomCache
 	maps  map[int][]procfs.Mapping // the mappings of processes, read once
 	seen  map[string]bool          // the IDs of the findings so far
+	reads *readBudget              // what the Audit may still read from files
 
 	mounts     []string // the mount points, read at the first app directory (see mountBelow)
 	mountsErr  error
@@ -95,6 +96,7 @@ func Run(ctx context.Context, d Deps, inv *inventory.Inventory) *Audit {
 		cache: sbomCache{root: filepath.Join(d.CacheDir, "sbom"), now: d.Now},
 		maps:  map[int][]procfs.Mapping{},
 		seen:  map[string]bool{},
+		reads: &readBudget{left: runReadCap},
 	}
 	au.run(ctx)
 	if ctx.Err() != nil {

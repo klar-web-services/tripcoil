@@ -123,7 +123,7 @@ var maxTreeEntries = 200_000 // lowered by tests
 // directory is opened once, never through a link, and everything is read relative to it: the
 // lockfiles, and the tree. Neither has a key: a link to a directory, a directory with a mount
 // below it (see mountBelow, which is given the opened directory's path).
-func appDirKey(ctx context.Context, dir, day string, mountBelow func(string) bool) (string, []string, error) {
+func appDirKey(ctx context.Context, reads *readBudget, dir, day string, mountBelow func(string) bool) (string, []string, error) {
 	d, err := openDir(dir)
 	if err != nil {
 		return "", nil, nil
@@ -137,7 +137,7 @@ func appDirKey(ctx context.Context, dir, day string, mountBelow func(string) boo
 	var files []string
 	locked := false
 	for _, name := range append(append([]string{}, appLockfiles...), appManifests...) {
-		data, err := readSmallAt(d, name, maxLockfile)
+		data, err := readSmallAt(reads, d, name, maxLockfile)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			continue
@@ -209,13 +209,13 @@ func lstatAt(d *os.File, name string) (syscall.Stat_t, error) {
 }
 
 // readSmallAt reads the file name in d as readSmall reads a path, but never through a link.
-func readSmallAt(d *os.File, name string, limit int64) ([]byte, error) {
+func readSmallAt(reads *readBudget, d *os.File, name string, limit int64) ([]byte, error) {
 	fd, err := syscall.Openat(int(d.Fd()), name, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: filepath.Join(d.Name(), name), Err: err}
 	}
 	defer syscall.Close(fd)
-	return readSmall("/proc/self/fd/"+strconv.Itoa(fd), limit)
+	return readSmall(reads, "/proc/self/fd/"+strconv.Itoa(fd), limit)
 }
 
 // mountInfo lists the mount points of Tripcoil's mount namespace.

@@ -34,8 +34,9 @@ var releaseFiles = map[string][]string{"deb": {"etc/debian_version"}}
 // stagePackageDB copies os-release and the package database of the host below root into dst, a
 // staging root that holds nothing else, and returns the SBOM cache key: the hash of what it
 // copied. Only regular files are copied: a package database file that is not one is left out,
-// and any other fails the copy. The copies must leave the cache file system its floor.
-func stagePackageDB(root string, family osrel.Family, dst string) (string, error) {
+// and any other fails the copy. The copies must leave the cache file system its floor, and are
+// charged to reads.
+func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst string) (string, error) {
 	alternatives, ok := packageDBFiles[family.PackageType()]
 	if !ok {
 		return "", fmt.Errorf("%q has no package database Tripcoil can read", family)
@@ -93,6 +94,9 @@ func stagePackageDB(root string, family osrel.Family, dst string) (string, error
 		return "", err
 	}
 	if err := hasRoom(dst, size); err != nil {
+		return "", err
+	}
+	if err := reads.take(size); err != nil {
 		return "", err
 	}
 	h := sha256.New()

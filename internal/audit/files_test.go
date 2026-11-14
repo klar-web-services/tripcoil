@@ -32,13 +32,13 @@ func TestCopyVerified(t *testing.T) {
 	write(t, src, "go binary v1")
 	dir := filepath.Join(t.TempDir(), "scan", sumOf("go binary v1"))
 	dst := filepath.Join(dir, "api")
-	if err := copyVerified(context.Background(), src, openPath(src), sumOf("go binary v1"), dst); err != nil {
+	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf("go binary v1"), dst); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(dst); string(data) != "go binary v1" {
 		t.Fatalf("copy %s: %q", dst, data)
 	}
-	if err := copyVerified(context.Background(), src, openPath(src), sumOf("go binary v0"), filepath.Join(dir, "old")); !errors.Is(err, errFileChanged) {
+	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf("go binary v0"), filepath.Join(dir, "old")); !errors.Is(err, errFileChanged) {
 		t.Fatalf("a changed file: %v", err)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -63,10 +63,10 @@ func TestFileReadsNeverHang(t *testing.T) {
 	for _, path := range []string{fifo, "/dev/zero", zero, kernel, dir} {
 		done := make(chan error, 3)
 		go func() {
-			done <- copyVerified(context.Background(), path, openPath(path), sumOf(""), filepath.Join(dir, "scan", "copy"))
-			_, err := hashFile(context.Background(), path)
+			done <- copyVerified(context.Background(), budget(), path, openPath(path), sumOf(""), filepath.Join(dir, "scan", "copy"))
+			_, err := hashFile(context.Background(), budget(), path)
 			done <- err
-			_, err = readSmall(path, 1<<20)
+			_, err = readSmall(budget(), path, 1<<20)
 			done <- err
 		}()
 		for range 3 {
@@ -80,7 +80,7 @@ func TestFileReadsNeverHang(t *testing.T) {
 			}
 		}
 	}
-	if _, err := readSmall(kernel, 1<<20); !errors.Is(err, procfs.ErrPseudoFile) {
+	if _, err := readSmall(budget(), kernel, 1<<20); !errors.Is(err, procfs.ErrPseudoFile) {
 		t.Errorf("a kernel file: %v", err)
 	}
 }
@@ -91,29 +91,29 @@ func TestCopyVerifiedLimits(t *testing.T) {
 	old := scanFileCap
 	scanFileCap = 50
 	defer func() { scanFileCap = old }()
-	if err := copyVerified(context.Background(), src, openPath(src), sumOf(""), filepath.Join(t.TempDir(), "big")); err == nil || !strings.Contains(err.Error(), src) {
+	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf(""), filepath.Join(t.TempDir(), "big")); err == nil || !strings.Contains(err.Error(), src) {
 		t.Fatalf("copied a file above the cap: %v", err)
 	}
-	if _, err := hashFile(context.Background(), src); err == nil || !strings.Contains(err.Error(), src) {
+	if _, err := hashFile(context.Background(), budget(), src); err == nil || !strings.Contains(err.Error(), src) {
 		t.Fatalf("hashed a file above the cap: %v", err)
 	}
 	scanFileCap = old
 	oldSpace := cacheSpace
 	defer func() { cacheSpace = oldSpace }()
 	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + 50, 10000, nil } // floor 1000
-	if err := copyVerified(context.Background(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
+	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
 		t.Fatalf("copy into a full cache: %v", err)
 	}
 	// The floor is a tenth of the file system, but at most 4 GiB.
 	cacheSpace = func(string) (uint64, uint64, error) { return maxCacheFloor + 100, 1 << 50, nil }
-	if err := copyVerified(context.Background(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); err != nil {
+	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); err != nil {
 		t.Fatalf("copy above a 4 GiB floor: %v", err)
 	}
 	cacheSpace = func(string) (uint64, uint64, error) { return maxCacheFloor + 99, 1 << 50, nil }
-	if err := copyVerified(context.Background(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
+	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
 		t.Fatalf("copy into a 4 GiB floor: %v", err)
 	}
-	if _, err := readSmall(src, 99); err == nil {
+	if _, err := readSmall(budget(), src, 99); err == nil {
 		t.Fatal("read a file above the limit")
 	}
 }
@@ -130,11 +130,11 @@ func TestFileShrinksWhileRead(t *testing.T) {
 		return f, size, err
 	}
 	write(t, src, "0123456789")
-	if sum, err := hashFile(context.Background(), src); !errors.Is(err, errFileChanged) {
+	if sum, err := hashFile(context.Background(), budget(), src); !errors.Is(err, errFileChanged) {
 		t.Errorf("hashed %q: %v", sum, err)
 	}
 	write(t, src, "0123456789")
-	if data, err := readSmall(src, 1<<20); !errors.Is(err, errFileChanged) {
+	if data, err := readSmall(budget(), src, 1<<20); !errors.Is(err, errFileChanged) {
 		t.Errorf("read %q: %v", data, err)
 	}
 }
@@ -142,7 +142,7 @@ func TestFileShrinksWhileRead(t *testing.T) {
 func TestHashFile(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "app.jar")
 	write(t, src, "jar")
-	if got, err := hashFile(context.Background(), src); err != nil || got != sumOf("jar") {
+	if got, err := hashFile(context.Background(), budget(), src); err != nil || got != sumOf("jar") {
 		t.Fatalf("%s %v", got, err)
 	}
 }
@@ -162,3 +162,6 @@ func files(t *testing.T, tree map[string]string) string {
 	}
 	return root
 }
+
+// budget is a run's whole read budget.
+func budget() *readBudget { return &readBudget{left: maxRunReadBytes} }

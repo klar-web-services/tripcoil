@@ -19,6 +19,26 @@ const maxScanFileSize = 4 << 30
 
 var scanFileCap int64 = maxScanFileSize // lowered by tests
 
+// maxRunReadBytes is the most the Audit reads from files in one run, as the Inventory: it hashes
+// every jar and reads every app directory's lockfiles twice on every run.
+const maxRunReadBytes = 64 << 30
+
+var runReadCap int64 = maxRunReadBytes // lowered by tests
+
+var errReadBudget = errors.New("the audit's read budget of 64 GiB for this run is spent")
+
+// readBudget is what is left of the bytes the Audit may still read from files in this run.
+type readBudget struct{ left int64 }
+
+// take charges n bytes, or fails when fewer are left: a file is read at most to its size.
+func (b *readBudget) take(n int64) error {
+	if n > b.left {
+		return errReadBudget
+	}
+	b.left -= n
+	return nil
+}
+
 // cacheSpace returns the available and total bytes of the file system that holds dir.
 var cacheSpace = func(dir string) (free, total uint64, err error) {
 	var st syscall.Statfs_t
@@ -80,13 +100,16 @@ func openPath(path string) func() (*os.File, error) {
 	return func() (*os.File, error) { return procfs.OpenRegular(path) }
 }
 
-// hashFile returns the SHA-256 of the regular file at path.
-func hashFile(ctx context.Context, path string) (string, error) {
+// hashFile returns the SHA-256 of the regular file at path, charged to reads.
+func hashFile(ctx context.Context, reads *readBudget, path string) (string, error) {
 	f, size, err := openFile(path, openPath(path))
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	if err := reads.take(size); err != nil {
+		return "", err
+	}
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(ctxReader{ctx, f}, size))
 	switch {
@@ -98,8 +121,9 @@ func hashFile(ctx context.Context, path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// readSmall reads a small regular file, such as a lockfile, of at most limit bytes.
-func readSmall(path string, limit int64) ([]byte, error) {
+// readSmall reads a small regular file, such as a lockfile, of at most limit bytes, charged to
+// reads.
+func readSmall(reads *readBudget, path string, limit int64) ([]byte, error) {
 	f, size, err := openFile(path, openPath(path))
 	if err != nil {
 		return nil, err
@@ -107,6 +131,9 @@ func readSmall(path string, limit int64) ([]byte, error) {
 	defer f.Close()
 	if size > limit {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, limit)
+	}
+	if err := reads.take(size); err != nil {
+		return nil, err
 	}
 	data, err := io.ReadAll(io.LimitReader(f, size))
 	if err == nil && int64(len(data)) != size {
@@ -132,10 +159,10 @@ func aboveFloor(dir string, size int64, full error) error {
 	return nil
 }
 
-// copyVerified copies the file that open opens, name, to dst when its content has that SHA-256.
-// Grype then reads exactly the file the Inventory identified: never a FIFO, a device or a kernel
-// file, nor a file that changed since.
-func copyVerified(ctx context.Context, name string, open func() (*os.File, error), sha, dst string) error {
+// copyVerified copies the file that open opens, name, to dst when its content has that SHA-256,
+// charged to reads. Grype then reads exactly the file the Inventory identified: never a FIFO, a
+// device or a kernel file, nor a file that changed since.
+func copyVerified(ctx context.Context, reads *readBudget, name string, open func() (*os.File, error), sha, dst string) error {
 	f, size, err := openFile(name, open)
 	if err != nil {
 		return err
@@ -146,6 +173,9 @@ func copyVerified(ctx context.Context, name string, open func() (*os.File, error
 		return err
 	}
 	if err := hasRoom(dir, size); err != nil {
+		return err
+	}
+	if err := reads.take(size); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, ".copy-*")

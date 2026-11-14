@@ -74,7 +74,7 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	stage := filepath.Join(au.d.CacheDir, "staging")
 	os.RemoveAll(stage)
 	defer os.RemoveAll(stage)
-	key, err := stagePackageDB(au.d.Root, au.d.Family, stage)
+	key, err := stagePackageDB(au.reads, au.d.Root, au.d.Family, stage)
 	if err != nil {
 		return nil, nil, err
 	}

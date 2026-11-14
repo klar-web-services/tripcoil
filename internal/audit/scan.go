@@ -76,7 +76,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 		}
 	}
 	if o.Kind == inventory.OriginAppDir && o.Jar {
-		sha, err := hashFile(ctx, filepath.Join(au.d.Root, o.Path))
+		sha, err := hashFile(ctx, au.reads, filepath.Join(au.d.Root, o.Path))
 		if err != nil {
 			return nil, counts{}, err
 		}
@@ -307,7 +307,7 @@ func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []
 		if o.Jar {
 			return keyOf("jar", o.SHA256, au.fileName(o)), nil, nil
 		}
-		return appDirKey(ctx, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"), au.mountBelow)
+		return appDirKey(ctx, au.reads, filepath.Join(au.d.Root, o.Path), au.d.Now().UTC().Format("2006-01-02"), au.mountBelow)
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
@@ -378,7 +378,7 @@ func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func
 	var err error
 	if o.Jar {
 		jar := filepath.Join(au.d.Root, o.Path)
-		err = copyVerified(ctx, jar, openPath(jar), o.SHA256, path)
+		err = copyVerified(ctx, au.reads, jar, openPath(jar), o.SHA256, path)
 	} else {
 		err = au.binaryFile(ctx, o, path)
 	}
@@ -401,11 +401,11 @@ func (au *auditor) binaryFile(ctx context.Context, o inventory.Origin, path stri
 		if os.Link(o.Copy, path) == nil {
 			return nil
 		}
-		return copyVerified(ctx, o.Copy, openPath(o.Copy), o.SHA256, path)
+		return copyVerified(ctx, au.reads, o.Copy, openPath(o.Copy), o.SHA256, path)
 	}
 	err := errors.New("it has no path")
 	au.eachOpener(o, func(name string, open func() (*os.File, error)) bool {
-		err = copyVerified(ctx, name, open, o.SHA256, path)
+		err = copyVerified(ctx, au.reads, name, open, o.SHA256, path)
 		return err == nil || ctx.Err() != nil
 	})
 	switch {
