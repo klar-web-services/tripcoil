@@ -48,17 +48,36 @@ func runChild(t *testing.T, mode string) {
 	}
 }
 
+// startOf reads the nice and IO class of the calling thread, which must be locked.
+func startOf(t *testing.T) (nice, class int) {
+	t.Helper()
+	return niceOf(t, "/proc/thread-self/stat"), ioClassOf(t, syscall.Gettid())
+}
+
 func TestLower(t *testing.T) {
-	nicer := 0 // a thread that is already nicer than Nice keeps its own value
-	switch os.Getenv(childEnv) {
-	case "":
+	runtime.LockOSThread()
+	mode := os.Getenv(childEnv)
+	if mode == "" {
+		defer runtime.UnlockOSThread()
+	}
+	start, class := startOf(t)
+	want := max(start, Nice) // a thread that is already nicer keeps its own value
+	if mode == "" {
+		if start >= Nice && class == ioprioClassIdle {
+			t.Skipf("the test process already has nice %d and the idle IO class, so the test cannot see Lower change anything", start)
+		}
 		runChild(t, "plain")
-		runChild(t, "nicer")
+		if want < 19 {
+			runChild(t, "nicer")
+		} else {
+			t.Logf("skipped the nicer mode: start nice %d leaves no higher value", start)
+		}
 		return
-	case "nicer":
-		runtime.LockOSThread()
-		nicer = syscall.Gettid()
-		if err := syscall.Setpriority(syscall.PRIO_PROCESS, nicer, 15); err != nil {
+	}
+	nicer, nicerNice := 0, 0
+	if mode == "nicer" {
+		nicer, nicerNice = syscall.Gettid(), min(want+3, 19)
+		if err := syscall.Setpriority(syscall.PRIO_PROCESS, nicer, nicerNice); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,12 +87,12 @@ func TestLower(t *testing.T) {
 	tasks, _ := filepath.Glob("/proc/self/task/*")
 	for _, task := range tasks {
 		tid, _ := strconv.Atoi(filepath.Base(task))
-		want := Nice
+		wantNice := want
 		if tid == nicer {
-			want = 15
+			wantNice = nicerNice
 		}
-		if n := niceOf(t, filepath.Join(task, "stat")); n != want {
-			t.Fatalf("thread %d: nice %d, want %d", tid, n, want)
+		if n := niceOf(t, filepath.Join(task, "stat")); n != wantNice {
+			t.Fatalf("thread %d: nice %d, want %d", tid, n, wantNice)
 		}
 		if c := ioClassOf(t, tid); c != ioprioClassIdle {
 			t.Fatalf("thread %d: IO class %d, want idle", tid, c)
@@ -87,8 +106,8 @@ func TestLower(t *testing.T) {
 	if err := os.WriteFile(f, out, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if n := niceOf(t, f); n < Nice {
-		t.Fatalf("child process nice %d, want at least %d", n, Nice)
+	if n := niceOf(t, f); n < want {
+		t.Fatalf("child process nice %d, want at least %d", n, want)
 	}
 	t.Log("CHILD OK")
 }
