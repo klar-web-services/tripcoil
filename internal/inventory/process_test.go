@@ -322,3 +322,53 @@ func TestProcessCollectorPrunesCache(t *testing.T) {
 		t.Fatalf("cache %v, want only this run's copy", names)
 	}
 }
+
+func TestProcessCollectorCapsLibraries(t *testing.T) {
+	oldProcess, oldRun := processLibraryCap, runLibraryCap
+	processLibraryCap, runLibraryCap = 2, 3
+	t.Cleanup(func() { processLibraryCap, runLibraryCap = oldProcess, oldRun })
+	libs := func(names ...string) []procfs.Mapping {
+		var maps []procfs.Mapping
+		for _, n := range names {
+			maps = append(maps, procfs.Mapping{Path: "/usr/lib/" + n + ".so"})
+		}
+		return maps
+	}
+	src := fakeSource{
+		10: {cmdline: []string{"many"}, exe: "/usr/bin/many", maps: libs("a", "b", "c")},
+		11: {cmdline: []string{"late"}, exe: "/usr/bin/late", maps: libs("d", "e")},
+		12: {cmdline: []string{"few"}, exe: "/usr/bin/few", maps: libs("a", "b")},
+	}
+	var asked []string
+	tool := fakeTool{typ: "deb", owners: map[string]pkgtool.Package{}, asked: &asked}
+	for _, n := range []string{"many", "late", "few"} {
+		tool.owners["/usr/bin/"+n] = pkgtool.Package{Name: n, Version: "1", Type: "deb"}
+	}
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		tool.owners["/usr/lib/"+n+".so"] = pkgtool.Package{Name: "lib" + n, Version: "1", Type: "deb"}
+	}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(asked)
+	if want := []string{"/usr/bin/few", "/usr/bin/late", "/usr/bin/many", "/usr/lib/a.so", "/usr/lib/b.so", "/usr/lib/d.so"}; !slices.Equal(asked, want) {
+		t.Fatalf("asked the package tool about %q, want %q", asked, want)
+	}
+	for name, reason := range map[string]string{"many": "more than 2 shared libraries", "late": "3 shared libraries", "few": ""} {
+		it := byName(res.items, name)
+		var unresolved []string
+		for _, id := range it.Origins {
+			if o := originByID(res.origins, id); o.Kind == OriginUnresolved {
+				unresolved = append(unresolved, o.Reason)
+			}
+		}
+		switch {
+		case reason == "" && len(unresolved) != 0:
+			t.Errorf("%s: unresolved %q", name, unresolved)
+		case reason != "" && (len(unresolved) != 1 || !strings.Contains(unresolved[0], reason)):
+			t.Errorf("%s: unresolved %q, want one about %q", name, unresolved, reason)
+		}
+	}
+}

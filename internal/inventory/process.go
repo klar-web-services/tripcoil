@@ -34,6 +34,16 @@ type Source interface {
 	OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error)
 }
 
+// Caps on the distinct shared libraries taken per process and per run. A user can map up to
+// vm.max_map_count files named lib<N>.so, and each library costs a package tool query, inventory
+// space and later a scan.
+const (
+	maxProcessLibraries = 1024
+	maxRunLibraries     = 20000
+)
+
+var processLibraryCap, runLibraryCap = maxProcessLibraries, maxRunLibraries // lowered by tests
+
 type processCollector struct {
 	src      Source
 	root     string            // host root, for /etc/passwd and for checking what is on disk now
@@ -41,9 +51,10 @@ type processCollector struct {
 	distro   Distro
 	cacheDir string
 
-	users  map[int]string
-	owned  map[string]bool   // package ownership of single paths (app directory markers), by path
-	hashed map[string]Origin // origins of unpackaged files that were not replaced, by path
+	users    map[int]string
+	owned    map[string]bool   // package ownership of single paths (app directory markers), by path
+	hashed   map[string]Origin // origins of unpackaged files that were not replaced, by path
+	libPaths map[string]bool   // the distinct library paths taken in this run
 }
 
 type rawProcess struct {
@@ -56,6 +67,7 @@ type rawProcess struct {
 	started    time.Time
 	unit       string
 	libs       []procfs.Mapping
+	libLimit   string // why some libraries were not taken, if some were not
 	unresolved string // why the origin cannot be resolved, if it cannot
 }
 
@@ -67,7 +79,7 @@ type processResult struct {
 }
 
 func (c *processCollector) collect(ctx context.Context) (processResult, error) {
-	c.owned, c.hashed = map[string]bool{}, map[string]Origin{}
+	c.owned, c.hashed, c.libPaths = map[string]bool{}, map[string]Origin{}, map[string]bool{}
 	pids, err := c.src.PIDs()
 	if err != nil {
 		return processResult{}, fmt.Errorf("cannot list processes: %w", err)
@@ -144,9 +156,21 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 	p.cwd, _ = c.src.Cwd(pid)
 	maps, _ := c.src.Maps(pid)
 	for _, m := range maps {
-		if m.Path != exe && isSharedLibrary(m.Path) {
-			p.libs = append(p.libs, m)
+		if m.Path == exe || !isSharedLibrary(m.Path) {
+			continue
 		}
+		if len(p.libs) == processLibraryCap {
+			p.libLimit = fmt.Sprintf("it maps more than %d shared libraries, and the others were not inventoried", processLibraryCap)
+			break
+		}
+		if !c.libPaths[m.Path] {
+			if len(c.libPaths) == runLibraryCap {
+				p.libLimit = fmt.Sprintf("the run reached its cap of %d shared libraries, and the others were not inventoried", runLibraryCap)
+				continue
+			}
+			c.libPaths[m.Path] = true
+		}
+		p.libs = append(p.libs, m)
 	}
 	return p, "", true
 }
@@ -277,6 +301,9 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			continue // covered by the app directory
 		}
 		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) })
+	}
+	if p.libLimit != "" {
+		b.link(d, Origin{ID: UnresolvedOriginID("libraries:" + p.libLimit), Kind: OriginUnresolved, Reason: p.libLimit})
 	}
 }
 

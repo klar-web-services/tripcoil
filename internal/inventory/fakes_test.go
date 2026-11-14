@@ -116,11 +116,15 @@ type fakeTool struct {
 	installed map[string][]pkgtool.Package
 	checkErr  error
 	ownersErr error
+	asked     *[]string // the paths Owners was asked about
 }
 
 func (f fakeTool) Type() string                { return f.typ }
 func (f fakeTool) Check(context.Context) error { return f.checkErr }
 func (f fakeTool) Owners(_ context.Context, paths []string) (map[string]pkgtool.Package, error) {
+	if f.asked != nil {
+		*f.asked = append(*f.asked, paths...)
+	}
 	if f.ownersErr != nil {
 		return nil, f.ownersErr
 	}
