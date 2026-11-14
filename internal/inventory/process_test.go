@@ -45,7 +45,7 @@ func hostProcesses() fakeSource {
 		31: {cmdline: []string{"/opt/api/old"}, exe: "/opt/api/old", deleted: true, exeData: "go binary v0"},
 		40: {cmdline: []string{"nginx"}, exe: "/usr/sbin/nginx", cgroup: cg("/system.slice/docker-" + containerID + ".scope")},
 		50: {cmdline: []string{"lxd"}, exe: "/snap/lxd/123/bin/lxd"},
-		60: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true},                                                  // another root, another file
+		60: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true},                                                  // another root, another file; the test sets exeID
 		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, cgroup: cg("/system.slice/ssh.service")}, // chrooted; the test sets exeID
 		62: {cmdline: []string{"sshd: /usr/sbin/sshd -D [listener]"}, exe: "/usr/sbin/sshd", cgroup: cg("/system.slice/ssh.service")},
 		63: {cmdline: []string{"-bash"}, exe: "/usr/bin/bash"},
@@ -101,6 +101,7 @@ func TestProcessCollector(t *testing.T) {
 	root, cache := hostRoot(t), t.TempDir()
 	tool := hostTool()
 	src := hostProcesses()
+	src[60].exeID = fileID(t, root, "usr/sbin/sshd") // not the host's /usr/bin/bash
 	src[61].exeID = fileID(t, root, "usr/sbin/sshd") // the host's own sshd, run in a chroot
 	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: cache}
 	res, err := c.collect(context.Background())
@@ -217,6 +218,9 @@ func TestProcessCollectorWithoutPackageTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(res.origins) != 3 { // nginx, libc, libssl
+		t.Fatalf("origins %+v", res.origins)
+	}
 	for _, o := range res.origins {
 		if o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "package tool failed") {
 			t.Fatalf("origin %+v", o)
@@ -233,6 +237,9 @@ func TestProcessCollectorOwnersError(t *testing.T) {
 	}
 	if len(res.problems) != 1 || res.problems[0].Code != problem.PackageToolFailed {
 		t.Fatalf("problems %+v", res.problems)
+	}
+	if len(res.origins) != 3 { // nginx, libc, libssl
+		t.Fatalf("origins %+v", res.origins)
 	}
 	for _, o := range res.origins {
 		if o.Kind != OriginUnresolved {
