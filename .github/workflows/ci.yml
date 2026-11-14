@@ -23,17 +23,17 @@ jobs:
       - run: go test ./...
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Distribution containers
+      - name: Audit fixtures and distribution containers, with the real Grype
         run: |
-          go test -tags integration -count=1 -v -timeout 30m ./internal/integration/ | tee docker.out
+          go test -tags integration -count=1 -v -timeout 40m ./internal/integration/ | tee docker.out
           ! grep -q -e '--- SKIP' docker.out
-      - name: Live inventory of the runner, as root
+      - name: Live inventory and audit of the runner, as root
         run: |
           go test -c -tags live -o live.test ./internal/integration/
           sudo ./live.test -test.v -test.run '^TestLiveHost$' | tee live.out
