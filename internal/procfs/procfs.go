@@ -154,14 +154,15 @@ func ParseMaps(data []byte) []Mapping {
 	var out []Mapping
 	seen := map[string]bool{}
 	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line) // address perms offset dev inode [path...]
+		fields := strings.Fields(line) // address perms offset dev inode [path]
 		if len(fields) < 6 {
 			continue
 		}
-		path := strings.Join(fields[5:], " ")
-		if !strings.HasPrefix(path, "/") {
-			continue
+		i := strings.Index(line, " /")
+		if i < 0 {
+			continue // not file-backed: [heap], [vdso], anonymous
 		}
+		path := line[i+1:]
 		p, deleted := strings.CutSuffix(path, " (deleted)")
 		if seen[p] {
 			continue

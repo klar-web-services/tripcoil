@@ -217,3 +217,15 @@ func TestOpenMapFileUnpadded(t *testing.T) {
 		t.Fatalf("%q", b)
 	}
 }
+
+func TestParseMapsKeepsPathVerbatim(t *testing.T) {
+	data := "7f0000000000-7f0000001000 r-xp 00000000 08:01 200                        /opt/my  app/lib.so\n" +
+		"7f0000002000-7f0000003000 r-xp 00000000 08:01 201                        /opt/my  app/old.so (deleted)\n"
+	want := []Mapping{
+		{Start: "7f0000000000", End: "7f0000001000", Path: "/opt/my  app/lib.so"},
+		{Start: "7f0000002000", End: "7f0000003000", Path: "/opt/my  app/old.so", Deleted: true},
+	}
+	if got := ParseMaps([]byte(data)); !slices.Equal(got, want) {
+		t.Fatalf("\n got %+v\nwant %+v", got, want)
+	}
+}
