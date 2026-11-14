@@ -71,7 +71,7 @@ func connect(s string) DockerAPI { return dockerapi.New(s) }
 
 func TestDockerContainers(t *testing.T) {
 	sock := dockerServer(t, engine(http.StatusOK))
-	items, origins, problems := collectDocker(context.Background(), "unix://"+sock, true, connect, map[string][]int{shopID: {2240, 2201}})
+	items, origins, problems := collectDocker(context.Background(), "unix://"+sock, true, connect, map[string][]int{shopID: {2240, 2201}}, fakeSource{})
 	if len(problems) != 0 {
 		t.Fatalf("problems %+v", problems)
 	}
@@ -113,12 +113,12 @@ func TestDockerContainers(t *testing.T) {
 
 func TestDockerProblems(t *testing.T) {
 	ctx := context.Background()
-	_, _, p := collectDocker(ctx, "unix:///nonexistent/docker.sock", true, connect, nil)
+	_, _, p := collectDocker(ctx, "unix:///nonexistent/docker.sock", true, connect, nil, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerAbsent || p[0].Kind != problem.Notice {
 		t.Fatalf("absent: %+v", p)
 	}
 	// dockerd stopped with live-restore: its socket is gone, but its containers still run.
-	_, _, p = collectDocker(ctx, "unix:///nonexistent/docker.sock", true, connect, map[string][]int{shopID: {2201}})
+	_, _, p = collectDocker(ctx, "unix:///nonexistent/docker.sock", true, connect, map[string][]int{shopID: {2201}}, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
 		!strings.Contains(p[0].Message, "1 container(s) have running processes") {
 		t.Fatalf("socket missing with running containers: %+v", p)
@@ -128,16 +128,16 @@ func TestDockerProblems(t *testing.T) {
 	if err := os.WriteFile(notDir, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, p = collectDocker(ctx, "unix://"+notDir+"/docker.sock", true, connect, nil)
+	_, _, p = collectDocker(ctx, "unix://"+notDir+"/docker.sock", true, connect, nil, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error {
 		t.Fatalf("stat error: %+v", p)
 	}
-	_, _, p = collectDocker(ctx, "tcp://10.0.0.5:2375", true, connect, nil)
+	_, _, p = collectDocker(ctx, "tcp://10.0.0.5:2375", true, connect, nil, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error {
 		t.Fatalf("tcp: %+v", p)
 	}
 	sock := dockerServer(t, engine(http.StatusInternalServerError))
-	_, _, p = collectDocker(ctx, "unix://"+sock, true, connect, nil)
+	_, _, p = collectDocker(ctx, "unix://"+sock, true, connect, nil, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable {
 		t.Fatalf("ping failure: %+v", p)
 	}
@@ -152,12 +152,12 @@ func TestDockerNotRunning(t *testing.T) {
 		engine(http.StatusOK).ServeHTTP(w, r)
 	}))
 	ctx := context.Background()
-	_, _, p := collectDocker(ctx, "unix://"+sock, false, connect, nil)
+	_, _, p := collectDocker(ctx, "unix://"+sock, false, connect, nil, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerAbsent || p[0].Kind != problem.Notice || !strings.Contains(p[0].Message, "no Docker daemon") {
 		t.Fatalf("no dockerd, no containers: %+v", p)
 	}
 	// dockerd stopped with live-restore: its containers still run.
-	_, _, p = collectDocker(ctx, "unix://"+sock, false, connect, map[string][]int{shopID: {2201}})
+	_, _, p = collectDocker(ctx, "unix://"+sock, false, connect, map[string][]int{shopID: {2201}}, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
 		!strings.Contains(p[0].Message, "1 container(s) have running processes, but no Docker daemon") {
 		t.Fatalf("no dockerd, running containers: %+v", p)
@@ -165,8 +165,27 @@ func TestDockerNotRunning(t *testing.T) {
 	if requests != 0 {
 		t.Fatalf("%d requests reached the Docker socket while no dockerd runs", requests)
 	}
-	items, _, p := collectDocker(ctx, "unix://"+sock, true, connect, map[string][]int{shopID: {2201}})
+	items, _, p := collectDocker(ctx, "unix://"+sock, true, connect, map[string][]int{shopID: {2201}}, fakeSource{})
 	if len(p) != 0 || len(items) != 1 || requests == 0 {
 		t.Fatalf("dockerd running: items %+v problems %+v requests %d", items, p, requests)
+	}
+}
+
+func TestDockerContainersItDoesNotList(t *testing.T) {
+	const otherID = "0000000000000000000000000000000000000000000000000000000000000003"
+	sock := dockerServer(t, engine(http.StatusOK))
+	pids := map[string][]int{shopID: {2201}, otherID: {3001, 3002}}
+	// A second dockerd on another socket runs the other container.
+	running := fakeSource{3002: {cmdline: []string{"redis-server"}, cgroup: cg("/system.slice/docker-" + otherID + ".scope")}}
+	items, _, p := collectDocker(context.Background(), "unix://"+sock, true, connect, pids, running)
+	if len(items) != 1 || len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
+		!strings.Contains(p[0].Message, "1 container(s)") {
+		t.Fatalf("items %+v problems %+v", items, p)
+	}
+	// Its processes ended meanwhile; one PID now belongs to a host process.
+	ended := fakeSource{3002: {cmdline: []string{"nginx"}, cgroup: cg("/system.slice/nginx.service")}}
+	items, _, p = collectDocker(context.Background(), "unix://"+sock, true, connect, pids, ended)
+	if len(items) != 1 || len(p) != 0 {
+		t.Fatalf("items %+v problems %+v", items, p)
 	}
 }

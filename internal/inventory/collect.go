@@ -56,7 +56,7 @@ func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 		return nil, err
 	}
 	problems = append(problems, procs.problems...)
-	containers, containerOrigins, dockerProblems := collectDocker(ctx, d.DockerHost, procs.dockerd, d.Connect, procs.containerPIDs)
+	containers, containerOrigins, dockerProblems := collectDocker(ctx, d.DockerHost, procs.dockerd, d.Connect, procs.containerPIDs, d.Proc)
 	problems = append(problems, dockerProblems...)
 
 	inv.Items = append(append([]Item{kernel}, procs.items...), containers...)

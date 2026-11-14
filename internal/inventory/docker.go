@@ -13,6 +13,7 @@ import (
 
 	"github.com/klar-web-services/tripcoil/internal/dockerapi"
 	"github.com/klar-web-services/tripcoil/internal/problem"
+	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
 // DockerAPI is what the container collector needs from the Docker daemon.
@@ -36,7 +37,7 @@ func dockerSocket(dockerHost string) (string, error) {
 // collectDocker inventories the running containers. Without a running dockerd it never connects:
 // with docker.socket active, a connection would start dockerd and every container with a restart
 // policy.
-func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, connect func(string) DockerAPI, containerPIDs map[string][]int) ([]Item, []Origin, []problem.Problem) {
+func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, connect func(string) DockerAPI, containerPIDs map[string][]int, src Source) ([]Item, []Origin, []problem.Problem) {
 	if !dockerdRunning {
 		// dockerd stopped with live-restore keeps its containers running.
 		if len(containerPIDs) > 0 {
@@ -76,6 +77,7 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	var items []Item
 	var problems []problem.Problem
 	origins := map[string]Origin{}
+	accounted := map[string]bool{} // inventoried, or already reported
 	for _, s := range list {
 		d, err := api.Inspect(ctx, s.ID)
 		if errors.Is(err, dockerapi.ErrNotFound) {
@@ -83,6 +85,7 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 		}
 		if err != nil {
 			problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory", "cannot inspect container %.12s: %v", s.ID, err))
+			accounted[s.ID] = true
 			continue
 		}
 		if !d.State.Running {
@@ -123,6 +126,11 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 		origins[o.ID] = o
 		it.Origins = []string{o.ID}
 		items = append(items, it)
+		accounted[d.ID] = true
+	}
+	if n := stillRunning(src, containerPIDs, accounted); n > 0 {
+		problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory",
+			"%d container(s) have running processes that Docker at %s does not list (a second Docker daemon?), so they are not inventoried", n, socket))
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	out := make([]Origin, 0, len(origins))
@@ -131,4 +139,22 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return items, out, problems
+}
+
+// stillRunning counts the containers outside accounted with a process that still runs in them:
+// a container that ended meanwhile is not missing, and its PIDs may have been reused.
+func stillRunning(src Source, containerPIDs map[string][]int, accounted map[string]bool) int {
+	n := 0
+	for id, pids := range containerPIDs {
+		if accounted[id] {
+			continue
+		}
+		for _, pid := range pids {
+			if cgroup, err := src.Cgroup(pid); err == nil && procfs.DockerContainerID(cgroup) == id {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }

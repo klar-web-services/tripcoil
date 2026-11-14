@@ -85,7 +85,12 @@ func (s fakeSource) StartTime(pid int) (time.Time, error) {
 	s[pid].started++
 	return t, nil
 }
-func (s fakeSource) Cgroup(pid int) (string, error)         { return s[pid].cgroup, nil }
+func (s fakeSource) Cgroup(pid int) (string, error) {
+	if s[pid] == nil { // it ended
+		return "", fs.ErrNotExist
+	}
+	return s[pid].cgroup, nil
+}
 func (s fakeSource) Maps(pid int) ([]procfs.Mapping, error) { return s[pid].maps, nil }
 func (s fakeSource) SameRootAsInit(pid int) (bool, error)   { return !s[pid].otherRoot, nil }
 func (s fakeSource) RootFileID(pid int) (procfs.FileID, error) {
