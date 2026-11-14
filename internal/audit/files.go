@@ -103,29 +103,30 @@ func readSmall(path string, max int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, size))
 }
 
-// copyVerified copies the file that open opens to dir/<sha> when its content has that SHA-256,
-// and returns the copy's path. Grype then reads exactly the file the Inventory identified: never
-// a FIFO, a device or a kernel file, nor a file that changed since.
-func copyVerified(ctx context.Context, open func() (*os.File, error), sha, dir string) (string, error) {
+// copyVerified copies the file that open opens to dst when its content has that SHA-256. Grype
+// then reads exactly the file the Inventory identified: never a FIFO, a device or a kernel file,
+// nor a file that changed since.
+func copyVerified(ctx context.Context, open func() (*os.File, error), sha, dst string) error {
 	f, size, err := openFile(open)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer f.Close()
+	dir := filepath.Dir(dst)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return err
 	}
 	free, total, err := cacheSpace(dir)
 	if err != nil {
-		return "", err
+		return err
 	}
 	floor := min(total/100*cacheFloorPercent, maxCacheFloor)
 	if free <= floor || uint64(size) > free-floor {
-		return "", errCacheFull
+		return errCacheFull
 	}
 	tmp, err := os.CreateTemp(dir, ".copy-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
 	h := sha256.New()
@@ -135,13 +136,9 @@ func copyVerified(ctx context.Context, open func() (*os.File, error), sha, dir s
 	}
 	switch {
 	case err != nil:
-		return "", err
+		return err
 	case hex.EncodeToString(h.Sum(nil)) != sha:
-		return "", errFileChanged
+		return errFileChanged
 	}
-	final := filepath.Join(dir, sha)
-	if err := os.Rename(tmp.Name(), final); err != nil {
-		return "", err
-	}
-	return final, nil
+	return os.Rename(tmp.Name(), dst)
 }

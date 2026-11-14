@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
@@ -56,7 +55,14 @@ func (au *auditor) scanDir() string { return filepath.Join(au.d.CacheDir, "scan"
 // directly every run instead. A cached SBOM that cannot be read or matched is dropped and the
 // origin scanned again.
 func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, int, error) {
-	key, files, err := au.cacheKey(ctx, o)
+	if o.Kind == inventory.OriginAppDir && o.Jar {
+		sha, err := hashFile(ctx, filepath.Join(au.d.Root, o.Path))
+		if err != nil {
+			return nil, 0, err
+		}
+		o.SHA256 = sha // a jar is keyed and copied like a binary
+	}
+	key, files, err := au.cacheKey(o)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -69,7 +75,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 			au.cache.remove(key)
 		}
 	}
-	source, cleanup, err := au.source(ctx, o, key)
+	source, cleanup, err := au.source(ctx, o)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -153,68 +159,87 @@ func (au *auditor) cacheIfMatchable(key string, files []string, data []byte) {
 
 // cacheKey is an origin's SBOM cache key (spec section 6.2), or "" when it is cataloged every
 // run: an app directory without a lockfile. For an app directory it also returns the files the
-// key hashes, as Grype names its locations.
-func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin) (string, []string, error) {
+// key hashes, as Grype names its locations. A binary's or jar's key holds its file name too,
+// because the SBOM depends on it (see source).
+func (au *auditor) cacheKey(o inventory.Origin) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
-		return "binary-" + o.SHA256, nil, nil
+		return keyOf("binary", o.SHA256, fileName(o)), nil, nil
 	case inventory.OriginImage:
 		return keyOf("image", o.ImageID), nil, nil
 	case inventory.OriginAppDir:
-		host := filepath.Join(au.d.Root, o.Path)
 		if o.Jar {
-			sha, err := hashFile(ctx, host)
-			if err != nil {
-				return "", nil, err
-			}
-			return "jar-" + sha, nil, nil
+			return keyOf("jar", o.SHA256, fileName(o)), nil, nil
 		}
-		return appDirKey(host)
+		return appDirKey(filepath.Join(au.d.Root, o.Path))
 	}
 	return "", nil, fmt.Errorf("origin kind %q cannot be scanned", o.Kind)
 }
 
-// source is what Grype scans for an origin: a verified copy of a binary or jar, an app directory,
-// or an image by ID from the local Docker daemon. cleanup removes a copy made for the scan.
-func (au *auditor) source(ctx context.Context, o inventory.Origin, key string) (string, func(), error) {
-	none := func() {}
+// fileName is the name of a binary or jar on the host: of a binary, its first path.
+func fileName(o inventory.Origin) string {
 	switch {
-	case o.Kind == inventory.OriginBinary:
-		return au.binaryFile(ctx, o)
-	case o.Kind == inventory.OriginAppDir && o.Jar:
-		path, err := copyVerified(ctx, openPath(filepath.Join(au.d.Root, o.Path)), strings.TrimPrefix(key, "jar-"), au.scanDir())
-		if err != nil {
-			return "", none, err
-		}
-		return "file:" + path, func() { os.Remove(path) }, nil
 	case o.Kind == inventory.OriginAppDir:
-		return "dir:" + filepath.Join(au.d.Root, o.Path), none, nil
+		return filepath.Base(o.Path)
+	case len(o.Paths) > 0:
+		return filepath.Base(o.Paths[0])
 	}
-	return "docker:" + o.ImageID, none, nil
+	return o.SHA256
 }
 
-// binaryFile returns a file with the binary's content: the Inventory's copy of a replaced file,
-// or a verified copy of the file that runs. The copy is read through a process that runs or maps
-// it, as the Inventory read it, because the path is the process's: a service with PrivateTmp
-// sees its own /tmp. Only when no such process is left is the file read at its path on the host.
-func (au *auditor) binaryFile(ctx context.Context, o inventory.Origin) (string, func(), error) {
+// source is what Grype scans for an origin: a verified copy of a binary or jar, an app directory,
+// or an image by ID from the local Docker daemon. A copy is scan/<sha>/<file name>, because
+// Syft's Java cataloger and binary classifiers go by the file name (*.jar, python*, node, ...).
+// cleanup removes it.
+func (au *auditor) source(ctx context.Context, o inventory.Origin) (string, func(), error) {
 	none := func() {}
+	switch {
+	case o.Kind == inventory.OriginImage:
+		return "docker:" + o.ImageID, none, nil
+	case o.Kind == inventory.OriginAppDir && !o.Jar:
+		return "dir:" + filepath.Join(au.d.Root, o.Path), none, nil
+	}
+	dir := filepath.Join(au.scanDir(), o.SHA256)
+	path := filepath.Join(dir, fileName(o))
+	var err error
+	if o.Jar {
+		err = copyVerified(ctx, openPath(filepath.Join(au.d.Root, o.Path)), o.SHA256, path)
+	} else {
+		err = au.binaryFile(ctx, o, path)
+	}
+	if err != nil {
+		os.RemoveAll(dir)
+		return "", none, err
+	}
+	return "file:" + path, func() { os.RemoveAll(dir) }, nil
+}
+
+// binaryFile puts the binary's content at path: the Inventory's copy of a replaced file, or a
+// verified copy of the file that runs. The copy is read through a process that runs or maps it,
+// as the Inventory read it, because the path is the process's: a service with PrivateTmp sees
+// its own /tmp. Only when no such process is left is the file read at its path on the host.
+func (au *auditor) binaryFile(ctx context.Context, o inventory.Origin, path string) error {
 	if o.Copy != "" {
-		return "file:" + o.Copy, none, nil
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		if os.Link(o.Copy, path) == nil {
+			return nil
+		}
+		return copyVerified(ctx, openPath(o.Copy), o.SHA256, path)
 	}
 	err := errors.New("it has no path")
-	var path string
 	au.eachOpener(o, func(open func() (*os.File, error)) bool {
-		path, err = copyVerified(ctx, open, o.SHA256, au.scanDir())
+		err = copyVerified(ctx, open, o.SHA256, path)
 		return err == nil || ctx.Err() != nil
 	})
 	switch {
 	case err == nil:
-		return "file:" + path, func() { os.Remove(path) }, nil
+		return nil
 	case ctx.Err() != nil:
-		return "", none, ctx.Err()
+		return ctx.Err()
 	}
-	return "", none, fmt.Errorf("cannot read the file that ran: %w", err)
+	return fmt.Errorf("cannot read the file that ran: %w", err)
 }
 
 // eachOpener offers try the ways to open an unpackaged file, until try returns true: through each

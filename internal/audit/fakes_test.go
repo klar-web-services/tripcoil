@@ -18,16 +18,18 @@ import (
 
 // fakeScanner imitates Grype. Scan writes the SBOM listed for the source and matches it; Match
 // matches every package of the SBOM it is given against vulns, keyed by name@version or by purl,
-// so a cached or rewritten SBOM gives the matches it holds.
+// so a cached or rewritten SBOM gives the matches it holds. A file's SBOM is listed by the path
+// of the copy Grype scans, scan/<sha>/<file name>, because the SBOM of a jar or of a binary that
+// Syft identifies by name depends on the file name.
 type fakeScanner struct {
 	status     grype.DBStatus
 	updateErr  error
 	prepareErr error
-	sboms      map[string][]grype.Component // by source; sources are compared by prefix
+	sboms      map[string][]grype.Component // by source
 	osVersion  string                       // the version of the SBOMs' operating system; Arch has none
 	distro     string                       // the distribution Grype reports; "" when it saw none
 	locations  map[string]string            // the file each package (by name) was read from
-	catalogErr map[string]error
+	catalogErr map[string]error             // by source prefix
 	vulns      map[string][]grype.Vulnerability
 	lookups    map[string]grype.Vulnerability
 	lookupErr  error
@@ -36,6 +38,7 @@ type fakeScanner struct {
 	catalogs   []string          // the sources cataloged, in order
 	matched    []string          // the file names of the SBOMs matched, in order
 	lookedUp   []string
+	copiesLeft []string // copies of other files still in the scan folder when a file was scanned
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -50,40 +53,51 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 			return nil, err
 		}
 	}
-	for prefix, comps := range f.sboms {
-		if strings.HasPrefix(source, prefix) {
-			type prop struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
+	if path, ok := strings.CutPrefix(source, "file:"); ok {
+		if _, err := os.Stat(path); err != nil {
+			return nil, err
+		}
+		dir := filepath.Dir(path)
+		copies, _ := filepath.Glob(filepath.Join(filepath.Dir(dir), "*", "*"))
+		for _, c := range copies {
+			if filepath.Dir(c) != dir {
+				f.copiesLeft = append(f.copiesLeft, c)
 			}
-			type comp struct {
-				Type       string `json:"type"`
-				Name       string `json:"name"`
-				Version    string `json:"version"`
-				PURL       string `json:"purl"`
-				Properties []prop `json:"properties,omitempty"`
-			}
-			doc := struct {
-				BOMFormat       string `json:"bomFormat"`
-				Serial          string `json:"serialNumber"`
-				Components      []comp `json:"components"`
-				Vulnerabilities []any  `json:"vulnerabilities"`
-			}{"CycloneDX", source, []comp{{Type: "operating-system", Name: "debian", Version: f.osVersion}, {Type: "file", Name: "/etc/os-release"}}, []any{"x"}}
-			for _, c := range comps {
-				cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL}
-				if l, ok := f.locations[c.Name]; ok {
-					cc.Properties = []prop{{"syft:location:0:path", l}}
-				}
-				doc.Components = append(doc.Components, cc)
-			}
-			data, _ := json.Marshal(doc)
-			if err := os.WriteFile(sbom, data, 0o600); err != nil {
-				return nil, err
-			}
-			return f.Match(ctx, sbom, raw)
 		}
 	}
-	return nil, errors.New("the fake has no SBOM for " + source)
+	comps, ok := f.sboms[source]
+	if !ok {
+		return nil, errors.New("the fake has no SBOM for " + source)
+	}
+	type prop struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	type comp struct {
+		Type       string `json:"type"`
+		Name       string `json:"name"`
+		Version    string `json:"version"`
+		PURL       string `json:"purl"`
+		Properties []prop `json:"properties,omitempty"`
+	}
+	doc := struct {
+		BOMFormat       string `json:"bomFormat"`
+		Serial          string `json:"serialNumber"`
+		Components      []comp `json:"components"`
+		Vulnerabilities []any  `json:"vulnerabilities"`
+	}{"CycloneDX", source, []comp{{Type: "operating-system", Name: "debian", Version: f.osVersion}, {Type: "file", Name: "/etc/os-release"}}, []any{"x"}}
+	for _, c := range comps {
+		cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL}
+		if l, ok := f.locations[c.Name]; ok {
+			cc.Properties = []prop{{"syft:location:0:path", l}}
+		}
+		doc.Components = append(doc.Components, cc)
+	}
+	data, _ := json.Marshal(doc)
+	if err := os.WriteFile(sbom, data, 0o600); err != nil {
+		return nil, err
+	}
+	return f.Match(ctx, sbom, raw)
 }
 
 func (f *fakeScanner) Match(_ context.Context, sbom, raw string) (*grype.Report, error) {

@@ -29,15 +29,15 @@ func write(t *testing.T, path, content string) {
 func TestCopyVerified(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "api")
 	write(t, src, "go binary v1")
-	dir := filepath.Join(t.TempDir(), "scan")
-	got, err := copyVerified(context.Background(), openPath(src), sumOf("go binary v1"), dir)
-	if err != nil {
+	dir := filepath.Join(t.TempDir(), "scan", sumOf("go binary v1"))
+	dst := filepath.Join(dir, "api")
+	if err := copyVerified(context.Background(), openPath(src), sumOf("go binary v1"), dst); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(got); got != filepath.Join(dir, sumOf("go binary v1")) || string(data) != "go binary v1" {
-		t.Fatalf("copy %s: %q", got, data)
+	if data, _ := os.ReadFile(dst); string(data) != "go binary v1" {
+		t.Fatalf("copy %s: %q", dst, data)
 	}
-	if _, err := copyVerified(context.Background(), openPath(src), sumOf("go binary v0"), dir); !errors.Is(err, errFileChanged) {
+	if err := copyVerified(context.Background(), openPath(src), sumOf("go binary v0"), filepath.Join(dir, "old")); !errors.Is(err, errFileChanged) {
 		t.Fatalf("a changed file: %v", err)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -62,9 +62,8 @@ func TestFileReadsNeverHang(t *testing.T) {
 	for _, path := range []string{fifo, "/dev/zero", zero, kernel, dir} {
 		done := make(chan error, 3)
 		go func() {
-			_, err := copyVerified(context.Background(), openPath(path), sumOf(""), filepath.Join(dir, "scan"))
-			done <- err
-			_, err = hashFile(context.Background(), path)
+			done <- copyVerified(context.Background(), openPath(path), sumOf(""), filepath.Join(dir, "scan", "copy"))
+			_, err := hashFile(context.Background(), path)
 			done <- err
 			_, err = readSmall(path, 1<<20)
 			done <- err
@@ -91,7 +90,7 @@ func TestCopyVerifiedLimits(t *testing.T) {
 	old := scanFileCap
 	scanFileCap = 50
 	defer func() { scanFileCap = old }()
-	if _, err := copyVerified(context.Background(), openPath(src), sumOf(""), t.TempDir()); err == nil {
+	if err := copyVerified(context.Background(), openPath(src), sumOf(""), filepath.Join(t.TempDir(), "big")); err == nil {
 		t.Fatal("copied a file above the cap")
 	}
 	if _, err := hashFile(context.Background(), src); err == nil {
@@ -101,7 +100,7 @@ func TestCopyVerifiedLimits(t *testing.T) {
 	oldSpace := cacheSpace
 	defer func() { cacheSpace = oldSpace }()
 	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + 50, 10000, nil } // floor 1000
-	if _, err := copyVerified(context.Background(), openPath(src), sumOf(string(make([]byte, 100))), t.TempDir()); !errors.Is(err, errCacheFull) {
+	if err := copyVerified(context.Background(), openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
 		t.Fatalf("copy into a full cache: %v", err)
 	}
 	if _, err := readSmall(src, 99); err == nil {

@@ -107,12 +107,12 @@ func hostScanner(root, cache string) *fakeScanner {
 				{Name: "linux-image-6.1.0-28-amd64", Version: "6.1.123-1", PURL: "pkg:deb/debian/linux-image-6.1.0-28-amd64@6.1.123-1?arch=amd64&distro=debian-12"},
 				{Name: "vim", Version: "2:9.0.1378-2", PURL: "pkg:deb/debian/vim@2:9.0.1378-2?arch=amd64&distro=debian-12"},
 			},
-			"file:" + filepath.Join(cache, "scan", sumOf("go binary v1")):     {{Name: "golang.org/x/net", Version: "v0.1.0", PURL: "pkg:golang/golang.org/x/net@v0.1.0"}},
-			"file:" + filepath.Join(cache, "replaced", sumOf("go binary v0")): {{Name: "golang.org/x/text", Version: "v0.3.5", PURL: "pkg:golang/golang.org/x/text@v0.3.5"}},
-			"file:" + filepath.Join(cache, "scan", sumOf("stripped")):         {},
-			"dir:" + filepath.Join(root, "srv/shop"):                          {{Name: "lodash", Version: "4.17.20", PURL: "pkg:npm/lodash@4.17.20"}},
-			"dir:" + filepath.Join(root, "srv/venv"):                          {{Name: "requests", Version: "2.31.0", PURL: "pkg:pypi/requests@2.31.0"}},
-			"file:" + filepath.Join(cache, "scan", sumOf("jar v1")):           {{Name: "log4j-core", Version: "2.14.1", PURL: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"}},
+			"file:" + filepath.Join(cache, "scan", sumOf("go binary v1"), "api"): {{Name: "golang.org/x/net", Version: "v0.1.0", PURL: "pkg:golang/golang.org/x/net@v0.1.0"}},
+			"file:" + filepath.Join(cache, "scan", sumOf("go binary v0"), "old"): {{Name: "golang.org/x/text", Version: "v0.3.5", PURL: "pkg:golang/golang.org/x/text@v0.3.5"}},
+			"file:" + filepath.Join(cache, "scan", sumOf("stripped"), "tool"):    {},
+			"dir:" + filepath.Join(root, "srv/shop"):                             {{Name: "lodash", Version: "4.17.20", PURL: "pkg:npm/lodash@4.17.20"}},
+			"dir:" + filepath.Join(root, "srv/venv"):                             {{Name: "requests", Version: "2.31.0", PURL: "pkg:pypi/requests@2.31.0"}},
+			"file:" + filepath.Join(cache, "scan", sumOf("jar v1"), "app.jar"):   {{Name: "log4j-core", Version: "2.14.1", PURL: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"}},
 			"docker:sha256:1111": {{Name: "zlib1g", Version: "1:1.2.13.dfsg-1", PURL: "pkg:deb/debian/zlib1g@1:1.2.13.dfsg-1?arch=amd64&distro=debian-12"}},
 		},
 		vulns: map[string][]grype.Vulnerability{
@@ -221,8 +221,8 @@ func TestAudit(t *testing.T) {
 			}
 		}
 	}
-	if _, err := os.Stat(filepath.Join(cache, "scan")); !os.IsNotExist(err) {
-		t.Errorf("verified copies are removed after the scan: %v", err)
+	if _, err := os.Stat(filepath.Join(cache, "scan")); !os.IsNotExist(err) || len(g.copiesLeft) != 0 {
+		t.Errorf("verified copies are removed after each scan: %v %q", err, g.copiesLeft)
 	}
 
 	// The cache holds stripped SBOMs, but none with Go modules.
@@ -242,7 +242,7 @@ func TestAudit(t *testing.T) {
 	// binaries, whose matches depend on the code linked into them.
 	g.catalogs = nil
 	a2 := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
-	want = []string{"file:" + filepath.Join(cache, "scan", sumOf("go binary v1")), "file:" + filepath.Join(cache, "replaced", sumOf("go binary v0")), "dir:" + filepath.Join(root, "srv/venv")}
+	want = []string{"file:" + filepath.Join(cache, "scan", sumOf("go binary v1"), "api"), "file:" + filepath.Join(cache, "scan", sumOf("go binary v0"), "old"), "dir:" + filepath.Join(root, "srv/venv")}
 	if slices.Sort(g.catalogs); !slices.Equal(g.catalogs, slices.Sorted(slices.Values(want))) || len(a2.Findings) != len(a.Findings) {
 		t.Fatalf("second run scanned %q and found %d findings", g.catalogs, len(a2.Findings))
 	}
@@ -384,6 +384,33 @@ func TestAuditHealsBrokenCacheEntries(t *testing.T) {
 	}
 }
 
+// Copies of jars and binaries used to be named by their SHA-256 alone, so Syft found nothing in
+// a jar or in a binary it identifies by name, and the empty SBOMs were cached. They are never
+// used, and age out of the cache.
+func TestAuditDoesNotUseSBOMsCachedWithoutTheFileName(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.sboms["file:"+filepath.Join(cache, "scan", sumOf("stripped"), "tool")] = []grype.Component{{Name: "python", Version: "3.12.0", PURL: "pkg:generic/python@3.12.0"}}
+	g.vulns["python@3.12.0"] = []grype.Vulnerability{vuln("CVE-2026-4000", "High", "fixed", "3.12.9")}
+	var old []string
+	for _, key := range []string{"jar-" + sumOf("jar v1"), "binary-" + sumOf("stripped")} {
+		p := filepath.Join(cache, "sbom", grype.Version, key+".cdx.json")
+		write(t, p, `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}`)
+		os.Chtimes(p, now.Add(-8*24*time.Hour), now.Add(-8*24*time.Hour))
+		old = append(old, p)
+	}
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	f := byVuln(a)
+	if st := statuses(a); st[jarO] != Scanned || st[toolO] != Scanned || f["CVE-2021-44228"].Origin != jarO || f["CVE-2026-4000"].Origin != toolO {
+		t.Fatalf("statuses %v: an empty SBOM cached under the old key was used", st)
+	}
+	for _, p := range old {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+}
+
 func TestAuditAppDirCachedOnlyFromItsOwnLockfiles(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -417,8 +444,8 @@ func TestAuditReadsBinariesThroughTheProcess(t *testing.T) {
 		inventory.Origin{ID: libO, Kind: inventory.OriginBinary, SHA256: sumOf("netty v1"), Paths: []string{"/tmp/libnetty.so"}},
 		inventory.Origin{ID: exeO, Kind: inventory.OriginBinary, SHA256: sumOf("tool v1"), Paths: []string{"/tmp/tool"}})
 	g := hostScanner(root, cache)
-	g.sboms["file:"+filepath.Join(cache, "scan", sumOf("netty v1"))] = []grype.Component{{Name: "netty", Version: "4.1.0", PURL: "pkg:maven/io.netty/netty@4.1.0"}}
-	g.sboms["file:"+filepath.Join(cache, "scan", sumOf("tool v1"))] = []grype.Component{{Name: "tool", Version: "1", PURL: "pkg:generic/tool@1"}}
+	g.sboms["file:"+filepath.Join(cache, "scan", sumOf("netty v1"), "libnetty.so")] = []grype.Component{{Name: "netty", Version: "4.1.0", PURL: "pkg:maven/io.netty/netty@4.1.0"}}
+	g.sboms["file:"+filepath.Join(cache, "scan", sumOf("tool v1"), "tool")] = []grype.Component{{Name: "tool", Version: "1", PURL: "pkg:generic/tool@1"}}
 	d := deps(root, cache, t.TempDir(), g, fakeKernel{})
 	d.Proc = fakeProc{exes: map[int]string{42: filepath.Join(running, "exe")},
 		maps:   map[int][]procfs.Mapping{42: {{Start: "1000", End: "2000", Path: "/tmp/libnetty.so"}}},
