@@ -100,7 +100,8 @@ func (f appDirFinder) walk(ctx context.Context, start string) (string, bool) {
 }
 
 func (f appDirFinder) walkUp(ctx context.Context, start string) (string, bool) {
-	for dir := start; dir != "/" && dir != "." && dir != ""; dir = filepath.Dir(dir) {
+	stop := toolHome(start)
+	for dir := start; dir != "/" && dir != "." && dir != "" && dir != stop; dir = filepath.Dir(dir) {
 		m := f.marker(dir)
 		if m == "" {
 			continue
@@ -111,6 +112,23 @@ func (f appDirFinder) walkUp(ctx context.Context, start string) (string, bool) {
 		return dir, true
 	}
 	return "", false
+}
+
+// toolHome returns the home directory (/root or /home/<name>) when p lies in a hidden directory
+// directly under it, such as ~/.local or ~/.nvm, or "". A stray manifest in the home directory
+// does not make it the app directory of a tool installed there.
+func toolHome(p string) string {
+	parts := strings.SplitN(strings.TrimPrefix(p, "/"), "/", 4)
+	n := 1
+	if parts[0] == "home" {
+		n = 2
+	} else if parts[0] != "root" {
+		return ""
+	}
+	if len(parts) <= n || !strings.HasPrefix(parts[n], ".") {
+		return ""
+	}
+	return "/" + strings.Join(parts[:n], "/")
 }
 
 // splitNodeModules splits /usr/lib/node_modules/@scope/name/bin into /usr/lib and
