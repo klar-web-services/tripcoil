@@ -48,7 +48,9 @@ func engine(ping int) http.Handler {
 		// stops before it is inspected: its inspect answers that it is not running.
 		w.Write([]byte(`[{"Id":"` + shopID + `","Names":["/shop-web-1"],"Image":"ghcr.io/acme/shop:2026.11.3","ImageID":"sha256:abc",` +
 			`"State":"running","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"},` +
-			`"Ports":[{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":9229,"Type":"tcp"}]},` +
+			`"Ports":[{"IP":"::","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":9229,"Type":"tcp"},` +
+			`{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8081,"Type":"tcp"},{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8080,"Type":"udp"},` +
+			`{"IP":"0.0.0.0","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"IP":"0.0.0.0","PrivatePort":443,"PublicPort":8443,"Type":"tcp"}]},` +
 			`{"Id":"0000000000000000000000000000000000000000000000000000000000000001","Names":["/gone"],"Image":"busybox","ImageID":"sha256:def","State":"running"},` +
 			`{"Id":"` + stoppedID + `","Names":["/stopped"],"Image":"busybox","ImageID":"sha256:def","State":"running"}]`))
 	})
@@ -59,7 +61,8 @@ func engine(ping int) http.Handler {
 		w.Write([]byte(`{"Id":"` + shopID + `","Name":"/shop-web-1","Image":"sha256:abc","State":{"Running":true,"Pid":2201},` +
 			`"Config":{"User":"node","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}},` +
 			`"HostConfig":{"Privileged":false,"NetworkMode":"shop_default"},` +
-			`"Mounts":[{"Type":"bind","Source":"/srv/shop/uploads","Destination":"/app/uploads","RW":true}]}`))
+			`"Mounts":[{"Type":"bind","Source":"/srv/shop/uploads","Destination":"/app/uploads","RW":true},` +
+			`{"Type":"volume","Source":"/var/lib/docker/volumes/shop_cache/_data","Destination":"/app/.cache","RW":true}]}`))
 	})
 	return mux
 }
@@ -83,10 +86,20 @@ func TestDockerContainers(t *testing.T) {
 	if it.Compose == nil || *it.Compose != (Compose{Project: "shop", Service: "web"}) {
 		t.Fatalf("compose %+v", it.Compose)
 	}
-	if !slices.Equal(it.Ports, []Port{{IP: "0.0.0.0", HostPort: 8080, ContainerPort: 3000, Protocol: "tcp"}}) {
+	// Docker builds both lists from maps, so they are sorted for identical runs to be identical.
+	if !slices.Equal(it.Ports, []Port{
+		{IP: "0.0.0.0", HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
+		{IP: "0.0.0.0", HostPort: 8080, ContainerPort: 3000, Protocol: "tcp"},
+		{IP: "0.0.0.0", HostPort: 8081, ContainerPort: 3000, Protocol: "tcp"},
+		{IP: "::", HostPort: 8080, ContainerPort: 3000, Protocol: "tcp"},
+		{IP: "0.0.0.0", HostPort: 8080, ContainerPort: 3000, Protocol: "udp"},
+	}) {
 		t.Fatalf("ports %+v (unpublished ports are left out)", it.Ports)
 	}
-	if !slices.Equal(it.Mounts, []Mount{{Type: "bind", Source: "/srv/shop/uploads", Destination: "/app/uploads", ReadWrite: true}}) {
+	if !slices.Equal(it.Mounts, []Mount{
+		{Type: "volume", Source: "/var/lib/docker/volumes/shop_cache/_data", Destination: "/app/.cache", ReadWrite: true},
+		{Type: "bind", Source: "/srv/shop/uploads", Destination: "/app/uploads", ReadWrite: true},
+	}) {
 		t.Fatalf("mounts %+v", it.Mounts)
 	}
 	if !slices.Equal(it.PIDs, []int{2201, 2240}) || !slices.Equal(it.Notes, []string{problem.ImageOnly}) {

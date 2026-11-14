@@ -1,11 +1,13 @@
 package inventory
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -95,6 +97,14 @@ func collectDocker(ctx context.Context, dockerHost string, connect func(string) 
 		for _, m := range d.Mounts {
 			it.Mounts = append(it.Mounts, Mount{Type: m.Type, Source: m.Source, Destination: m.Destination, ReadWrite: m.RW})
 		}
+		// Docker builds both lists from maps: sorted, identical runs give identical inventories.
+		slices.SortFunc(it.Ports, func(a, b Port) int {
+			return cmp.Or(cmp.Compare(a.ContainerPort, b.ContainerPort), strings.Compare(a.Protocol, b.Protocol),
+				strings.Compare(a.IP, b.IP), cmp.Compare(a.HostPort, b.HostPort))
+		})
+		slices.SortFunc(it.Mounts, func(a, b Mount) int {
+			return cmp.Or(strings.Compare(a.Destination, b.Destination), strings.Compare(a.Source, b.Source))
+		})
 		it.PIDs = append([]int(nil), containerPIDs[d.ID]...)
 		sort.Ints(it.PIDs)
 		o := Origin{ID: ImageOriginID(s.ImageID), Kind: OriginImage, ImageID: s.ImageID, Ref: ref}
