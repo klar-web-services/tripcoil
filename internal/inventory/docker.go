@@ -57,10 +57,10 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 			"cannot check the Docker socket at %s (%v), so running containers are missing from this run", socket, err)}
 	}
 	if err != nil || fi.Mode()&fs.ModeSocket == 0 {
-		// dockerd stopped with live-restore keeps its containers running without a socket.
+		// dockerd runs, but not on this socket (a custom -H).
 		if len(containerPIDs) > 0 {
 			return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
-				"%d container(s) have running processes, but the Docker socket %s is missing or not a socket, so they are not inventoried; start Docker or set DOCKER_HOST to its socket",
+				"%d container(s) have running processes, but dockerd does not listen on %s, so they are not inventoried; set DOCKER_HOST to its socket",
 				len(containerPIDs), socket)}
 		}
 		return nil, nil, []problem.Problem{problem.New(problem.Notice, problem.DockerAbsent, "inventory", "no Docker socket at %s, so there are no containers to inventory", socket)}

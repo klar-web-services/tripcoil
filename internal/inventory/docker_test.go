@@ -117,10 +117,11 @@ func TestDockerProblems(t *testing.T) {
 	if len(p) != 1 || p[0].Code != problem.DockerAbsent || p[0].Kind != problem.Notice {
 		t.Fatalf("absent: %+v", p)
 	}
-	// dockerd stopped with live-restore: its socket is gone, but its containers still run.
+	// dockerd runs, but not on this socket (a custom -H), and so do its containers.
 	_, _, p = collectDocker(ctx, "unix:///nonexistent/docker.sock", true, connect, map[string][]int{shopID: {2201}}, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
-		!strings.Contains(p[0].Message, "1 container(s) have running processes") {
+		!strings.Contains(p[0].Message, "1 container(s) have running processes, but dockerd does not listen on /nonexistent/docker.sock") ||
+		!strings.Contains(p[0].Message, "set DOCKER_HOST to its socket") {
 		t.Fatalf("socket missing with running containers: %+v", p)
 	}
 	// A stat error other than a missing file (ENOTDIR here; EACCES needs a non-root user).
