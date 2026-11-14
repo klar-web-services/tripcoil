@@ -58,8 +58,10 @@ func (k kernelCollector) collect(ctx context.Context) (Item, Origin, []problem.P
 	var problems []problem.Problem
 	pkg, err := k.kernelPackage(ctx, modDir, modDirExists)
 	if err != nil {
-		problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
-			"the package tool failed, so the running kernel's package is unknown: %v", err))
+		if !interrupted(ctx, err) {
+			problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
+				"the package tool failed, so the running kernel's package is unknown: %v", err))
+		}
 		// As without a package tool: a kernel matched through its package is unresolved.
 		k.resolver = nil
 	}
@@ -161,6 +163,9 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 	}
 	var problems []problem.Problem
 	toolFailed := func(what string, err error) {
+		if interrupted(ctx, err) {
+			return
+		}
 		problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
 			"the package tool could not %s, so whether a newer installed kernel needs a reboot is unknown: %v", what, err))
 	}

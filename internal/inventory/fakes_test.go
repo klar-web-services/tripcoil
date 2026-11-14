@@ -154,12 +154,14 @@ func (fakeInfo) IsDir() bool        { return false }
 func (i fakeInfo) Sys() any         { return &syscall.Stat_t{Dev: i.id.Dev, Ino: i.id.Ino} }
 
 type fakeTool struct {
-	typ       string
-	owners    map[string]pkgtool.Package
-	installed map[string][]pkgtool.Package
-	checkErr  error
-	ownersErr error
-	asked     *[]string // the paths Owners was asked about
+	typ          string
+	owners       map[string]pkgtool.Package
+	installed    map[string][]pkgtool.Package
+	checkErr     error
+	ownersErr    error
+	installedErr error
+	compareErr   error
+	asked        *[]string // the paths Owners was asked about
 }
 
 func (f fakeTool) Type() string                { return f.typ }
@@ -180,11 +182,14 @@ func (f fakeTool) Owners(_ context.Context, paths []string) (map[string]pkgtool.
 	return out, nil
 }
 func (f fakeTool) Installed(_ context.Context, pattern string) ([]pkgtool.Package, error) {
-	return f.installed[pattern], nil
+	return f.installed[pattern], f.installedErr
 }
 
 // Compare orders versions as text; the tests pick versions whose text order is their real order.
 func (f fakeTool) Compare(_ context.Context, a, b string) (int, error) {
+	if f.compareErr != nil {
+		return 0, f.compareErr
+	}
 	return strings.Compare(a, b), nil
 }
 

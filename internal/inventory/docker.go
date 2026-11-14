@@ -67,10 +67,16 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	}
 	api := connect(socket)
 	if err := api.Ping(ctx); err != nil {
+		if interrupted(ctx, err) {
+			return nil, nil, nil
+		}
 		return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
 			"Docker at %s does not answer (%v), so running containers are missing from this run", socket, err)}
 	}
 	list, err := api.Containers(ctx)
+	if interrupted(ctx, err) {
+		return nil, nil, nil
+	}
 	if err != nil {
 		return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory", "cannot list containers: %v", err)}
 	}
@@ -84,7 +90,9 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 			continue // it was removed between the list and the inspect: it is no longer running
 		}
 		if err != nil {
-			problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory", "cannot inspect container %.12s: %v", s.ID, err))
+			if !interrupted(ctx, err) {
+				problems = append(problems, problem.New(problem.Error, problem.DockerUnavailable, "inventory", "cannot inspect container %.12s: %v", s.ID, err))
+			}
 			accounted[s.ID] = true
 			continue
 		}

@@ -117,8 +117,10 @@ func (c *processCollector) collect(ctx context.Context) (processResult, error) {
 	}
 	owners, err := c.owners(ctx, procs)
 	if err != nil {
-		res.problems = append(res.problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
-			"the package tool failed, so the packages of running processes are unknown: %v", err))
+		if !interrupted(ctx, err) {
+			res.problems = append(res.problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
+				"the package tool failed, so the packages of running processes are unknown: %v", err))
+		}
 		c.resolver, owners = nil, nil
 	}
 	finder := appDirFinder{root: c.root, owned: c.ownedPath}

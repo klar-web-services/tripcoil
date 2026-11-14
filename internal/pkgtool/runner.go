@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 )
 
@@ -13,8 +14,8 @@ type Result struct {
 	ExitCode       int
 }
 
-// Runner runs a command. The error is only for a command that could not run at all; a non-zero
-// exit is reported in Result.ExitCode.
+// Runner runs a command. The error is only for a command that could not run at all or was stopped
+// because ctx ended (wrapping ctx.Err()); a non-zero exit is reported in Result.ExitCode.
 type Runner func(ctx context.Context, name string, args ...string) (Result, error)
 
 // Exec runs the command with a fixed environment, so messages are untranslated and PATH is the
@@ -25,6 +26,9 @@ func Exec(ctx context.Context, name string, args ...string) (Result, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
+	if err != nil && ctx.Err() != nil {
+		return Result{}, fmt.Errorf("%s was stopped: %w", name, ctx.Err())
+	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: ee.ExitCode()}, nil

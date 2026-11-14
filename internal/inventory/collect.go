@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,8 +40,10 @@ func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 			"%q is not a supported distribution, so the packages of running software are unknown", d.Release.ID))
 	default:
 		if err := d.Tool.Check(ctx); err != nil {
-			problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
-				"the package tool does not work, so the packages of running software are unknown: %v", err))
+			if !interrupted(ctx, err) {
+				problems = append(problems, problem.New(problem.Error, problem.PackageToolFailed, "inventory",
+					"the package tool does not work, so the packages of running software are unknown: %v", err))
+			}
 		} else {
 			resolver = &pkgtool.Resolver{Tool: d.Tool, Aliases: pkgtool.DetectAliases(d.Root)}
 		}
@@ -63,6 +66,12 @@ func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 	inv.Origins = mergeOrigins([]Origin{kernelOrigin}, procs.origins, containerOrigins)
 	inv.Errors, inv.Warnings, inv.Notices = problem.Split(problems)
 	return inv, nil
+}
+
+// interrupted reports whether err comes from the end of the run's context (Ctrl-C, SIGTERM),
+// which run.json records as INTERRUPTED: it is no failure of the package tool or of Docker.
+func interrupted(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
 // mergeOrigins joins origin lists, keeping the first of each ID, sorted by ID.

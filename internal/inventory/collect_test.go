@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/osrel"
+	"github.com/klar-web-services/tripcoil/internal/pkgtool"
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
@@ -170,5 +172,49 @@ func TestCollectJSONLikeTheSpec(t *testing.T) {
 				t.Fatalf("%s item has rebootPending %q", kind, got)
 			}
 		}
+	}
+}
+
+func TestCollectInterrupted(t *testing.T) {
+	// Ctrl-C kills the package tool and ends the Docker requests; run.json records INTERRUPTED.
+	interrupted := fmt.Errorf("cannot run dpkg-query: %w", context.Canceled)
+	newerKernel := map[string][]pkgtool.Package{"linux-image-*": {deb("linux-image-6.1.0-31-amd64", "6.1.128-1")}}
+	for name, mutate := range map[string]func(*Deps, *fakeTool){
+		"check":     func(_ *Deps, tool *fakeTool) { tool.checkErr = interrupted },
+		"owners":    func(_ *Deps, tool *fakeTool) { tool.ownersErr = interrupted },
+		"installed": func(_ *Deps, tool *fakeTool) { tool.installedErr = interrupted },
+		"compare":   func(_ *Deps, tool *fakeTool) { tool.installed, tool.compareErr = newerKernel, interrupted },
+		"docker": func(d *Deps, _ *fakeTool) {
+			d.DockerHost = "unix://" + dockerServer(t, engine(http.StatusOK))
+			d.Proc = fakeSource{15: {cmdline: []string{"/usr/bin/dockerd"}, exe: "/usr/bin/dockerd", cgroup: cg("/system.slice/docker.service")}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := collectDeps(t)
+			tool := d.Tool.(fakeTool)
+			mutate(&d, &tool)
+			d.Tool = tool
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			inv, err := Collect(ctx, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(inv.Errors) != 0 {
+				t.Fatalf("errors %+v: the interruption caused them", inv.Errors)
+			}
+		})
+	}
+	// A timeout of the tool itself, in a run that goes on, is a failure.
+	d := collectDeps(t)
+	tool := d.Tool.(fakeTool)
+	tool.ownersErr = fmt.Errorf("cannot run dpkg-query: %w", context.DeadlineExceeded)
+	d.Tool = tool
+	inv, err := Collect(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Errors) != 2 || inv.Errors[0].Code != problem.PackageToolFailed {
+		t.Fatalf("errors %+v", inv.Errors)
 	}
 }
