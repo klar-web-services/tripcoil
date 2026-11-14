@@ -96,6 +96,15 @@ func (c *processCollector) collect(ctx context.Context) (processResult, error) {
 		c.build(ctx, p, owners, finder, b)
 	}
 	res.items, res.origins = b.result()
+	if ctx.Err() == nil { // an interrupted run did not get to every copy the last run refers to
+		keep := map[string]bool{}
+		for _, o := range res.origins {
+			if o.Copy != "" {
+				keep[o.Copy] = true
+			}
+		}
+		pruneCache(c.cacheDir, keep)
+	}
 	return res, nil
 }
 
@@ -262,18 +271,18 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			d.note(problem.AppDirNotFound)
 		}
 	}
-	c.linkFile(b, d, p.exe, p.exeDeleted, owners, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) })
+	c.linkFile(ctx, b, d, p.exe, p.exeDeleted, owners, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) })
 	for _, m := range p.libs {
 		if found && !dir.Jar && within(m.Path, dir.Path) {
 			continue // covered by the app directory
 		}
-		c.linkFile(b, d, m.Path, m.Deleted, owners, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) })
+		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) })
 	}
 }
 
 // linkFile attaches the origin of a running executable or library: its package, or the file
 // itself. open reads the running file through /proc.
-func (c *processCollector) linkFile(b *itemBuilder, d *draft, path string, deleted bool, owners map[string]pkgtool.Package, open func() (io.ReadCloser, error)) {
+func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draft, path string, deleted bool, owners map[string]pkgtool.Package, open func() (io.ReadCloser, error)) {
 	pkg, owned := owners[path]
 	if deleted && (owned || c.existsOnHost(path)) {
 		d.restartNeeded(path) // a newer file is in place, and a restart loads it
@@ -288,9 +297,9 @@ func (c *processCollector) linkFile(b *itemBuilder, d *draft, path string, delet
 		b.link(d, o)
 		return
 	}
-	o, err := c.fileOrigin(path, deleted, open)
+	o, err := c.fileOrigin(ctx, path, deleted, open)
 	if err != nil {
-		b.link(d, Origin{ID: UnresolvedOriginID(path), Kind: OriginUnresolved, Reason: fmt.Sprintf("the file cannot be read (%v)", err), Paths: []string{path}})
+		b.link(d, Origin{ID: UnresolvedOriginID(path), Kind: OriginUnresolved, Reason: fmt.Sprintf("the running file was not read (%v)", err), Paths: []string{path}})
 		return
 	}
 	b.link(d, o)
@@ -300,18 +309,22 @@ func (c *processCollector) linkFile(b *itemBuilder, d *draft, path string, delet
 // the file that runs, not whatever is at the path now (another mount namespace may differ), and
 // it can never be a FIFO or device someone put at that path. A replaced file is also copied into
 // the cache, because the Audit cannot read it from the path.
-func (c *processCollector) fileOrigin(path string, deleted bool, open func() (io.ReadCloser, error)) (Origin, error) {
+func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted bool, open func() (io.ReadCloser, error)) (Origin, error) {
 	if !deleted {
 		if o, ok := c.hashed[path]; ok {
 			return o, nil
 		}
 	}
+	f, err := openRunning(open)
+	if err != nil {
+		return Origin{}, err
+	}
+	defer f.Close()
 	var sha, copyPath string
-	var err error
 	if deleted {
-		sha, copyPath, err = copyToCache(open, c.cacheDir)
+		sha, copyPath, err = copyToCache(ctx, f, c.cacheDir)
 	} else {
-		sha, err = hashReader(open)
+		sha, err = hashRunning(ctx, f)
 	}
 	if err != nil {
 		return Origin{}, err

@@ -1,11 +1,13 @@
 package procfs
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -229,5 +231,45 @@ func TestParseMapsKeepsPathVerbatim(t *testing.T) {
 	}
 	if got := ParseMaps([]byte(data)); !slices.Equal(got, want) {
 		t.Fatalf("\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestOpenRefusesNonRegularFiles(t *testing.T) {
+	f, root := fixture(t)
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mf := filepath.Join(root, "proc/42/map_files")
+	if err := os.MkdirAll(mf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, target := range map[string]string{"1000-2000": fifo, "3000-4000": "/dev/null"} {
+		if err := os.Symlink(target, filepath.Join(mf, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	proc(t, root, 78, nil, map[string]string{"exe": fifo})
+	for name, open := range map[string]func() (io.ReadCloser, error){
+		"exe FIFO":           func() (io.ReadCloser, error) { return f.OpenExe(78) },
+		"mapped FIFO":        func() (io.ReadCloser, error) { return f.OpenMapFile(42, Mapping{Start: "1000", End: "2000"}) },
+		"mapped char device": func() (io.ReadCloser, error) { return f.OpenMapFile(42, Mapping{Start: "3000", End: "4000"}) },
+	} {
+		done := make(chan error, 1)
+		go func() {
+			r, err := open()
+			if err == nil {
+				r.Close()
+			}
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if !errors.Is(err, ErrNotRegular) {
+				t.Errorf("%s: %v, want ErrNotRegular", name, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("%s: open blocked", name)
+		}
 	}
 }

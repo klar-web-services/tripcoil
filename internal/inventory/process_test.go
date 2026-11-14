@@ -239,3 +239,86 @@ func TestProcessCollectorOwnersError(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessCollectorRefusesUnsafeFiles(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(p *fakeProc, cancel context.CancelFunc)
+		cap    int64                                // lowers runningFileCap
+		space  func(string) (uint64, uint64, error) // free and total bytes of the cache file system
+		reason string
+	}{
+		"not a regular file": {mutate: func(p *fakeProc, _ context.CancelFunc) {
+			p.openErr = &fs.PathError{Op: "open", Path: "/proc/30/exe", Err: procfs.ErrNotRegular}
+		}, reason: "not a regular file"},
+		"larger than the cap":           {cap: 8, reason: "larger than"},
+		"grows past the cap while read": {mutate: func(p *fakeProc, _ context.CancelFunc) { p.size = 4 }, cap: 8, reason: "larger than"},
+		"cache file system too full": {mutate: func(p *fakeProc, _ context.CancelFunc) { p.deleted = true },
+			space: func(string) (uint64, uint64, error) { return 110, 1000, nil }, reason: "less than 10%"},
+		"interrupted": {mutate: func(p *fakeProc, cancel context.CancelFunc) {
+			p.exeData, p.onRead = strings.Repeat("x", 1<<20), cancel
+		}, reason: "canceled"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if tc.cap != 0 {
+				old := runningFileCap
+				runningFileCap = tc.cap
+				t.Cleanup(func() { runningFileCap = old })
+			}
+			if tc.space != nil {
+				old := cacheSpace
+				cacheSpace = tc.space
+				t.Cleanup(func() { cacheSpace = old })
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			p := &fakeProc{cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeData: "go binary v1"}
+			if tc.mutate != nil {
+				tc.mutate(p, cancel)
+			}
+			cache := t.TempDir()
+			c := &processCollector{src: fakeSource{30: p}, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: cache}
+			res, err := c.collect(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			it := byName(res.items, "api")
+			if len(it.Origins) != 1 {
+				t.Fatalf("origins %v", it.Origins)
+			}
+			o := originByID(res.origins, it.Origins[0])
+			if o.Kind != OriginUnresolved || !strings.Contains(o.Reason, tc.reason) || !slices.Equal(o.Paths, []string{"/opt/api/api"}) {
+				t.Fatalf("origin %+v, want unresolved because %q", o, tc.reason)
+			}
+			if entries, _ := os.ReadDir(filepath.Join(cache, "replaced")); len(entries) != 0 {
+				t.Fatalf("cache holds %v", entries)
+			}
+		})
+	}
+}
+
+func TestProcessCollectorPrunesCache(t *testing.T) {
+	cache := t.TempDir()
+	dir := filepath.Join(cache, "replaced")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{sum("an old binary"), ".copy-123"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	src := fakeSource{31: hostProcesses()[31]}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: cache}
+	if _, err := c.collect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if !slices.Equal(names, []string{sum("go binary v0")}) {
+		t.Fatalf("cache %v, want only this run's copy", names)
+	}
+}

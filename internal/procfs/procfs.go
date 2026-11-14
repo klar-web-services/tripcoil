@@ -3,6 +3,7 @@ package procfs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -172,6 +173,9 @@ func ParseMaps(data []byte) []Mapping {
 	return out
 }
 
+// ErrNotRegular is returned for a running file that is not a regular file.
+var ErrNotRegular = errors.New("not a regular file")
+
 // FileID identifies a file by device and inode.
 type FileID struct{ Dev, Ino uint64 }
 
@@ -216,10 +220,28 @@ func (f FS) ExeFileID(pid int) (FileID, error) {
 
 // OpenExe opens the running executable, even when it was replaced on disk.
 func (f FS) OpenExe(pid int) (io.ReadCloser, error) {
-	return os.Open(f.proc(pid, "exe"))
+	return openRegular(f.proc(pid, "exe"))
 }
 
 // OpenMapFile opens a mapped file through /proc/<pid>/map_files, even when it was replaced.
 func (f FS) OpenMapFile(pid int, m Mapping) (io.ReadCloser, error) {
-	return os.Open(filepath.Join(f.proc(pid, "map_files"), strings.TrimLeft(m.Start, "0")+"-"+strings.TrimLeft(m.End, "0")))
+	return openRegular(filepath.Join(f.proc(pid, "map_files"), strings.TrimLeft(m.Start, "0")+"-"+strings.TrimLeft(m.End, "0")))
+}
+
+// openRegular opens a file only if it is a regular file. A process can map a FIFO or a device:
+// O_NONBLOCK keeps the open of a FIFO from waiting for a writer, and nothing is read from either.
+func openRegular(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := file.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		err = &fs.PathError{Op: "open", Path: path, Err: ErrNotRegular}
+	}
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +29,9 @@ type fakeProc struct {
 	otherRoot bool
 	exeData   string            // what /proc/<pid>/exe reads
 	mapData   map[string]string // path -> what map_files reads
+	size      int64             // the size an opened running file reports, if not its length
+	openErr   error             // what opening a running file returns
+	onRead    func()            // called on every read of a running file
 }
 
 type fakeSource map[int]*fakeProc
@@ -65,12 +69,46 @@ func (s fakeSource) StartTime(pid int) (time.Time, error) {
 func (s fakeSource) Cgroup(pid int) (string, error)         { return s[pid].cgroup, nil }
 func (s fakeSource) Maps(pid int) ([]procfs.Mapping, error) { return s[pid].maps, nil }
 func (s fakeSource) SameRootAsInit(pid int) (bool, error)   { return !s[pid].otherRoot, nil }
-func (s fakeSource) OpenExe(pid int) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader(s[pid].exeData)), nil
-}
+func (s fakeSource) OpenExe(pid int) (io.ReadCloser, error) { return s[pid].open(s[pid].exeData) }
 func (s fakeSource) OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader(s[pid].mapData[m.Path])), nil
+	return s[pid].open(s[pid].mapData[m.Path])
 }
+
+func (p *fakeProc) open(data string) (io.ReadCloser, error) {
+	if p.openErr != nil {
+		return nil, p.openErr
+	}
+	size := p.size
+	if size == 0 {
+		size = int64(len(data))
+	}
+	return &fakeFile{p: p, r: strings.NewReader(data), info: fakeInfo{size: size}}, nil
+}
+
+// fakeFile is a running file opened through /proc.
+type fakeFile struct {
+	p    *fakeProc
+	r    io.Reader
+	info fakeInfo
+}
+
+func (f *fakeFile) Read(b []byte) (int, error) {
+	if f.p.onRead != nil {
+		f.p.onRead()
+	}
+	return f.r.Read(b)
+}
+func (f *fakeFile) Close() error               { return nil }
+func (f *fakeFile) Stat() (fs.FileInfo, error) { return f.info, nil }
+
+type fakeInfo struct{ size int64 }
+
+func (fakeInfo) Name() string       { return "" }
+func (i fakeInfo) Size() int64      { return i.size }
+func (fakeInfo) Mode() fs.FileMode  { return 0o755 }
+func (fakeInfo) ModTime() time.Time { return time.Time{} }
+func (fakeInfo) IsDir() bool        { return false }
+func (fakeInfo) Sys() any           { return nil }
 
 type fakeTool struct {
 	typ       string
