@@ -695,3 +695,21 @@ func TestProcessCollectorProcessEndsWhileRead(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessCollectorFileUnlinkedBetweenProcesses(t *testing.T) {
+	id := procfs.FileID{Dev: 1, Ino: 100}
+	src := fakeSource{
+		30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeID: id, exeData: "go binary v1"},
+		// The same file, unlinked after process 30 was read: the Audit can only scan a copy.
+		31: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", deleted: true, exeID: id, exeData: "go binary v1"},
+	}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := originByID(res.origins, BinaryOriginID(sum("go binary v1")))
+	if data, err := os.ReadFile(o.Copy); err != nil || string(data) != "go binary v1" {
+		t.Fatalf("origin %+v: copy %q %v", o, data, err)
+	}
+}

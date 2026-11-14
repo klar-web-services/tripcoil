@@ -62,10 +62,11 @@ type processCollector struct {
 }
 
 // fileKey identifies a running file by path and by device and inode: another mount namespace
-// can put another file at the same path.
+// can put another file at the same path. A file unlinked after one process was read needs a copy.
 type fileKey struct {
-	path string
-	id   procfs.FileID
+	path    string
+	id      procfs.FileID
+	deleted bool
 }
 
 type rawProcess struct {
@@ -397,7 +398,7 @@ func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted 
 		return Origin{}, err
 	}
 	defer f.Close()
-	key := fileKey{path, f.id}
+	key := fileKey{path, f.id, deleted}
 	if o, ok := c.files[key]; ok && f.idKnown {
 		return o, nil
 	}
