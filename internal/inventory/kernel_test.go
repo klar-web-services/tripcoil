@@ -234,6 +234,39 @@ func TestKernel(t *testing.T) {
 			origin: KernelUpstreamOriginID("6.6.51"),
 		},
 		{
+			name: "liquorix kernel on debian", release: osrel.Release{ID: "debian", VersionID: "13"},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "7.0.9-1-liquorix-amd64", "Linux version 7.0.9-1-liquorix-amd64 (steven@liquorix.net) (gcc (Debian 14.2.0-19) 14.2.0, "+
+					"GNU ld (GNU Binutils for Debian) 2.44) #1 ZEN SMP PREEMPT_DYNAMIC liquorix 7.0-9.1~trixie (2026-05-20)", "", "usr/lib/modules/7.0.9-1-liquorix-amd64")
+			},
+			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/7.0.9-1-liquorix-amd64/modules.builtin": deb("linux-image-7.0.9-1-liquorix-amd64", "7.0-9.1~trixie")}},
+			running: "7.0-9.1~trixie", upstream: "7.0.9",
+			origin: KernelUpstreamOriginID("7.0.9"),
+		},
+		{
+			name: "ubuntu mainline kernel", release: osrel.Release{ID: "ubuntu", VersionID: "24.04", IDLike: []string{"debian"}},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.12.5-061205-generic", "Linux version 6.12.5-061205-generic (kernel@kathleen) #202412141234 SMP PREEMPT_DYNAMIC", "",
+					"usr/lib/modules/6.12.5-061205-generic")
+			},
+			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/6.12.5-061205-generic/modules.builtin": deb("linux-modules-6.12.5-061205-generic", "6.12.5-061205.202412141234")}},
+			running: "6.12.5-061205.202412141234", upstream: "6.12.5",
+			origin: KernelUpstreamOriginID("6.12.5"),
+		},
+		{
+			name: "ubuntu mainline kernel of an x.y.0 release", release: osrel.Release{ID: "ubuntu", VersionID: "24.04", IDLike: []string{"debian"}},
+			root: func(t *testing.T) string {
+				return kernelRoot(t, "6.12.0-061200-generic", "Linux version 6.12.0-061200-generic (kernel@kathleen) #202411172217 SMP PREEMPT_DYNAMIC", "",
+					"usr/lib/modules/6.12.0-061200-generic")
+			},
+			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
+				"/usr/lib/modules/6.12.0-061200-generic/modules.builtin": deb("linux-modules-6.12.0-061200-generic", "6.12.0-061200.202411172217")}},
+			running: "6.12.0-061200.202411172217", upstream: "6.12.0",
+			origin: KernelUpstreamOriginID("6.12.0"),
+		},
+		{
 			name: "elrepo kernel on rocky", release: rockyRel,
 			root: func(t *testing.T) string {
 				return kernelRoot(t, "6.12.9-1.el9.elrepo.x86_64", "Linux version 6.12.9-1.el9.elrepo.x86_64", "", "usr/lib/modules/6.12.9-1.el9.elrepo.x86_64")
@@ -289,5 +322,21 @@ func TestKernel(t *testing.T) {
 				t.Fatalf("item origins %v", it.Origins)
 			}
 		})
+	}
+}
+
+func TestDistroKernel(t *testing.T) {
+	for name, want := range map[string]bool{
+		"linux-image-6.1.0-28-amd64": true, "linux-image-6.1.0-0.deb11.17-amd64": true, "linux-image-6.12.43+deb13-amd64": true,
+		"linux-image-6.12.12+bpo-cloud-amd64": true, "linux-modules-5.15.0-91-generic": true, "linux-image-unsigned-6.8.0-49-generic": true,
+		"linux-image-7.0.9-1-liquorix-amd64": false, "linux-modules-6.12.5-061205-generic": false, "linux-image-6.6.51+rpt-rpi-v8": false,
+		"proxmox-kernel-6.8.12-4-pve-signed": false, "linux-image-amd64": false,
+	} {
+		if got := distroKernel(deb(name, "1"), true); got != want {
+			t.Errorf("%s: %v, want %v", name, got, want)
+		}
+		if distroKernel(deb(name, "1"), false) {
+			t.Errorf("%s without the distribution's build marker must not count", name)
+		}
 	}
 }

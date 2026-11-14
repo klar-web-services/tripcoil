@@ -36,9 +36,10 @@ var (
 	rpmKernelName = regexp.MustCompile(`^kernel(\d+\.\d+)?(-(core|modules|modules-core|debug|debug-core|debug-modules|debug-modules-core|rt|rt-core|rt_debug|uki-virt|default|default-base|azure|kvmsmall|64kb|64k|64k-core|uek|uek-core))?$`)
 	// debKernelName matches Debian's and Ubuntu's own kernel packages, <prefix>-<abi>-<flavor>.
 	// ABIs: 6.1.0-28 (Debian 12), 6.12.117+deb13 (Debian 13), 6.12.95+deb12 and 6.1.0-0.deb11.17
-	// (backports), 5.15.0-91 (Ubuntu, where linux-modules-* owns modules.builtin). Metapackages
-	// such as linux-image-amd64 do not match.
-	debKernelName = regexp.MustCompile(`^(linux-(?:image-unsigned|image|modules))-(\d+\.\d+\.\d+(?:-\d+(?:\.deb\d+\.\d+)?|\+deb\d+|\+bpo))-(.+)$`)
+	// (backports), 5.15.0-91 (Ubuntu, where linux-modules-* owns modules.builtin). A dash ABI
+	// always has patch level 0, so Liquorix's 7.0.9-1 and Ubuntu mainline's 6.12.5-061205 do not
+	// match. Metapackages such as linux-image-amd64 do not match.
+	debKernelName = regexp.MustCompile(`^(linux-(?:image-unsigned|image|modules))-(\d+\.\d+\.0-\d+(?:\.deb\d+\.\d+)?|\d+\.\d+\.\d+(?:\+deb\d+|\+bpo))-(.+)$`)
 	// debKernelFlavor splits any deb kernel package into <prefix>-<abi>-<flavor> to find installed
 	// kernels of the same flavor: the distributions' own and also pve-kernel-5.15.131-2-pve,
 	// proxmox-kernel-6.8.12-4-pve-signed, linux-image-6.6.51+rpt-rpi-v8 (Raspberry Pi) and Kali's
@@ -54,11 +55,12 @@ func (k kernelCollector) collect(ctx context.Context) (Item, Origin) {
 	family := k.release.Family()
 	modDir, modDirExists := modulesDir(k.root, rel)
 	pkg := k.kernelPackage(ctx, modDir, modDirExists)
-	it.RunningVersion, it.UpstreamVersion = runningVersions(family, rel,
+	var distroBuild bool
+	it.RunningVersion, it.UpstreamVersion, distroBuild = runningVersions(family, rel,
 		readTrimmed(k.root, "proc/version"), readTrimmed(k.root, "proc/version_signature"), pkg)
 	it.RebootReasons = k.rebootReasons(ctx, family, modDir, modDirExists, pkg, it.RunningVersion)
 	it.RebootPending = len(it.RebootReasons) > 0
-	o := k.origin(family, pkg, rel, it.UpstreamVersion)
+	o := k.origin(family, pkg, distroBuild, rel, it.UpstreamVersion)
 	it.Origins = []string{o.ID}
 	return it, o
 }
@@ -80,7 +82,9 @@ func (k kernelCollector) kernelPackage(ctx context.Context, modDir string, exist
 	return nil
 }
 
-func runningVersions(family osrel.Family, rel, procVersion, signature string, pkg *pkgtool.Package) (running, upstream string) {
+// runningVersions also reports whether the running kernel carries the build marker of Debian's
+// or Ubuntu's own kernels: the /proc/version trailer or /proc/version_signature.
+func runningVersions(family osrel.Family, rel, procVersion, signature string, pkg *pkgtool.Package) (running, upstream string, distroBuild bool) {
 	running, upstream = rel, upstreamLead.FindString(rel)
 	if pkg != nil {
 		running = pkg.Version
@@ -90,15 +94,17 @@ func runningVersions(family osrel.Family, rel, procVersion, signature string, pk
 		if m := debianRunning.FindStringSubmatch(procVersion); m != nil {
 			running = m[1]
 			upstream = upstreamLead.FindString(withoutEpoch(running))
+			distroBuild = true
 		}
 	case osrel.Ubuntu:
 		// "Ubuntu 5.15.0-91.101-generic 5.15.131": package version plus flavor, then upstream.
 		if f := strings.Fields(signature); len(f) == 3 && f[0] == "Ubuntu" {
 			running = strings.TrimSuffix(f[1], "-"+kernelFlavor(rel))
 			upstream = f[2]
+			distroBuild = true
 		}
 	}
-	return running, upstream
+	return running, upstream, distroBuild
 }
 
 // withoutEpoch drops a package epoch: "1:6.6.51-1+rpt3" becomes "6.6.51-1+rpt3".
@@ -113,11 +119,13 @@ func withoutEpoch(v string) string {
 
 // distroKernel reports whether pkg is the distribution's own kernel package, which its
 // advisories cover. A third-party kernel (Proxmox, ELRepo, Raspberry Pi, a bindeb-pkg build)
-// is matched by upstream version instead, so it is never shown as clean by default.
-func distroKernel(pkg pkgtool.Package) bool {
+// is matched by upstream version instead, so it is never shown as clean by default. A deb kernel
+// also needs the distribution's build marker, because mainline and third-party builds of an x.y.0
+// release can carry the same names.
+func distroKernel(pkg pkgtool.Package, distroBuild bool) bool {
 	switch pkg.Type {
 	case "deb":
-		return debKernelName.MatchString(pkg.Name)
+		return distroBuild && debKernelName.MatchString(pkg.Name)
 	case "rpm":
 		return rpmKernelName.MatchString(pkg.Name)
 	}
@@ -179,9 +187,9 @@ func (k kernelCollector) rebootReasons(ctx context.Context, family osrel.Family,
 	return reasons
 }
 
-func (k kernelCollector) origin(family osrel.Family, pkg *pkgtool.Package, rel, upstream string) Origin {
+func (k kernelCollector) origin(family osrel.Family, pkg *pkgtool.Package, distroBuild bool, rel, upstream string) Origin {
 	if family.BackportsKernelFixes() {
-		if pkg != nil && distroKernel(*pkg) {
+		if pkg != nil && distroKernel(*pkg, distroBuild) {
 			return packageOrigin(k.distro, *pkg)
 		}
 		if pkg == nil && k.resolver == nil {
