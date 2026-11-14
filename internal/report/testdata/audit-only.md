@@ -19,9 +19,9 @@
 
 ## Medium risk (3)
 
+- 1 in this host's packages (1 package); all in libssl3 (1)
 - 1 in the app directory /srv/shop (node); all in lodash (1)
 - 1 in the container shop-web-1 (ghcr.io/acme/shop:2026.11.3); all in libssl3 (1)
-- 1 in this host's packages (1 package); all in libssl3 (1)
 
 Every medium risk finding, with its remediation, is in audit.json.
 

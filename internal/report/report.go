@@ -311,10 +311,13 @@ func signals(v audit.Vulnerability) string {
 }
 
 // writeSummary counts the findings of a tier per image, binary, app directory, jar and kernel,
-// and those of the host's packages together.
+// and those of the host's packages together. The host's packages and the kernel come first, so the
+// limit never hides them.
 func writeSummary(b *strings.Builder, tier string, fs []audit.Finding, inv *inventory.Inventory) {
 	type group struct {
+		id       string // the origin; "" for the host's packages
 		name     string
+		rank     int // 0 for the host's packages, 1 for the kernel, 2 for the rest
 		count    int
 		packages map[string]int
 	}
@@ -330,31 +333,33 @@ func writeSummary(b *strings.Builder, tier string, fs []audit.Finding, inv *inve
 		}
 	}
 	groups := map[string]*group{}
+	host := &group{packages: map[string]int{}}
 	hostPackages := map[string]bool{}
 	for _, f := range fs {
 		o := origins[f.Origin]
-		key := f.Origin
-		if o.Kind == inventory.OriginPackage && !kernel[f.Origin] {
-			key = ""
+		isKernel := kernel[f.Origin] || o.Kind == inventory.OriginKernelUpstream
+		g := host
+		if o.Kind == inventory.OriginPackage && !isKernel {
 			hostPackages[f.Origin] = true
-		}
-		g := groups[key]
-		if g == nil {
-			g = &group{packages: map[string]int{}}
-			if key != "" {
-				o.ID = f.Origin
-				g.name = groupName(o, names[f.Origin], kernel[f.Origin])
+		} else if g = groups[f.Origin]; g == nil {
+			o.ID = f.Origin
+			g = &group{id: f.Origin, name: groupName(o, names[f.Origin], isKernel), rank: 2, packages: map[string]int{}}
+			if isKernel {
+				g.rank = 1
 			}
-			groups[key] = g
+			groups[f.Origin] = g
 		}
 		g.count++
 		g.packages[f.Package.Name]++
 	}
-	if g := groups[""]; g != nil {
-		g.name = "this host's packages (" + plural(len(hostPackages), "package", "packages") + ")"
-	}
 	list := slices.Collect(maps.Values(groups))
-	slices.SortFunc(list, func(x, y *group) int { return cmp.Or(cmp.Compare(y.count, x.count), cmp.Compare(x.name, y.name)) })
+	if host.count > 0 {
+		host.name = "this host's packages (" + plural(len(hostPackages), "package", "packages") + ")"
+		list = append(list, host)
+	}
+	slices.SortFunc(list, func(x, y *group) int {
+		return cmp.Or(cmp.Compare(x.rank, y.rank), cmp.Compare(y.count, x.count), cmp.Compare(x.name, y.name), cmp.Compare(x.id, y.id))
+	})
 	for i, g := range list {
 		if i == maxGroups {
 			rest := 0
@@ -411,7 +416,7 @@ func topPackages(counts map[string]int) string {
 	slices.SortFunc(pkgs, func(x, y string) int { return cmp.Or(cmp.Compare(counts[y], counts[x]), cmp.Compare(x, y)) })
 	how := "all in "
 	if len(pkgs) > 3 {
-		pkgs, how = pkgs[:3], "most in "
+		pkgs, how = pkgs[:3], "including "
 	}
 	parts := make([]string, len(pkgs))
 	for i, p := range pkgs {
@@ -452,13 +457,13 @@ func systemUnits(units []string) []string {
 }
 
 func writeGaps(b *strings.Builder, gaps []Gap, aud *audit.Audit, inv *inventory.Inventory) {
-	var failed []string
+	var failed []Gap
 	if aud != nil && inv != nil && aud.Status != audit.Failed { // a failed audit's verdict says why
 		names := itemNames(inv)
 		origins := originsByID(inv)
 		for _, o := range aud.Origins {
 			if o.Status == audit.ScanFailed {
-				failed = append(failed, fmt.Sprintf("- Not audited: %s: %s", md(describe(origins[o.ID], names[o.ID])), md(o.Error)))
+				failed = append(failed, Gap{Subject: describe(origins[o.ID], names[o.ID]), Detail: o.Error})
 			}
 		}
 	}
@@ -469,21 +474,30 @@ func writeGaps(b *strings.Builder, gaps []Gap, aud *audit.Audit, inv *inventory.
 	for _, g := range groupGaps(gaps) {
 		if len(g) == 1 {
 			fmt.Fprintf(b, "- `%s` %s: %s\n", g[0].Code, md(g[0].Subject), md(g[0].Detail))
-			continue
+		} else {
+			fmt.Fprintf(b, "- %d × `%s`: %s (%s)\n", len(g), g[0].Code, md(g[0].Detail), examples(g))
 		}
-		var examples []string
-		for _, x := range g[:min(3, len(g))] {
-			examples = append(examples, md(x.Subject))
-		}
-		if len(g) > 3 {
-			examples = append(examples, fmt.Sprintf("and %d more", len(g)-3))
-		}
-		fmt.Fprintf(b, "- %d × `%s`: %s (%s)\n", len(g), g[0].Code, md(g[0].Detail), strings.Join(examples, "; "))
 	}
-	for _, f := range failed {
-		b.WriteString(f + "\n")
+	for _, g := range groupGaps(failed) {
+		if len(g) == 1 {
+			fmt.Fprintf(b, "- Not audited: %s: %s\n", md(g[0].Subject), md(g[0].Detail))
+		} else {
+			fmt.Fprintf(b, "- %d × Not audited: %s (%s)\n", len(g), md(g[0].Detail), examples(g))
+		}
 	}
 	b.WriteString("\n")
+}
+
+// examples names the first three gaps of a group, and how many more there are.
+func examples(g []Gap) string {
+	var s []string
+	for _, x := range g[:min(3, len(g))] {
+		s = append(s, md(x.Subject))
+	}
+	if len(g) > 3 {
+		s = append(s, fmt.Sprintf("and %d more", len(g)-3))
+	}
+	return strings.Join(s, "; ")
 }
 
 // groupGaps groups gaps by code and reason, the largest group first.
@@ -597,14 +611,40 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
+// vulnLink links a vulnerability's ID to the first safe URL that names it, else to the first safe one.
 func vulnLink(v audit.Vulnerability) string {
 	id := md(v.ID)
+	var first, named string
 	for _, u := range v.URLs {
-		if strings.HasPrefix(u, "https://") && !strings.ContainsFunc(u, unsafeURLRune) {
-			return "[" + id + "](" + u + ")"
+		if !strings.HasPrefix(u, "https://") || strings.ContainsFunc(u, unsafeURLRune) {
+			continue
+		}
+		first = cmp.Or(first, u)
+		if named == "" && namesID(u, v.ID) {
+			named = u
 		}
 	}
+	if u := cmp.Or(named, first); u != "" {
+		return "[" + id + "](" + u + ")"
+	}
 	return escapeBlockStart(id)
+}
+
+// namesID reports whether a URL contains an ID, ignoring case, and not as the start of a longer
+// one (CVE-2026-1000 in CVE-2026-10001).
+func namesID(u, id string) bool {
+	u, id = strings.ToLower(u), strings.ToLower(id)
+	for id != "" {
+		i := strings.Index(u, id)
+		if i < 0 {
+			return false
+		}
+		if end := i + len(id); end == len(u) || !unicode.IsLetter(rune(u[end])) && !unicode.IsDigit(rune(u[end])) {
+			return true
+		}
+		u = u[i+1:]
+	}
+	return false
 }
 
 // escapeBlockStart keeps text printed at the start of a list item from opening a Markdown block.

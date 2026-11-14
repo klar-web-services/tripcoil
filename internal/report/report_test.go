@@ -309,11 +309,11 @@ func TestRenderGroupsCriticalAndHighByVulnerability(t *testing.T) {
 	kernelCNA := f("f:6", up, "CVE-2026-7000", "High", 0.2, audit.RiskHigh, "linux", "kernel")
 	kernelCNA.Source = "kernel-cna"
 	aud := &audit.Audit{Status: audit.Complete, Findings: []audit.Finding{
-		f("f:1", "image:b", "CVE-2026-1000", "Critical", 0.5, audit.RiskCritical, "zlib", "container:b-web", "http://insecure.example", "https://example.com/1000"),
-		f("f:2", "image:a", "CVE-2026-1000", "High", 0.5, audit.RiskCritical, "zlib", "container:a-api"),
+		f("f:1", "image:b", "CVE-2026-1000", "Critical", 0.5, audit.RiskCritical, "zlib", "container:b-web", "http://insecure.example/CVE-2026-1000", "https://nvd.example/vuln/detail/cve-2026-1000"),
+		f("f:2", "image:a", "CVE-2026-1000", "High", 0.5, audit.RiskCritical, "zlib", "container:a-api", "https://example.com/advisory"),
 		f("f:3", "image:a", "CVE-2026-1000", "Critical", 0.5, audit.RiskCritical, "libz", "container:a-api"),
 		f("f:4", "image:a", "CVE-2026-2000", "High", 0.9, audit.RiskCritical, "openssl", "container:a-api"),
-		f("f:5", "image:b", "CVE-2026-3000", "Medium", 0.2, audit.RiskHigh, "curl", "container:b-web"),
+		f("f:5", "image:b", "CVE-2026-3000", "Medium", 0.2, audit.RiskHigh, "curl", "container:b-web", "https://example.com/advisory", "https://example.com/CVE-2026-30001"),
 		kernelCNA,
 	}}
 	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
@@ -321,14 +321,14 @@ func TestRenderGroupsCriticalAndHighByVulnerability(t *testing.T) {
 
 - CVE-2026-2000: severity High, known exploited (CISA KEV), EPSS 90.0%.
   - openssl 1.2 in a-api: Fix f:4.
-- [CVE-2026-1000](https://example.com/1000): severity Critical or High, known exploited (CISA KEV), EPSS 50.0%.
+- [CVE-2026-1000](https://nvd.example/vuln/detail/cve-2026-1000): severity Critical or High, known exploited (CISA KEV), EPSS 50.0%.
   - libz 1.2 in a-api: Fix f:3.
   - zlib 1.2 in a-api: Fix f:2.
   - zlib 1.2 in b-web: Fix f:1.
 
 ## High risk (2)
 
-- CVE-2026-3000: severity Medium, EPSS 20.0%.
+- [CVE-2026-3000](https://example.com/advisory): severity Medium, EPSS 20.0%.
   - curl 1.2 in b-web: Fix f:5.
 - CVE-2026-7000: severity High, EPSS 20.0%.
   - linux 1.2 in kernel (matched by upstream kernel version): Fix f:6.
@@ -339,6 +339,7 @@ func TestRenderGroupsCriticalAndHighByVulnerability(t *testing.T) {
 	}
 }
 
+// The host's packages and the kernel come first in a summary, so the limit never hides them.
 func TestRenderSummarizesMediumAndLow(t *testing.T) {
 	up := inventory.KernelUpstreamOriginID("7.3.3")
 	inv := &inventory.Inventory{
@@ -375,23 +376,22 @@ func TestRenderSummarizesMediumAndLow(t *testing.T) {
 	for i := range 25 {
 		b := fmt.Sprintf("binary:%02d", i)
 		inv.Origins = append(inv.Origins, inventory.Origin{ID: b, Kind: inventory.OriginBinary, Paths: []string{fmt.Sprintf("/opt/bin/b%02d", i)}})
-		add(b, audit.RiskMedium, "stdlib", 1)
+		add(b, audit.RiskMedium, "stdlib", 4)
 	}
 	add(img, audit.RiskLow, "zlib", 1)
 	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"})
-	want := `## Medium risk (39)
+	want := `## Medium risk (114)
 
-- 7 in the containers web-1, web-2 (ghcr.io/acme/web:1); most in chromium (3), libxml2 (2), openssl (1)
 - 3 in this host's packages (2 packages); all in libssl3 (2), zlib1g (1)
-- 2 in the jar /srv/app.jar (java); all in log4j-core (2)
 - 2 in the kernel (Linux 7.3.3); all in linux (2)
-- 1 in the binary /opt/bin/b00; all in stdlib (1)
+- 7 in the containers web-1, web-2 (ghcr.io/acme/web:1); including chromium (3), libxml2 (2), openssl (1)
+- 4 in the binary /opt/bin/b00; all in stdlib (4)
 `
 	if !strings.Contains(got, want) {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
-	want = `- 1 in the binary /opt/bin/b20; all in stdlib (1)
-- … and 4 more with 4 findings.
+	want = `- 4 in the binary /opt/bin/b21; all in stdlib (4)
+- … and 4 more with 14 findings.
 
 Every medium risk finding, with its remediation, is in audit.json.
 
@@ -401,8 +401,27 @@ Every medium risk finding, with its remediation, is in audit.json.
 
 Every low risk finding, with its remediation, is in audit.json.
 `
-	if !strings.Contains(got, want) || strings.Contains(got, "/opt/bin/b21") || strings.Contains(got, "Fix f:") {
+	if !strings.Contains(got, want) || strings.Contains(got, "/opt/bin/b22") || strings.Contains(got, "Fix f:") {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Groups with the same count and name come in the order of their origins, whatever the order
+// of the map they are collected from.
+func TestRenderSummaryTiesFollowTheOrigin(t *testing.T) {
+	inv := &inventory.Inventory{Origins: []inventory.Origin{
+		{ID: "binary:b", Kind: inventory.OriginBinary, Paths: []string{"/opt/x"}},
+		{ID: "binary:a", Kind: inventory.OriginBinary, Paths: []string{"/opt/x"}},
+	}}
+	aud := &audit.Audit{Status: audit.Complete, Findings: []audit.Finding{
+		{ID: "f:1", Origin: "binary:b", Risk: audit.RiskLow, Package: audit.Package{Name: "aa"}},
+		{ID: "f:2", Origin: "binary:a", Risk: audit.RiskLow, Package: audit.Package{Name: "zz"}},
+	}}
+	want := "- 1 in the binary /opt/x; all in zz (1)\n- 1 in the binary /opt/x; all in aa (1)\n"
+	for range 20 {
+		if got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StageOK}), Inventory: inv, Audit: aud, NoReview: "x"}); !strings.Contains(got, want) {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
 	}
 }
 
@@ -424,6 +443,27 @@ func TestRenderGroupsCoverageGaps(t *testing.T) {
 		"- 2 × `APPDIR_NOT_FOUND`: no app directory was found, so only the interpreter is audited (p (/usr/bin/python3); q (/usr/bin/python3))\n" +
 		"- `ORIGIN_UNRESOLVED` lxd: /snap/lxd/1/bin/lxd: it runs from a snap\n"
 	if !strings.Contains(got, want) || !strings.Contains(got, "(8 coverage gaps)") {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// An interrupted run fails every origin it did not scan, with one error; they are one line.
+func TestRenderGroupsNotAuditedOrigins(t *testing.T) {
+	inv := &inventory.Inventory{}
+	aud := &audit.Audit{Status: audit.Partial}
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		id := "binary:" + n
+		inv.Items = append(inv.Items, inventory.Item{ID: "proc:" + n, Kind: inventory.KindProcess, Name: n, Origins: []string{id}})
+		inv.Origins = append(inv.Origins, inventory.Origin{ID: id, Kind: inventory.OriginBinary, Paths: []string{"/opt/" + n + "_x"}})
+		aud.Origins = append(aud.Origins, audit.OriginResult{ID: id, Kind: inventory.OriginBinary, Status: audit.ScanFailed, Error: "not scanned: the run was interrupted"})
+	}
+	inv.Origins = append(inv.Origins, inventory.Origin{ID: img, Kind: inventory.OriginImage, Ref: "acme/web:1"})
+	aud.Origins = append(aud.Origins, audit.OriginResult{ID: img, Kind: inventory.OriginImage, Status: audit.ScanFailed, Error: "Grype failed: no such image"})
+	got := Render(Input{Run: record(map[string]string{"inventory": run.StageOK, "audit": run.StagePartial}), Inventory: inv, Audit: aud, NoReview: "x"})
+	want := "## Coverage gaps\n\n" +
+		"- 5 × Not audited: not scanned: the run was interrupted (a: /opt/a\\_x; b: /opt/b\\_x; c: /opt/c\\_x; and 2 more)\n" +
+		"- Not audited: image acme/web:1: Grype failed: no such image\n\n"
+	if !strings.Contains(got, want) {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
