@@ -206,7 +206,15 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errGrypeTimeout)
 	defer cancel()
 	if r.HasRoom != nil {
-		go r.watchSpace(ctx, work, stop)
+		watched := make(chan struct{})
+		go func() {
+			defer close(watched)
+			r.watchSpace(ctx, work, spaceCheckEvery, stop)
+		}()
+		defer func() {
+			cancel()
+			<-watched
+		}()
 	}
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = work
@@ -240,9 +248,10 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 	return fmt.Errorf("Grype failed: %s", msg)
 }
 
-// watchSpace stops Grype through stop when HasRoom says that dir's file system ran low on space.
-func (r *Runner) watchSpace(ctx context.Context, dir string, stop context.CancelCauseFunc) {
-	tick := time.NewTicker(spaceCheckEvery)
+// watchSpace asks HasRoom about dir every interval until ctx ends, and stops Grype through stop
+// when it says that dir's file system ran low on space.
+func (r *Runner) watchSpace(ctx context.Context, dir string, interval time.Duration, stop context.CancelCauseFunc) {
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
 		select {
