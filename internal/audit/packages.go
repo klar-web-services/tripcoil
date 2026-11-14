@@ -67,9 +67,10 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 }
 
 // scanPackages stages the package database and returns its matches and packages: from its cached
-// SBOM, or from a scan of the staging root when the database changed, its SBOM is not matchable,
-// or the cached one is at fault (see badSBOM). The running kernel's package is matched at its
-// running version.
+// SBOM, or from a scan of the staging root when the database changed, its SBOM does not match
+// like the staging root (see cacheIfVerified), or the cached one is at fault (see badSBOM). The
+// running kernel's package is matched at its running version. The SBOM is verified against the
+// scan and cached before that change, which a cached SBOM gets as it is matched.
 func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, []grype.Component, error) {
 	stage := filepath.Join(au.d.CacheDir, "staging")
 	os.RemoveAll(stage)
@@ -105,7 +106,7 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	if err != nil {
 		return nil, nil, err
 	}
-	au.cacheIfMatchable(key, nil, data)
+	au.cacheIfVerified(ctx, key, nil, data, rep, packagesID+".verify")
 	if changed, err := au.kernelChanged(data); err != nil || changed {
 		if err != nil {
 			return nil, nil, err

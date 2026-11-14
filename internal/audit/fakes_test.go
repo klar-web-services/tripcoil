@@ -18,9 +18,9 @@ import (
 
 // fakeScanner imitates Grype. Scan writes the SBOM listed for the source and matches it; Match
 // matches every package of the SBOM it is given against vulns, keyed by name@version or by purl,
-// so a cached or rewritten SBOM gives the matches it holds. A file's SBOM is listed by the path
-// of the copy Grype scans, scan/<sha>/<file name>, because the SBOM of a jar or of a binary that
-// Syft identifies by name depends on the file name.
+// so a cached or rewritten SBOM gives the matches it holds, unless matching changes them. A
+// file's SBOM is listed by the path of the copy Grype scans, scan/<sha>/<file name>, because the
+// SBOM of a jar or of a binary that Syft identifies by name depends on the file name.
 type fakeScanner struct {
 	status     grype.DBStatus
 	updateErr  error
@@ -40,6 +40,7 @@ type fakeScanner struct {
 	lookedUp   []string
 	copiesLeft []string // copies of other files still in the scan folder when a file was scanned
 	scanning   func(source string)
+	matching   func(*grype.Report) // changes what matching an SBOM gives, as against scanning its source
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -107,10 +108,18 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
 		return nil, err
 	}
-	return f.Match(ctx, sbom, raw)
+	return f.match(ctx, sbom, raw)
 }
 
 func (f *fakeScanner) Match(ctx context.Context, sbom, raw string) (*grype.Report, error) {
+	rep, err := f.match(ctx, sbom, raw)
+	if err == nil && f.matching != nil {
+		f.matching(rep)
+	}
+	return rep, err
+}
+
+func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Report, error) {
 	f.matched = append(f.matched, filepath.Base(sbom))
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -127,6 +136,9 @@ func (f *fakeScanner) Match(ctx context.Context, sbom, raw string) (*grype.Repor
 		return nil, err
 	}
 	rep := &grype.Report{DBBuilt: f.status.Built, Distro: f.distro}
+	if f.distro != "" {
+		rep.DistroVersion = f.osVersion
+	}
 	for _, c := range comps {
 		typ, _, _ := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/")
 		purl := c.PURL

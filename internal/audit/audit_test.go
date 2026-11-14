@@ -275,6 +275,90 @@ func TestAuditScansWhatAnSBOMCannotMatchEveryRun(t *testing.T) {
 	}
 }
 
+// cachedKinds lists the kinds of the cached SBOMs, such as appdir, sorted.
+func cachedKinds(cache string) []string {
+	sboms, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*.cdx.json"))
+	var kinds []string
+	for _, p := range sboms {
+		kinds = append(kinds, strings.SplitN(filepath.Base(p), "-", 2)[0])
+	}
+	slices.Sort(kinds)
+	return kinds
+}
+
+// An SBOM is cached only when matching it, as it would be cached, gives what scanning its origin
+// gave: the same distribution and the same matches. Otherwise the origin is scanned every run.
+// Either way the findings are the scan's, and a failed match fails nothing.
+func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
+	setuptools := grype.Match{Vulnerability: vuln("CVE-2026-5000", "High", "fixed", "40.0.0"),
+		Artifact: grype.Artifact{Name: "setuptools", Version: "39.2.0", Type: "python"}}
+	for _, tc := range []struct {
+		name   string
+		setup  func(*fakeScanner, *inventory.Inventory)
+		cached []string
+	}{
+		// The package database's SBOM is compared as Grype wrote it, before the running kernel's
+		// package is changed in it, as with the scan: the changed one matches otherwise.
+		{"the same", func(*fakeScanner, *inventory.Inventory) {}, []string{"appdir", "binary", "image", "jar", "packages"}},
+		{"another distribution", func(g *fakeScanner, _ *inventory.Inventory) {
+			g.matching = func(r *grype.Report) { r.Distro = "archlinux" }
+		}, nil},
+		{"another distribution version", func(g *fakeScanner, _ *inventory.Inventory) {
+			g.matching = func(r *grype.Report) { r.DistroVersion = "12" }
+		}, nil},
+		{"an extra match", func(g *fakeScanner, _ *inventory.Inventory) {
+			g.matching = func(r *grype.Report) { r.Matches = append(r.Matches, setuptools) }
+		}, nil},
+		{"another fix version", func(g *fakeScanner, _ *inventory.Inventory) {
+			g.matching = func(r *grype.Report) {
+				for i := range r.Matches {
+					if v := &r.Matches[i].Vulnerability; len(v.FixVersions) > 0 {
+						v.FixVersions = []string{"0:" + v.FixVersions[0]}
+					}
+				}
+			}
+		}, []string{"binary", "image"}}, // the stripped binary has no matches, the image's no fix version
+		{"a failed match", func(g *fakeScanner, inv *inventory.Inventory) {
+			g.matchErr = map[string]error{packagesID + ".verify.cdx.json": errors.New("Grype timed out after 15m0s")}
+			for _, o := range inv.Origins {
+				g.matchErr[rawName(o.ID, ".verify.cdx.json")] = errors.New("Grype timed out after 15m0s")
+			}
+		}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, cache, inv := host(t)
+			g := hostScanner(root, cache)
+			tc.setup(g, inv)
+			runDir := t.TempDir()
+			a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
+			if a.Status != Complete || len(a.Errors) != 0 || len(a.Findings) != 8 {
+				t.Fatalf("audit %s, errors %+v, %d findings", a.Status, a.Errors, len(a.Findings))
+			}
+			f := byVuln(a)
+			if _, ok := f["CVE-2026-5000"]; ok || !slices.Equal(f["GHSA-35jh-r3h4-6jhm"].Fix.Versions, []string{"4.17.21"}) {
+				t.Errorf("findings %+v: they are the scan's", a.Findings)
+			}
+			if got := cachedKinds(cache); !slices.Equal(got, tc.cached) {
+				t.Errorf("cached SBOMs %v, want %v", got, tc.cached)
+			}
+			want := map[string]bool{}
+			for _, o := range a.Origins {
+				if o.Raw != nil {
+					want[filepath.Base(o.Raw.Grype)], want[filepath.Base(o.Raw.SBOM)] = true, true
+				}
+			}
+			if raw, _ := os.ReadDir(filepath.Join(runDir, "raw")); len(raw) != len(want) {
+				t.Errorf("raw/ holds %v: the match's report is not the origin's", raw)
+			}
+			g.catalogs = nil
+			Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+			if len(g.catalogs) != 8-len(tc.cached) {
+				t.Errorf("second run scanned %q", g.catalogs)
+			}
+		})
+	}
+}
+
 func TestAuditOriginFailuresArePartial(t *testing.T) {
 	root, cache, inv := host(t)
 	os.WriteFile(filepath.Join(root, "opt/api/api"), []byte("go binary v2"), 0o755) // upgraded since the inventory

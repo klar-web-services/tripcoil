@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -58,9 +59,9 @@ func (au *auditor) scanDir() string { return filepath.Join(au.d.CacheDir, "scan"
 // scanOrigin returns an origin's matches and how many packages it holds, and leaves Grype's
 // report and the SBOM in the run folder. Cataloging is the slow part of a scan, so an origin's
 // SBOM is cached under a content key, and later runs only match it; an origin whose SBOM does not
-// match like the origin itself (Go modules, an operating system without a version) is scanned
-// directly every run instead. A cached SBOM that is itself at fault (see badSBOM) is dropped and
-// the origin scanned again; on any other failure the origin fails, and the entry is kept.
+// match like the origin itself (see cacheIfVerified) is scanned directly every run instead. A
+// cached SBOM that is itself at fault (see badSBOM) is dropped and the origin scanned again; on
+// any other failure the origin fails, and the entry is kept.
 func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, counts, error) {
 	if o.Kind == inventory.OriginImage && au.d.Images != nil {
 		// For an image the daemon does not have, it would try a pull from Docker Hub.
@@ -124,7 +125,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if err != nil {
 		return nil, counts{}, err
 	}
-	au.cacheIfMatchable(key, files, data)
+	au.cacheIfVerified(ctx, key, files, data, rep, rawName(o.ID, ".verify"))
 	return rep, n, nil
 }
 
@@ -200,13 +201,15 @@ func rejected(err error) error {
 	return err
 }
 
-// cacheIfMatchable caches a stripped SBOM under key, unless there is no key or matching the SBOM
-// would not give the scan's matches (see grype.Matchable): such an origin is scanned every run.
-// When files is set, every package must have been read from one of them: an app directory's key
-// hashes only its own lockfiles and manifests, and Grype also reads nested lockfiles and
-// virtual environments, which would change unseen. The cache only saves time, so a failed write
-// is not an error.
-func (au *auditor) cacheIfMatchable(key string, files []string, data []byte) {
+// cacheIfVerified caches a stripped SBOM under key when matching it gives what the scan gave
+// (see sameMatches). Matching an SBOM can lose a derivative's distribution, or match some
+// packages otherwise than a scan, so the SBOM is matched once, exactly as it would be cached, as
+// name.cdx.json in the scan folder; grype.Matchable first rules out the cases known to differ.
+// An origin whose SBOM is not cached is scanned every run. When files is set, every package must
+// have been read from one of them: an app directory's key hashes only its own lockfiles and
+// manifests, and Grype also reads nested lockfiles and virtual environments, which would change
+// unseen. The cache only saves time, so a failed match or write is not an error.
+func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []string, data []byte, scan *grype.Report, name string) {
 	if key == "" {
 		return
 	}
@@ -229,7 +232,35 @@ func (au *auditor) cacheIfMatchable(key string, files []string, data []byte) {
 			}
 		}
 	}
+	sbom := filepath.Join(au.scanDir(), name+".cdx.json")
+	raw := filepath.Join(au.scanDir(), name+".grype.json")
+	defer os.Remove(sbom)
+	defer os.Remove(raw)
+	if err := os.WriteFile(sbom, data, 0o600); err != nil {
+		return
+	}
+	rep, err := au.d.Grype.Match(ctx, sbom, raw)
+	if err != nil || !sameMatches(rep, scan) {
+		return
+	}
 	_ = au.cache.put(key, data)
+}
+
+// sameMatches reports whether two reports name the same distribution and hold the same set of
+// matches, each by vulnerability, package, namespace and fix.
+func sameMatches(a, b *grype.Report) bool {
+	if a.Distro != b.Distro || a.DistroVersion != b.DistroVersion {
+		return false
+	}
+	set := func(r *grype.Report) map[string]bool {
+		s := map[string]bool{}
+		for _, m := range r.Matches {
+			v := m.Vulnerability
+			s[strings.Join(append([]string{v.ID, m.Artifact.Name, m.Artifact.Version, m.Artifact.Type, v.Namespace, v.FixState}, v.FixVersions...), "\x00")] = true
+		}
+		return s
+	}
+	return maps.Equal(set(a), set(b))
 }
 
 // cacheKey is an origin's SBOM cache key (spec section 6.2), or "" when it is cataloged every
