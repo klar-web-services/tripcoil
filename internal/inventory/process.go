@@ -184,7 +184,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 			}
 			c.libPaths[m.Path] = true
 		}
-		if p.otherRoot {
+		if p.otherRoot && !m.Deleted { // a replaced file never matches the newer one at its path
 			if id, err := c.src.MapFileID(pid, m); err != nil || !c.isHostFile(m.Path, id) {
 				p.notHost = append(p.notHost, m.Path)
 				continue

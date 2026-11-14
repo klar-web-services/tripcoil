@@ -594,3 +594,25 @@ func TestProcessCollectorReadBudget(t *testing.T) {
 		t.Fatalf("read %d bytes with a budget of 20", n)
 	}
 }
+
+func TestProcessCollectorReplacedLibraryOfChrootedDaemon(t *testing.T) {
+	root := files(t, map[string]string{"usr/sbin/haproxy": "haproxy", "usr/lib/libssl.so.3": "libssl, upgraded"})
+	ssl := procfs.Mapping{Start: "3", End: "4", Path: "/usr/lib/libssl.so.3", Deleted: true}
+	src := fakeSource{
+		// haproxy with "chroot /var/lib/haproxy" still maps the libssl that was replaced on disk.
+		40: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", otherRoot: true, exeID: fileID(t, root, "usr/sbin/haproxy"),
+			maps: []procfs.Mapping{ssl}, mapIDs: map[string]procfs.FileID{ssl.Path: {Dev: 99, Ino: 2}}},
+	}
+	tool := hostTool()
+	tool.owners["/usr/sbin/haproxy"] = pkgtool.Package{Name: "haproxy", Version: "2.6.12-1", Arch: "amd64", Type: "deb"}
+	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := byName(res.items, "haproxy")
+	o := originByID(res.origins, PackageOriginID(debian, tool.owners[ssl.Path]))
+	if !slices.Equal(it.RestartNeeded, []string{ssl.Path}) || !slices.Contains(it.Origins, o.ID) || !o.RunningOlderCopy {
+		t.Fatalf("haproxy %+v, libssl origin %+v", it, o)
+	}
+}
