@@ -54,6 +54,10 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	for _, o := range origins {
 		res := OriginResult{ID: o.ID, Kind: o.Kind, Status: Scanned, Packages: counts[o.ID], Raw: raw}
 		_, _, kernel := au.kernelPackage(o)
+		if kernel && au.kernelErr != nil {
+			au.failOrigin(o, au.kernelErr)
+			continue
+		}
 		if kernel && au.kernelMatched != "" {
 			res.Raw = &Raw{Grype: kernelRaw, SBOM: raw.SBOM}
 		}
@@ -170,16 +174,25 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	// Matching the SBOM does not give what the scan gave, so only the kernel package's matches come
 	// from matching it. The scan's report stays in the run folder, and so does the match's, as the
 	// kernel package's findings' evidence: the scan's holds the package at its installed version.
+	// When the match fails, only the kernel package's origin fails, and the others keep the scan's.
 	path := filepath.Join(au.d.RunDir, kernelRaw)
-	if err := aboveFloor(filepath.Dir(path), 0, errRunFolderFull); err != nil {
-		return nil, nil, err
+	var matched *grype.Report
+	err = aboveFloor(filepath.Dir(path), 0, errRunFolderFull)
+	if err == nil {
+		matched, err = au.match(ctx, running, path)
 	}
-	matched, err := au.match(ctx, running, path)
 	if err == nil {
 		err = run.Share(path, 0o640)
 	}
-	if err != nil {
+	switch {
+	case err != nil && ctx.Err() != nil:
 		return nil, nil, err
+	case err != nil:
+		os.Remove(path)
+		au.kernelErr = fmt.Errorf("matching the kernel package at its running version failed: %w", err)
+		out := *rep
+		out.Matches = slices.DeleteFunc(slices.Clone(rep.Matches), func(m grype.Match) bool { return m.Artifact.Name == kernel })
+		return au.keepPackages(&out, data, raw)
 	}
 	au.kernelMatched = kernel
 	return au.keepPackages(au.withKernel(rep, matched, kernel), running, raw)

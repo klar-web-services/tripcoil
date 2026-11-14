@@ -72,6 +72,61 @@ func TestAuditDebianKernelEvidenceWhenTheSBOMDoesNotVerify(t *testing.T) {
 	}
 }
 
+// When matching the kernel package alone fails, only the kernel's origin fails: the other packages
+// keep the scan's results. So it does when the run folder, where the match's report is kept, is at
+// its floor.
+func TestAuditKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
+	old := cacheSpace
+	defer func() { cacheSpace = old }()
+	for _, tc := range []struct {
+		name  string
+		fail  func(g *fakeScanner, runDir string)
+		error string
+	}{
+		{"match", func(g *fakeScanner, _ string) {
+			g.matchErr = map[string]error{"packages-match.cdx.json": errors.New("Grype failed: boom")}
+		}, "Grype failed: boom"},
+		{"run folder at its floor", func(_ *fakeScanner, runDir string) {
+			first := true // the kernel's report is the first file written to the run folder
+			cacheSpace = func(dir string) (uint64, uint64, error) {
+				if strings.HasPrefix(dir, runDir) && first {
+					first = false
+					return 1000, 10000, nil
+				}
+				return 1 << 40, 1 << 41, nil
+			}
+		}, errRunFolderFull.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheSpace = old
+			root, cache, inv := host(t)
+			g := hostScanner(root, cache)
+			g.matching = func(r *grype.Report) {
+				r.Matches = slices.DeleteFunc(r.Matches, func(m grype.Match) bool { return m.Artifact.Name == "libssl3" })
+			}
+			runDir := t.TempDir()
+			tc.fail(g, runDir)
+			a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
+			f, st := byVuln(a), statuses(a)
+			want := "linux-image-6.1.0-28-amd64 6.1.123-1: matching the kernel package at its running version failed: " + tc.error
+			if a.Status != Partial || len(a.Errors) != 1 || a.Errors[0].Message != want || st[kernelO] != ScanFailed || st[libsslO] != Scanned {
+				t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
+			}
+			if f["CVE-2026-1234"].Origin != libsslO {
+				t.Errorf("findings %+v: libssl3's is the scan's", a.Findings)
+			}
+			for _, id := range []string{"CVE-2026-2000", "CVE-2026-2999"} {
+				if _, ok := f[id]; ok {
+					t.Errorf("a finding of the failed kernel package: %+v", f[id])
+				}
+			}
+			if _, err := os.Stat(filepath.Join(runDir, "raw", rawName(packagesID, ".kernel.grype.json"))); !os.IsNotExist(err) {
+				t.Errorf("the failed match's report is left: %v", err)
+			}
+		})
+	}
+}
+
 // When matching the changed SBOM loses the distribution the scan recognised, the other packages are
 // still the scan's, and the kernel's package, which nothing else matches at its running version, is
 // a coverage gap.

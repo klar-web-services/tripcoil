@@ -84,6 +84,7 @@ type auditor struct {
 
 	kernelGap     string // why the running kernel's package is unidentified, when withKernel says so
 	kernelMatched string // the running kernel's package, when its matches are kernelRaw's (see scanPackages)
+	kernelErr     error  // why matching the running kernel's package alone failed (see scanPackages)
 
 	mounts     []string // the mount points, read at the first app directory (see mountBelow)
 	mountsErr  error
