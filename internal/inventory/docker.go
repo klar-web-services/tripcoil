@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"slices"
@@ -24,17 +23,6 @@ type DockerAPI interface {
 	InspectImage(ctx context.Context, id string) (dockerapi.Image, error)
 }
 
-// dockerSocket picks the socket from DOCKER_HOST, or the default.
-func dockerSocket(dockerHost string) (string, error) {
-	if dockerHost == "" {
-		return "/var/run/docker.sock", nil
-	}
-	if p, ok := strings.CutPrefix(dockerHost, "unix://"); ok {
-		return p, nil
-	}
-	return "", fmt.Errorf("DOCKER_HOST=%s is not a unix socket; Tripcoil only reads the local Docker daemon through its unix socket", dockerHost)
-}
-
 // collectDocker inventories the running containers. Without a running dockerd it never connects:
 // with docker.socket active, a connection would start dockerd and every container with a restart
 // policy.
@@ -48,7 +36,7 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 		}
 		return nil, nil, []problem.Problem{problem.New(problem.Notice, problem.DockerAbsent, "inventory", "no Docker daemon is running, so there are no containers to inventory")}
 	}
-	socket, err := dockerSocket(dockerHost)
+	socket, err := dockerapi.Socket(dockerHost)
 	if err != nil {
 		return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory", "%v", err)}
 	}

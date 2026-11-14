@@ -223,13 +223,9 @@ func auditHost(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir s
 // when DOCKER_HOST is not a unix socket: the Inventory then reads no containers, so there are no
 // images to scan.
 func dockerImages(dockerHost string) audit.Images {
-	socket := "/var/run/docker.sock"
-	if dockerHost != "" {
-		p, ok := strings.CutPrefix(dockerHost, "unix://")
-		if !ok {
-			return nil
-		}
-		socket = p
+	socket, err := dockerapi.Socket(dockerHost)
+	if err != nil {
+		return nil
 	}
 	return dockerapi.New(socket)
 }

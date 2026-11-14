@@ -17,6 +17,17 @@ import (
 // ErrNotFound is what a request for a container or image that no longer exists returns.
 var ErrNotFound = errors.New("not found")
 
+// Socket picks the socket from DOCKER_HOST, or the default.
+func Socket(dockerHost string) (string, error) {
+	if dockerHost == "" {
+		return "/var/run/docker.sock", nil
+	}
+	if p, ok := strings.CutPrefix(dockerHost, "unix://"); ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("DOCKER_HOST=%s is not a unix socket; Tripcoil only reads the local Docker daemon through its unix socket", dockerHost)
+}
+
 // Client talks to the Docker daemon over its unix socket.
 type Client struct{ hc *http.Client }
 

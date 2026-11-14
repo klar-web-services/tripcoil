@@ -13,6 +13,18 @@ import (
 	"time"
 )
 
+func TestSocket(t *testing.T) {
+	for host, want := range map[string]string{"": "/var/run/docker.sock", "unix:///run/user/1000/docker.sock": "/run/user/1000/docker.sock"} {
+		if got, err := Socket(host); got != want || err != nil {
+			t.Errorf("DOCKER_HOST=%q: %q %v", host, got, err)
+		}
+	}
+	if got, err := Socket("tcp://10.0.0.5:2375"); got != "" || err == nil ||
+		err.Error() != "DOCKER_HOST=tcp://10.0.0.5:2375 is not a unix socket; Tripcoil only reads the local Docker daemon through its unix socket" {
+		t.Errorf("tcp: %q %v", got, err)
+	}
+}
+
 func TestNoConnectionLeftOpen(t *testing.T) {
 	dir, err := os.MkdirTemp("", "tc-docker") // short path: unix socket paths are limited to 108 bytes
 	if err != nil {
