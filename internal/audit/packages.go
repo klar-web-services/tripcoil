@@ -19,12 +19,18 @@ import (
 // packagesID names the one scan of the package database, for its raw files and messages.
 const packagesID = "packages"
 
+// kernelRaw names the report of matching the package SBOM in which the running kernel's package was
+// changed, in the run folder, when the kernel package's findings come from it alone (see
+// scanPackages).
+var kernelRaw = "raw/" + rawName(packagesID, ".kernel.grype.json")
+
 // packages scans the package database once and keeps the matches of packages that are origins.
 func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	raw := rawFiles(packagesID)
 	rep, comps, err := au.scanPackages(ctx, raw)
 	if err != nil {
 		au.removeRaw(raw)
+		os.Remove(filepath.Join(au.d.RunDir, kernelRaw))
 		au.failPackages(ctx, origins, err)
 		return
 	}
@@ -48,6 +54,9 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	for _, o := range origins {
 		res := OriginResult{ID: o.ID, Kind: o.Kind, Status: Scanned, Packages: counts[o.ID], Raw: raw}
 		_, _, kernel := au.kernelPackage(o)
+		if kernel && au.kernelMatched != "" {
+			res.Raw = &Raw{Grype: kernelRaw, SBOM: raw.SBOM}
+		}
 		switch {
 		case rep.Distro == "":
 			// Without a distribution, no distribution data applies, and no match would come.
@@ -68,9 +77,20 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 		}
 		au.a.Origins = append(au.a.Origins, res)
 	}
-	au.addFindings(rep.Matches, raw.Grype, func(m grype.Match) (string, bool) {
-		return owner(m.Artifact.Name, m.Artifact.Version, m.Artifact.PURL)
-	})
+	scanned, matched := rep.Matches, []grype.Match(nil)
+	if au.kernelMatched != "" {
+		scanned = nil
+		for _, m := range rep.Matches {
+			if m.Artifact.Name == au.kernelMatched {
+				matched = append(matched, m)
+			} else {
+				scanned = append(scanned, m)
+			}
+		}
+	}
+	owns := func(m grype.Match) (string, bool) { return owner(m.Artifact.Name, m.Artifact.Version, m.Artifact.PURL) }
+	au.addFindings(scanned, raw.Grype, owns)
+	au.addFindings(matched, kernelRaw, owns)
 }
 
 // packageChanged says how a package origin changed since the Inventory when the package database
@@ -147,11 +167,20 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 		return au.matchPackages(ctx, running, raw)
 	}
 	// Matching the SBOM does not give what the scan gave, so only the kernel package's matches come
-	// from matching it, and the scan's report stays in the run folder.
-	matched, err := au.match(ctx, running, filepath.Join(au.scanDir(), "packages-match.grype.json"))
+	// from matching it. The scan's report stays in the run folder, and so does the match's, as the
+	// kernel package's findings' evidence: the scan's holds the package at its installed version.
+	path := filepath.Join(au.d.RunDir, kernelRaw)
+	if err := aboveFloor(filepath.Dir(path), 0, errRunFolderFull); err != nil {
+		return nil, nil, err
+	}
+	matched, err := au.match(ctx, running, path)
+	if err == nil {
+		err = run.Share(path, 0o640)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
+	au.kernelMatched = kernel
 	return au.keepPackages(au.withKernel(rep, matched, kernel), running, raw)
 }
 

@@ -41,6 +41,36 @@ func TestAuditDebianSBOMThatDoesNotVerify(t *testing.T) {
 	}
 }
 
+// The kernel package's findings and origin then name the report of matching the changed SBOM, kept
+// in the run folder as the others: the scan's report holds the package at its installed version.
+func TestAuditDebianKernelEvidenceWhenTheSBOMDoesNotVerify(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.matching = func(r *grype.Report) {
+		r.Matches = slices.DeleteFunc(r.Matches, func(m grype.Match) bool { return m.Artifact.Name == "libssl3" })
+	}
+	runDir := t.TempDir()
+	a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
+	f, scanned, matched := byVuln(a), "raw/"+rawName(packagesID, ".grype.json"), "raw/"+rawName(packagesID, ".kernel.grype.json")
+	if f["CVE-2026-2000"].Raw != matched || f["CVE-2026-1234"].Raw != scanned {
+		t.Fatalf("the kernel's finding names %q, libssl3's %q", f["CVE-2026-2000"].Raw, f["CVE-2026-1234"].Raw)
+	}
+	for _, o := range a.Origins {
+		if want := map[string]string{kernelO: matched, libsslO: scanned}[o.ID]; want != "" && (o.Raw == nil || o.Raw.Grype != want) {
+			t.Errorf("origin %s names %+v, want %s", o.ID, o.Raw, want)
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(runDir, matched)); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Fatalf("the kernel's report in the run folder: %v %v", fi, err)
+	}
+	// When the SBOM verifies, every finding is of the one report that matched it.
+	root, cache, inv = host(t)
+	a = Run(context.Background(), deps(root, cache, t.TempDir(), hostScanner(root, cache), fakeKernel{}), inv)
+	if k := byVuln(a)["CVE-2026-2000"]; k.Raw != scanned {
+		t.Errorf("verified: the kernel's finding names %q", k.Raw)
+	}
+}
+
 // When matching the changed SBOM loses the distribution the scan recognised, the other packages are
 // still the scan's, and the kernel's package, which nothing else matches at its running version, is
 // a coverage gap.
