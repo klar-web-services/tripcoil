@@ -139,8 +139,9 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 // package database: only that distribution's vulnerability data matches those.
 type counts struct{ packages, os int }
 
-// osPackageTypes are Syft's types of the packages in a distribution's package database.
-var osPackageTypes = []string{"deb", "rpm", "apk", "alpm"}
+// osPackageTypes are Syft's types of the packages it reads from a distribution's package database:
+// dpkg's, RPM's, apk's, pacman's, Gentoo's portage and the Nix store, as Syft 1.57 names them.
+var osPackageTypes = []string{"deb", "rpm", "apk", "alpm", "portage", "nix"}
 
 func countPackages(data []byte) (counts, error) {
 	pkgs, err := grype.SBOMPackages(data)

@@ -544,6 +544,21 @@ func TestAuditUnknownDistribution(t *testing.T) {
 	}
 }
 
+// Syft 1.57 reads Gentoo's packages as type portage and the Nix store's as type nix.
+func TestAuditUnknownDistributionGentooAndNix(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.distro = ""
+	g.sboms["docker:sha256:1111"] = []grype.Component{
+		{Name: "dev-libs/openssl", Version: "3.0.0", PURL: "pkg:ebuild/dev-libs%2Fopenssl@3.0.0"},
+		{Name: "zlib", Version: "1.2.11", PURL: "pkg:nix/zlib@1.2.11?outputhash=0c9qkzwg8a6d7k2a1rv4n8slf6drrhdm"},
+	}
+	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if o := a.Origins[slices.IndexFunc(a.Origins, func(o OriginResult) bool { return o.ID == imageO })]; o.Status != Unidentified || !strings.Contains(o.Reason, "its 2 operating system packages") {
+		t.Errorf("image %+v: a scan without a distribution is a gap, never clean", o)
+	}
+}
+
 func TestAuditHealsBrokenCacheEntries(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
