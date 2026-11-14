@@ -38,18 +38,29 @@ func TestIsInterpreter(t *testing.T) {
 func TestFindAppDir(t *testing.T) {
 	root := tree(t,
 		"srv/shop/package.json", "srv/shop/server.js", "srv/shop/node_modules/next/package.json", "srv/shop/node_modules/next/dist/bin/next",
-		"srv/api/.venv/pyvenv.cfg", "srv/api/.venv/bin/gunicorn", "srv/api/requirements.txt",
+		"srv/api/.venv/pyvenv.cfg", "srv/api/.venv/bin/gunicorn", "srv/api/.venv/bin/python3", "srv/api/requirements.txt",
 		"srv/app.jar",
 		"usr/lib/node_modules/pm2/package.json", "usr/lib/node_modules/pm2/lib/ProcessContainerFork.js",
 		"usr/lib/node_modules/node-red/package.json", "usr/lib/node_modules/node-red/red.js",
 		"usr/share/nodejs/yarn/package.json", "usr/share/nodejs/yarn/bin/yarn.js",
 		"srv/plain/main.py",
+		"home/n8n/.nvm/package.json", "home/n8n/.nvm/versions/node/v20.11.0/bin/node",
+		"home/n8n/.nvm/versions/node/v20.11.0/lib/node_modules/n8n/package.json", "home/n8n/.nvm/versions/node/v20.11.0/lib/node_modules/n8n/bin/n8n",
+		"home/n8n/bot/index.js",
+		"home/deploy/package.json", "home/deploy/.npm-global/lib/node_modules/node-red/package.json", "home/deploy/.npm-global/lib/node_modules/node-red/red.js",
 	)
-	if err := os.MkdirAll(filepath.Join(root, "usr/bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("../lib/node_modules/node-red/red.js", filepath.Join(root, "usr/bin/node-red")); err != nil {
-		t.Fatal(err)
+	const nvm = "/home/n8n/.nvm/versions/node/v20.11.0"
+	for link, target := range map[string]string{
+		"usr/bin/node-red":                     "../lib/node_modules/node-red/red.js",
+		nvm[1:] + "/bin/n8n":                   "../lib/node_modules/n8n/bin/n8n",
+		"home/deploy/.npm-global/bin/node-red": "../lib/node_modules/node-red/red.js",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, link)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	owned := func(_ context.Context, path string) bool { return path == "/usr/share/nodejs/yarn/package.json" }
 	f := appDirFinder{root: root, owned: owned}
@@ -64,9 +75,13 @@ func TestFindAppDir(t *testing.T) {
 		{"flags before script", []string{"node", "--max-old-space-size=512", "-r", "dotenv/config", "/srv/shop/server.js"}, "/", appDir{Path: "/srv/shop"}, true},
 		{"script inside node_modules", []string{"node", "/srv/shop/node_modules/next/dist/bin/next", "start"}, "/", appDir{Path: "/srv/shop"}, true},
 		{"venv", []string{"/srv/api/.venv/bin/python3", "/srv/api/.venv/bin/gunicorn", "app:app"}, "/", appDir{Path: "/srv/api/.venv"}, true},
+		{"venv python", []string{"/srv/api/.venv/bin/python3", "-m", "uvicorn", "main:app"}, "/", appDir{Path: "/srv/api/.venv"}, true},
 		{"jar", []string{"java", "-Xmx1g", "-jar", "/srv/app.jar"}, "/", appDir{Path: "/srv/app.jar", Jar: true}, true},
 		{"pm2 falls back to cwd", []string{"node", "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
 		{"global npm package through a symlink", []string{"node", "/usr/bin/node-red"}, "/", appDir{Path: "/usr/lib/node_modules/node-red"}, true},
+		{"global package under nvm", []string{nvm + "/bin/node", nvm + "/bin/n8n"}, "/home/n8n", appDir{Path: nvm + "/lib/node_modules/n8n"}, true},
+		{"global package in a home npm prefix", []string{"node", "/home/deploy/.npm-global/bin/node-red"}, "/home/deploy", appDir{Path: "/home/deploy/.npm-global/lib/node_modules/node-red"}, true},
+		{"runtime's bin is not a start point", []string{nvm + "/bin/node", "/home/n8n/bot/index.js"}, "/home/n8n/bot", appDir{}, false},
 		{"distribution-packaged module is not an app", []string{"node", "/usr/share/nodejs/yarn/bin/yarn.js"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
 		{"python -m uses cwd", []string{"python3", "-m", "http.server"}, "/srv/shop", appDir{Path: "/srv/shop"}, true},
 		{"no marker", []string{"python3", "main.py"}, "/srv/plain", appDir{}, false},

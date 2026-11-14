@@ -60,8 +60,13 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 			break
 		}
 	}
+	// A runtime's bin/ is a start point only as a venv's: walking up from it would climb into a
+	// version manager's checkout (~/.nvm has a package.json) or the home directory.
 	if len(cmdline) > 0 && strings.Contains(cmdline[0], "/") && f.isFile(abs(cmdline[0])) {
-		starts = append(starts, filepath.Dir(abs(cmdline[0]))) // not resolved: a venv's bin/python links to the system python
+		venv := filepath.Dir(filepath.Dir(abs(cmdline[0]))) // not resolved: a venv's bin/python links to the system python
+		if _, err := os.Stat(filepath.Join(f.root, venv, "pyvenv.cfg")); err == nil {
+			starts = append(starts, venv)
+		}
 	}
 	if cwd != "" {
 		starts = append(starts, cwd)
@@ -80,10 +85,12 @@ func (f appDirFinder) walk(ctx context.Context, start string) (string, bool) {
 	if !inside {
 		return f.walkUp(ctx, start)
 	}
-	if dir, ok := f.walkUp(ctx, outer); ok {
-		return dir, true
+	// Only the directory holding node_modules: npm puts node_modules next to the project's manifest,
+	// and above it may be a home directory or a version manager's checkout (~/.nvm/versions/...).
+	if m := f.marker(outer); outer != "" && m != "" && !f.owned(ctx, outer+"/"+m) {
+		return outer, true
 	}
-	// Nothing above node_modules is a project: a globally installed npm package (npm -g).
+	// The directory holding node_modules is not a project: a globally installed npm package (npm -g).
 	if pkgDir != "" {
 		if m := f.marker(pkgDir); m != "" && !f.owned(ctx, pkgDir+"/"+m) {
 			return pkgDir, true
