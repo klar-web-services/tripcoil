@@ -35,8 +35,9 @@ func (r rpm) Owners(ctx context.Context, paths []string) (map[string]Package, er
 			return nil, fmt.Errorf("cannot run rpm: %w", err)
 		}
 		if res.ExitCode != 0 {
-			if !rpmUnowned(p, res) {
-				return nil, fmt.Errorf("rpm -qf %s failed (exit %d): %s", p, res.ExitCode, firstLine(res.Stderr))
+			errs := rpmErrors(res.Stderr)
+			if !rpmUnowned(p, res.Stdout, errs) {
+				return nil, fmt.Errorf("rpm -qf %s failed (exit %d): %s", p, res.ExitCode, strings.Join(errs, "; "))
 			}
 			continue
 		}
@@ -47,17 +48,27 @@ func (r rpm) Owners(ctx context.Context, paths []string) (map[string]Package, er
 	return out, nil
 }
 
+// rpmErrors returns rpm's stderr lines without its warnings, which some hosts print on every call
+// (such as for a Berkeley DB database under an rpm that expects sqlite).
+func rpmErrors(stderr []byte) []string {
+	var out []string
+	for _, l := range lines(stderr) {
+		if !strings.HasPrefix(l, "warning: ") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 // rpmUnowned reports whether a failed rpm -qf said only that p is not owned or does not exist.
-func rpmUnowned(p string, res Result) bool {
-	missing := false
-	for _, l := range lines(res.Stderr) {
+func rpmUnowned(p string, stdout []byte, errs []string) bool {
+	for _, l := range errs {
 		if l != "error: file "+p+": No such file or directory" {
 			return false
 		}
-		missing = true
 	}
-	stdout := lines(res.Stdout)
-	return len(stdout) == 1 && stdout[0] == "file "+p+" is not owned by any package" || len(stdout) == 0 && missing
+	out := lines(stdout)
+	return len(out) == 1 && out[0] == "file "+p+" is not owned by any package" || len(out) == 0 && len(errs) > 0
 }
 
 func parseRPM(b []byte) []Package {
@@ -82,10 +93,11 @@ func (r rpm) Installed(ctx context.Context, name string) ([]Package, error) {
 		return nil, fmt.Errorf("cannot run rpm: %w", err)
 	}
 	if res.ExitCode != 0 {
-		if ls := lines(res.Stdout); len(ls) == 1 && ls[0] == "package "+name+" is not installed" && len(lines(res.Stderr)) == 0 {
+		errs := rpmErrors(res.Stderr)
+		if ls := lines(res.Stdout); len(ls) == 1 && ls[0] == "package "+name+" is not installed" && len(errs) == 0 {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("rpm -q %s failed (exit %d): %s", name, res.ExitCode, firstLine(res.Stderr))
+		return nil, fmt.Errorf("rpm -q %s failed (exit %d): %s", name, res.ExitCode, strings.Join(errs, "; "))
 	}
 	return parseRPM(res.Stdout), nil
 }

@@ -12,8 +12,9 @@ import (
 var (
 	pacmanOwned   = regexp.MustCompile(`^(/.+) is owned by (\S+) (\S+)$`)
 	pacmanUnowned = regexp.MustCompile(`^error: (No package owns /.*|failed to read file '/.*': No such file or directory)$`)
-	// Printed on every run where the sync databases were never downloaded.
-	pacmanNoSyncDB = regexp.MustCompile(`^warning: database file for '[^']+' does not exist \(use '[^']+' to download\)$`)
+	// Some hosts print a warning on every call, such as for missing sync databases or a stale
+	// pacman.conf directive.
+	pacmanWarning = regexp.MustCompile(`^warning: `)
 )
 
 type pacman struct {
@@ -44,7 +45,7 @@ func (p pacman) Owners(ctx context.Context, paths []string) (map[string]Package,
 			return nil, fmt.Errorf("cannot run pacman: %w", err)
 		}
 		if res.ExitCode != 0 {
-			if ok, line := onlyUnowned(res.Stderr, pacmanUnowned, pacmanNoSyncDB); !ok {
+			if ok, line := onlyUnowned(res.Stderr, pacmanUnowned, pacmanWarning); !ok {
 				return nil, fmt.Errorf("pacman -Qo failed (exit %d): %s", res.ExitCode, line)
 			}
 		}

@@ -313,6 +313,38 @@ func TestToolFailures(t *testing.T) {
 	}
 }
 
+func TestWarningsAreHarmless(t *testing.T) {
+	bdbRO := "warning: Found bdb_ro Packages database while attempting sqlite backend: using bdb_ro backend.\n"
+	for _, tc := range []struct {
+		name, typ, cmd string
+		res            Result
+		installed      string // when set, Installed(installed) is called instead of Owners
+	}{
+		{"pacman", "alpm", "pacman -Qo /opt/x", Result{Stderr: []byte("warning: config file /etc/pacman.conf, line 36: " +
+			"directive 'TotalDownload' in section 'options' not recognized.\nerror: No package owns /opt/x\n"), ExitCode: 1}, ""},
+		{"rpm -qf", "rpm", "rpm -qf --qf " + rpmFormat + " /opt/x",
+			Result{Stdout: []byte("file /opt/x is not owned by any package\n"), Stderr: []byte(bdbRO), ExitCode: 1}, ""},
+		{"rpm -q", "rpm", "rpm -q --qf " + rpmFormat + " kernel-rt",
+			Result{Stdout: []byte("package kernel-rt is not installed\n"), Stderr: []byte(bdbRO), ExitCode: 1}, "kernel-rt"},
+		{"apk", "apk", "apk info --who-owns /opt/x", Result{Stderr: []byte("WARNING: opening from cache " +
+			"https://dl-cdn.alpinelinux.org/alpine/v3.21/main: No such file or directory\nERROR: /opt/x: Could not find owner package\n"), ExitCode: 1}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeRunner{t: t, resp: map[string]Result{tc.cmd: tc.res}}
+			tool := New(tc.typ, f.run)
+			if tc.installed != "" {
+				if pkgs, err := tool.Installed(ctx, tc.installed); err != nil || len(pkgs) != 0 {
+					t.Fatalf("%+v %v", pkgs, err)
+				}
+				return
+			}
+			if got, err := tool.Owners(ctx, []string{"/opt/x"}); err != nil || len(got) != 0 {
+				t.Fatalf("%+v %v", got, err)
+			}
+		})
+	}
+}
+
 func TestMissingFileIsUnowned(t *testing.T) {
 	for _, tc := range []struct {
 		typ, path, cmd string
