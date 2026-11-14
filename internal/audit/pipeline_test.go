@@ -127,6 +127,44 @@ func TestAuditKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
 	}
 }
 
+// So it does when the SBOM verifies, as long as the scan's report is in hand: the scan's report
+// stays in the run folder as the others' evidence. Matched from the cache, with no scan, every
+// package origin fails.
+func TestAuditVerifiedKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	g.matchErr = map[string]error{"packages-match.cdx.json": errors.New("Grype failed: boom")}
+	runDir := t.TempDir()
+	a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
+	f, st := byVuln(a), statuses(a)
+	if a.Status != Partial || len(a.Errors) != 1 || st[kernelO] != ScanFailed || st[libsslO] != Scanned ||
+		a.Errors[0].Message != "linux-image-6.1.0-28-amd64 6.1.123-1: matching the kernel package at its running version failed: Grype failed: boom" {
+		t.Fatalf("audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
+	}
+	scanned := "raw/" + rawName(packagesID, ".grype.json")
+	if s := f["CVE-2026-1234"]; s.Origin != libsslO || s.Raw != scanned {
+		t.Errorf("libssl3's finding %+v: it is the scan's", s)
+	}
+	for _, id := range []string{"CVE-2026-2000", "CVE-2026-2999"} {
+		if _, ok := f[id]; ok {
+			t.Errorf("a finding of the failed kernel package: %+v", f[id])
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(runDir, scanned)); err != nil || fi.Size() == 0 {
+		t.Errorf("the scan's report in the run folder: %v %v", fi, err)
+	}
+	if _, err := os.Stat(filepath.Join(runDir, "raw", rawName(packagesID, ".kernel.grype.json"))); !os.IsNotExist(err) {
+		t.Errorf("the failed match's report is left: %v", err)
+	}
+	if !slices.Contains(cachedKinds(cache), "packages") {
+		t.Fatalf("cached %v", cachedKinds(cache))
+	}
+	a = Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
+	if st := statuses(a); st[kernelO] != ScanFailed || st[libsslO] != ScanFailed {
+		t.Fatalf("matched from the cache: audit %s, errors %+v, statuses %v", a.Status, a.Errors, st)
+	}
+}
+
 // When matching the changed SBOM loses the distribution the scan recognised, the other packages are
 // still the scan's, and the kernel's package, which nothing else matches at its running version, is
 // a coverage gap.

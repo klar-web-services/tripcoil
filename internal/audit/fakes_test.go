@@ -148,6 +148,7 @@ func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Repor
 		return nil, err
 	}
 	if err := f.matchErr[filepath.Base(sbom)]; err != nil {
+		os.WriteFile(raw, nil, 0o600) // Grype empties its output files when it fails
 		return nil, err
 	}
 	data, err := os.ReadFile(sbom)
