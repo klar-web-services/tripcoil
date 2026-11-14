@@ -197,3 +197,23 @@ func TestStartTimeLongUptime(t *testing.T) {
 		t.Fatalf("%v %v, want %v", got, err, want)
 	}
 }
+
+func TestOpenMapFileUnpadded(t *testing.T) {
+	f, root := fixture(t)
+	mf := filepath.Join(root, "proc/42/map_files")
+	if err := os.MkdirAll(mf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mf, "400000-74d000"), []byte("low mapping"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.OpenMapFile(42, Mapping{Start: "00400000", End: "0074d000", Path: "/usr/sbin/nginx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	b, _ := io.ReadAll(r)
+	if string(b) != "low mapping" {
+		t.Fatalf("%q", b)
+	}
+}

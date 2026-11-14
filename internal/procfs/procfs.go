@@ -23,7 +23,7 @@ type FS struct{ Root string }
 
 // Mapping is one file mapped into a process, deduplicated by path.
 type Mapping struct {
-	Start, End string // hex addresses as in /proc/<pid>/maps; together they name the map_files entry
+	Start, End string // hex addresses as in /proc/<pid>/maps; without their zero padding they name the map_files entry
 	Path       string
 	Deleted    bool // the file was replaced or removed after it was mapped
 }
@@ -222,5 +222,12 @@ func (f FS) OpenExe(pid int) (io.ReadCloser, error) {
 
 // OpenMapFile opens a mapped file through /proc/<pid>/map_files, even when it was replaced.
 func (f FS) OpenMapFile(pid int, m Mapping) (io.ReadCloser, error) {
-	return os.Open(filepath.Join(f.proc(pid, "map_files"), m.Start+"-"+m.End))
+	return os.Open(filepath.Join(f.proc(pid, "map_files"), unpadded(m.Start)+"-"+unpadded(m.End)))
+}
+
+func unpadded(hex string) string {
+	if s := strings.TrimLeft(hex, "0"); s != "" {
+		return s
+	}
+	return "0"
 }
