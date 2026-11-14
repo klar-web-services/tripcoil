@@ -2,6 +2,9 @@ package grype
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -77,6 +80,71 @@ func TestStripSBOM(t *testing.T) {
 	}
 }
 
+// Pop!_OS's purls name the distribution pop-22.04, which Grype does not know: matching the SBOM
+// with them finds nothing, while the scan matches Ubuntu 22.04's data.
+func TestStripSBOMDropsDistro(t *testing.T) {
+	data := load(t, "pop22-staging.cdx.json")
+	stripped, err := StripSBOM(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type sbom struct {
+		Components   []map[string]any `json:"components"`
+		Dependencies []struct {
+			Ref       string   `json:"ref"`
+			DependsOn []string `json:"dependsOn"`
+		} `json:"dependencies"`
+	}
+	var before, after sbom
+	json.Unmarshal(data, &before)
+	json.Unmarshal(stripped, &after)
+	before.Components = slices.DeleteFunc(before.Components, func(c map[string]any) bool { return c["type"] == "file" })
+	if len(after.Components) != 5 || len(after.Components) != len(before.Components) {
+		t.Fatalf("%d components from %d", len(after.Components), len(before.Components))
+	}
+	refs := map[string]bool{}
+	for i, c := range after.Components {
+		want := before.Components[i]
+		for _, k := range []string{"purl", "bom-ref"} {
+			if s, ok := want[k].(string); ok {
+				want[k] = strings.Replace(s, "&distro=pop-22.04", "", 1)
+			}
+		}
+		if !reflect.DeepEqual(c, want) {
+			t.Errorf("got %v, want %v", c, want)
+		}
+		refs[c["bom-ref"].(string)] = true
+	}
+	if p := after.Components[3]["purl"]; p != "pkg:deb/pop/passwd@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=amd64&upstream=shadow" {
+		t.Errorf("passwd %v", p)
+	}
+	if len(after.Dependencies) != 3 {
+		t.Fatalf("%d dependencies", len(after.Dependencies))
+	}
+	for _, d := range after.Dependencies {
+		for _, r := range append([]string{d.Ref}, d.DependsOn...) {
+			if !refs[r] {
+				t.Errorf("dependency on %s, which is no component", r)
+			}
+		}
+	}
+}
+
+func TestWithoutDistro(t *testing.T) {
+	for in, want := range map[string]string{
+		"pkg:apk/alpine/musl@1.2.5-r9?arch=x86_64&distro=alpine-3.21.3&upstream=musl": "pkg:apk/alpine/musl@1.2.5-r9?arch=x86_64&upstream=musl",
+		"pkg:deb/debian/tzdata@2026a?distro=debian-12":                                "pkg:deb/debian/tzdata@2026a",
+		"pkg:rpm/rocky/bash@5.1?distro=rocky-9.3&arch=x86_64#sub":                     "pkg:rpm/rocky/bash@5.1?arch=x86_64#sub",
+		"pkg:npm/lodash@4.17.21":                                                      "pkg:npm/lodash@4.17.21",
+		"os:pop@22.04":                                                                "os:pop@22.04",
+		"e3b0c44298fc1c14?distro=x":                                                   "e3b0c44298fc1c14?distro=x",
+	} {
+		if got := withoutDistro(in); got != want {
+			t.Errorf("withoutDistro(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSetKernel(t *testing.T) {
 	data := load(t, "debian-kernel.cdx.json")
 	out, n, err := SetKernel(data, "linux-image-6.1.0-54-amd64", "6.1.190-1", "6.1.76-1", "linux")
@@ -117,5 +185,23 @@ func TestSetKernel(t *testing.T) {
 	}
 	if _, n, _ := SetKernel(data, "linux-image-6.1.0-54-amd64", "6.1.189-1", "6.1.76-1", "linux"); n != 0 {
 		t.Fatal("another version was changed")
+	}
+	// A package without a source property gets one, and a source version, once.
+	for _, props := range []string{`[{"name":"syft:package:type","value":"deb"}]`,
+		`[{"name":"syft:metadata:sourceVersion","value":"6.1.190+1"}]`} {
+		in := `{"bomFormat":"CycloneDX","components":[{"type":"library","name":"linux-image-6.1.0-54-amd64","version":"6.1.190-1","properties":` + props + `}]}`
+		out, n, err := SetKernel([]byte(in), "linux-image-6.1.0-54-amd64", "6.1.190-1", "6.1.76-1", "linux")
+		if err != nil || n != 1 {
+			t.Fatalf("%d changed: %v", n, err)
+		}
+		json.Unmarshal(out, &got)
+		count := map[prop]int{}
+		for _, p := range got.Components[0].Properties {
+			count[p]++
+		}
+		if count[prop{"syft:metadata:source", "linux"}] != 1 || count[prop{"syft:metadata:sourceVersion", "6.1.76-1"}] != 1 ||
+			len(got.Components[0].Properties) != len(count) {
+			t.Errorf("%s: %v", props, got.Components[0].Properties)
+		}
 	}
 }

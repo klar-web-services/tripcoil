@@ -11,6 +11,10 @@ was written. Local paths were replaced with `/var/lib/tripcoil/cache/...`; nothi
   debian_version and dpkg status.
 - `rocky9-packages.cdx.json`: Rocky Linux 9's staging-root SBOM, cut to three packages, one with
   an epoch.
+- `pop22-staging.cdx.json`: Pop!_OS 22.04's staging-root SBOM, cut to four packages (adduser,
+  bash, libc6, passwd), the operating system and the dpkg status file, with the dependencies
+  among them and without its vulnerabilities. Its purls carry `distro=pop-22.04`, which Grype
+  does not know: matching the whole SBOM unchanged found none of the 71 matches its scan found.
 - `go-binary.cdx.json`: a Go binary linking golang.org/x/text v0.3.5.
 - `stripped-c-binary.cdx.json`: a stripped C binary, in which Grype finds nothing.
 - `debian-kernel.cdx.json`: Debian 12's `linux-image-6.1.0-54-amd64` 6.1.190-1 as Grype catalogs

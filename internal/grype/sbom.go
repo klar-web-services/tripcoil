@@ -14,14 +14,20 @@ type Component struct {
 	Name, Version, PURL string
 }
 
+type cdxComponent struct {
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	PURL       string `json:"purl"`
+	Properties []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"properties"`
+}
+
 type cdxDocument struct {
-	BOMFormat  string `json:"bomFormat"`
-	Components []struct {
-		Type    string `json:"type"`
-		Name    string `json:"name"`
-		Version string `json:"version"`
-		PURL    string `json:"purl"`
-	} `json:"components"`
+	BOMFormat  string         `json:"bomFormat"`
+	Components []cdxComponent `json:"components"`
 }
 
 func parseSBOM(data []byte) (cdxDocument, error) {
@@ -35,48 +41,47 @@ func parseSBOM(data []byte) (cdxDocument, error) {
 	return doc, nil
 }
 
-// SBOMPackages lists the packages in an SBOM: its components that are neither files nor the
+// sbomPackages returns the packages in an SBOM: its components that are neither files nor the
 // operating system.
-func SBOMPackages(data []byte) ([]Component, error) {
+func sbomPackages(data []byte) ([]cdxComponent, error) {
 	doc, err := parseSBOM(data)
 	if err != nil {
 		return nil, err
 	}
-	var out []Component
+	var out []cdxComponent
 	for _, c := range doc.Components {
 		if c.Type != "file" && c.Type != "operating-system" {
-			out = append(out, Component{Name: c.Name, Version: c.Version, PURL: c.PURL})
+			out = append(out, c)
 		}
+	}
+	return out, nil
+}
+
+// SBOMPackages lists the packages in an SBOM: its components that are neither files nor the
+// operating system.
+func SBOMPackages(data []byte) ([]Component, error) {
+	pkgs, err := sbomPackages(data)
+	if err != nil {
+		return nil, err
+	}
+	var out []Component
+	for _, c := range pkgs {
+		out = append(out, Component{Name: c.Name, Version: c.Version, PURL: c.PURL})
 	}
 	return out, nil
 }
 
 var locationProperty = regexp.MustCompile(`^syft:location:[0-9]+:path$`)
 
-// SBOMLocations lists, for each package of an SBOM, the files it was read from, as paths below
-// the scanned directory with a leading slash, such as "/package-lock.json".
+// SBOMLocations lists, for each package of SBOMPackages in the same order, the files it was read
+// from, as paths below the scanned directory with a leading slash, such as "/package-lock.json".
 func SBOMLocations(data []byte) ([][]string, error) {
-	var doc struct {
-		BOMFormat  string `json:"bomFormat"`
-		Components []struct {
-			Type       string `json:"type"`
-			Properties []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"properties"`
-		} `json:"components"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("unparseable SBOM from Grype: %w", err)
-	}
-	if doc.BOMFormat != "CycloneDX" {
-		return nil, errors.New("unparseable SBOM from Grype: not a CycloneDX document")
+	pkgs, err := sbomPackages(data)
+	if err != nil {
+		return nil, err
 	}
 	var out [][]string
-	for _, c := range doc.Components {
-		if c.Type == "file" || c.Type == "operating-system" {
-			continue
-		}
+	for _, c := range pkgs {
 		var locs []string
 		for _, p := range c.Properties {
 			if locationProperty.MatchString(p.Name) && !slices.Contains(locs, p.Value) {
@@ -88,17 +93,11 @@ func SBOMLocations(data []byte) ([][]string, error) {
 	return out, nil
 }
 
-// SBOMComponents counts the packages in an SBOM.
-func SBOMComponents(data []byte) (int, error) {
-	pkgs, err := SBOMPackages(data)
-	return len(pkgs), err
-}
-
 // Matchable reports whether matching an SBOM gives the same matches as scanning what it came
 // from, so that the SBOM can be cached. It does not when the SBOM holds Go modules: Grype keeps
 // only the Go matches whose code is linked into a binary, which it sees in the binary but not in
-// an SBOM. Nor when its operating system has no version, as on Arch Linux and its derivatives:
-// Grype then loses the distribution and matches none of its packages.
+// an SBOM. An SBOM whose operating system has no version is not cached either: matching it may
+// lose the distribution of a derivative, as it did for CachyOS.
 func Matchable(data []byte) (bool, error) {
 	doc, err := parseSBOM(data)
 	if err != nil {
@@ -113,7 +112,10 @@ func Matchable(data []byte) (bool, error) {
 }
 
 // StripSBOM drops what matching does not need from an SBOM written by Grype: its vulnerabilities
-// and its file components. That makes it about ten times smaller and gives the same matches.
+// and its file components. That makes it about ten times smaller and gives the same matches. It
+// also drops the distro qualifier from purls: Grype matches a package against the distribution
+// the qualifier names, and finds nothing for a derivative it does not know, such as Pop!_OS;
+// without it, Grype uses the distribution it detected, as a scan does.
 func StripSBOM(data []byte) ([]byte, error) {
 	if _, err := parseSBOM(data); err != nil {
 		return nil, err
@@ -126,13 +128,51 @@ func StripSBOM(data []byte) ([]byte, error) {
 	if comps, ok := doc["components"].([]any); ok {
 		kept := []any{}
 		for _, c := range comps {
-			if m, ok := c.(map[string]any); !ok || m["type"] != "file" {
-				kept = append(kept, c)
+			m, ok := c.(map[string]any)
+			if ok && m["type"] == "file" {
+				continue
 			}
+			for _, k := range []string{"purl", "bom-ref"} {
+				if s, ok := m[k].(string); ok {
+					m[k] = withoutDistro(s)
+				}
+			}
+			kept = append(kept, c)
 		}
 		doc["components"] = kept
 	}
+	// The dependencies name packages by their bom-ref.
+	deps, _ := doc["dependencies"].([]any)
+	for _, d := range deps {
+		m, _ := d.(map[string]any)
+		if s, ok := m["ref"].(string); ok {
+			m["ref"] = withoutDistro(s)
+		}
+		on, _ := m["dependsOn"].([]any)
+		for i, r := range on {
+			if s, ok := r.(string); ok {
+				on[i] = withoutDistro(s)
+			}
+		}
+	}
 	return json.Marshal(doc)
+}
+
+// withoutDistro returns s without its distro qualifier when s is a purl, and s otherwise.
+func withoutDistro(s string) string {
+	rest, subpath, hasSubpath := strings.Cut(s, "#")
+	base, query, ok := strings.Cut(rest, "?")
+	if !strings.HasPrefix(s, "pkg:") || !ok {
+		return s
+	}
+	qs := slices.DeleteFunc(strings.Split(query, "&"), func(q string) bool { return strings.HasPrefix(q, "distro=") })
+	if len(qs) > 0 {
+		base += "?" + strings.Join(qs, "&")
+	}
+	if hasSubpath {
+		base += "#" + subpath
+	}
+	return base
 }
 
 // SetKernel returns the SBOM with the kernel package name at version from set to the running
@@ -157,7 +197,7 @@ func SetKernel(data []byte, name, from, running, source string) ([]byte, int, er
 		}
 		m["version"] = running
 		props, _ := m["properties"].([]any)
-		hasSource := false
+		hasSource, hasSourceVersion := false, false
 		for _, p := range props {
 			pm, ok := p.(map[string]any)
 			if !ok {
@@ -165,6 +205,7 @@ func SetKernel(data []byte, name, from, running, source string) ([]byte, int, er
 			}
 			switch pm["name"] {
 			case "syft:metadata:sourceVersion":
+				hasSourceVersion = true
 				pm["value"] = running
 			case "syft:metadata:source":
 				hasSource = true
@@ -174,8 +215,11 @@ func SetKernel(data []byte, name, from, running, source string) ([]byte, int, er
 			}
 		}
 		if source != "" && !hasSource {
-			m["properties"] = append(props, map[string]any{"name": "syft:metadata:source", "value": source},
-				map[string]any{"name": "syft:metadata:sourceVersion", "value": running})
+			props = append(props, map[string]any{"name": "syft:metadata:source", "value": source})
+			if !hasSourceVersion {
+				props = append(props, map[string]any{"name": "syft:metadata:sourceVersion", "value": running})
+			}
+			m["properties"] = props
 		}
 		n++
 	}

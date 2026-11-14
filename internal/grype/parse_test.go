@@ -20,8 +20,8 @@ func TestParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rep.DBBuilt.Equal(time.Date(2026, 11, 14, 6, 19, 25, 0, time.UTC)) || len(rep.Matches) != 4 || rep.Distro != "debian" {
-		t.Fatalf("built %v, distro %q, %d matches", rep.DBBuilt, rep.Distro, len(rep.Matches))
+	if !rep.DBBuilt.Equal(time.Date(2026, 11, 14, 6, 19, 25, 0, time.UTC)) || len(rep.Matches) != 4 || rep.Distro != "debian" || rep.DistroVersion != "12.15" {
+		t.Fatalf("built %v, distro %q %q, %d matches", rep.DBBuilt, rep.Distro, rep.DistroVersion, len(rep.Matches))
 	}
 	log4j := rep.Matches[0]
 	if log4j.Vulnerability.ID != "GHSA-jfh8-c2jp-5v3q" || log4j.Artifact.Name != "log4j-core" || log4j.Artifact.Version != "2.14.1" ||
@@ -47,9 +47,17 @@ func TestParse(t *testing.T) {
 
 func TestParseRejectsGarbage(t *testing.T) {
 	for _, in := range []string{"not json", `{"matches": []}`, `{"descriptor": {"name": "grype", "db": {"status": {"built": ""}}}}`,
-		`{"matches": [{"vulnerability": {"id": ""}, "artifact": {"name": "x"}}], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`} {
+		`{"matches": [{"vulnerability": {"id": ""}, "artifact": {"name": "x"}}], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`,
+		`{"descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`} {
 		if _, err := Parse([]byte(in)); err == nil {
 			t.Errorf("Parse(%q) succeeded", in)
 		}
+	}
+}
+
+func TestParseWithoutDistro(t *testing.T) {
+	rep, err := Parse([]byte(`{"matches": [], "descriptor": {"name": "grype", "db": {"status": {"built": "2026-11-14T06:19:25Z"}}}}`))
+	if err != nil || rep.Distro != "" || rep.DistroVersion != "" || len(rep.Matches) != 0 {
+		t.Fatalf("%+v %v", rep, err)
 	}
 }

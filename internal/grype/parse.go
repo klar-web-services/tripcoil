@@ -10,8 +10,11 @@ import (
 // Report is what Tripcoil takes from one Grype JSON report.
 type Report struct {
 	DBBuilt time.Time
-	Distro  string // the distribution whose data applies, such as debian; "" when Grype saw none
-	Matches []Match
+	// Distro is the distribution Grype detected, such as debian, whether or not its database has
+	// data for it; "" when Grype saw none.
+	Distro        string
+	DistroVersion string // such as 12.15
+	Matches       []Match
 }
 
 // Match is one vulnerability matched in one package.
@@ -82,7 +85,7 @@ func (r rawVulnerability) convert() Vulnerability {
 }
 
 type document struct {
-	Matches []struct {
+	Matches *[]struct {
 		Vulnerability          rawVulnerability   `json:"vulnerability"`
 		RelatedVulnerabilities []rawVulnerability `json:"relatedVulnerabilities"`
 		Artifact               struct {
@@ -96,7 +99,8 @@ type document struct {
 		} `json:"artifact"`
 	} `json:"matches"`
 	Distro struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Version string `json:"version"`
 	} `json:"distro"`
 	Descriptor struct {
 		Name string `json:"name"`
@@ -121,8 +125,11 @@ func Parse(data []byte) (*Report, error) {
 	if err != nil {
 		return nil, errors.New("Grype output has no valid vulnerability database build time")
 	}
-	rep := &Report{DBBuilt: built.UTC(), Distro: doc.Distro.Name}
-	for _, m := range doc.Matches {
+	if doc.Matches == nil {
+		return nil, errors.New("unparseable Grype output: the matches are missing")
+	}
+	rep := &Report{DBBuilt: built.UTC(), Distro: doc.Distro.Name, DistroVersion: doc.Distro.Version}
+	for _, m := range *doc.Matches {
 		if m.Vulnerability.ID == "" || m.Artifact.Name == "" {
 			return nil, errors.New("unparseable Grype output: a match has no vulnerability ID or package name")
 		}

@@ -1,0 +1,258 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:4952db03-00d2-4e97-893f-81848fed4258",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-14T13:14:01+01:00",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "author": "anchore",
+          "name": "grype",
+          "version": "0.121.2"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "eb6031a1afb71668",
+      "type": "file",
+      "name": "/var/lib/tripcoil/cache/staging"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:deb/pop/adduser@3.134?arch=all&distro=pop-22.04&package-id=480ed63cff2e6eb4",
+      "type": "library",
+      "publisher": "Debian Adduser Developers <adduser@packages.debian.org>",
+      "name": "adduser",
+      "version": "3.134",
+      "cpe": "cpe:2.3:a:adduser:adduser:3.134:*:*:*:*:*:*:*",
+      "purl": "pkg:deb/pop/adduser@3.134?arch=all&distro=pop-22.04",
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "dpkg-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "deb"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "dpkg-db-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/dpkg/status"
+        },
+        {
+          "name": "syft:metadata:installedSize",
+          "value": "686"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:deb/pop/bash@5.2.15-2%2Bb13?arch=amd64&distro=pop-22.04&package-id=c52fb0fab1257483&upstream=bash%405.2.15-2",
+      "type": "library",
+      "publisher": "Matthias Klose <doko@debian.org>",
+      "name": "bash",
+      "version": "5.2.15-2+b13",
+      "cpe": "cpe:2.3:a:bash:bash:5.2.15-2\\+b13:*:*:*:*:*:*:*",
+      "purl": "pkg:deb/pop/bash@5.2.15-2%2Bb13?arch=amd64&distro=pop-22.04&upstream=bash%405.2.15-2",
+      "externalReferences": [
+        {
+          "url": "pkg:deb/pop/bash@5.2.15-2?arch=source&distro=pop-22.04",
+          "type": "source-distribution"
+        }
+      ],
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "dpkg-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "deb"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "dpkg-db-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/dpkg/status"
+        },
+        {
+          "name": "syft:metadata:installedSize",
+          "value": "7164"
+        },
+        {
+          "name": "syft:metadata:source",
+          "value": "bash"
+        },
+        {
+          "name": "syft:metadata:sourceVersion",
+          "value": "5.2.15-2"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:deb/pop/libc6@2.36-9%2Bdeb12u14?arch=amd64&distro=pop-22.04&package-id=d5cfab4d2af88102&upstream=glibc",
+      "type": "library",
+      "publisher": "GNU Libc Maintainers <debian-glibc@lists.debian.org>",
+      "name": "libc6",
+      "version": "2.36-9+deb12u14",
+      "cpe": "cpe:2.3:a:libc6:libc6:2.36-9\\+deb12u14:*:*:*:*:*:*:*",
+      "purl": "pkg:deb/pop/libc6@2.36-9%2Bdeb12u14?arch=amd64&distro=pop-22.04&upstream=glibc",
+      "externalReferences": [
+        {
+          "url": "pkg:deb/pop/glibc@2.36-9%2Bdeb12u14?arch=source&distro=pop-22.04",
+          "type": "source-distribution"
+        }
+      ],
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "dpkg-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "deb"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "dpkg-db-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/dpkg/status"
+        },
+        {
+          "name": "syft:metadata:installedSize",
+          "value": "13001"
+        },
+        {
+          "name": "syft:metadata:source",
+          "value": "glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:deb/pop/passwd@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=amd64&distro=pop-22.04&package-id=d8463abb16a91e8e&upstream=shadow",
+      "type": "library",
+      "publisher": "Shadow package maintainers <pkg-shadow-devel@lists.alioth.debian.org>",
+      "name": "passwd",
+      "version": "1:4.13+dfsg1-1+deb12u2",
+      "cpe": "cpe:2.3:a:passwd:passwd:1\\:4.13\\+dfsg1-1\\+deb12u2:*:*:*:*:*:*:*",
+      "purl": "pkg:deb/pop/passwd@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=amd64&distro=pop-22.04&upstream=shadow",
+      "externalReferences": [
+        {
+          "url": "pkg:deb/pop/shadow@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=source&distro=pop-22.04",
+          "type": "source-distribution"
+        }
+      ],
+      "properties": [
+        {
+          "name": "syft:package:foundBy",
+          "value": "dpkg-db-cataloger"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "deb"
+        },
+        {
+          "name": "syft:package:metadataType",
+          "value": "dpkg-db-entry"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/var/lib/dpkg/status"
+        },
+        {
+          "name": "syft:metadata:installedSize",
+          "value": "2827"
+        },
+        {
+          "name": "syft:metadata:source",
+          "value": "shadow"
+        }
+      ]
+    },
+    {
+      "bom-ref": "os:pop@22.04",
+      "type": "operating-system",
+      "name": "pop",
+      "version": "22.04",
+      "description": "Pop!_OS 22.04 LTS",
+      "swid": {
+        "tagId": "pop",
+        "name": "pop",
+        "version": "22.04"
+      },
+      "properties": [
+        {
+          "name": "syft:distro:extendedSupport",
+          "value": "false"
+        },
+        {
+          "name": "syft:distro:id",
+          "value": "pop"
+        },
+        {
+          "name": "syft:distro:idLike:0",
+          "value": "ubuntu"
+        },
+        {
+          "name": "syft:distro:idLike:1",
+          "value": "debian"
+        },
+        {
+          "name": "syft:distro:prettyName",
+          "value": "Pop!_OS 22.04 LTS"
+        },
+        {
+          "name": "syft:distro:versionCodename",
+          "value": "jammy"
+        },
+        {
+          "name": "syft:distro:versionID",
+          "value": "22.04"
+        }
+      ]
+    },
+    {
+      "bom-ref": "3e140e9b56072de1",
+      "type": "file",
+      "name": "/var/lib/dpkg/status",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8be68579d9dc42ef3d572a2b01eecb37559d76abaccd17fa818926689217e10a"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:deb/pop/adduser@3.134?arch=all&distro=pop-22.04&package-id=480ed63cff2e6eb4",
+      "dependsOn": [
+        "pkg:deb/pop/passwd@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=amd64&distro=pop-22.04&package-id=d8463abb16a91e8e&upstream=shadow"
+      ]
+    },
+    {
+      "ref": "pkg:deb/pop/bash@5.2.15-2%2Bb13?arch=amd64&distro=pop-22.04&package-id=c52fb0fab1257483&upstream=bash%405.2.15-2",
+      "dependsOn": [
+        "pkg:deb/pop/libc6@2.36-9%2Bdeb12u14?arch=amd64&distro=pop-22.04&package-id=d5cfab4d2af88102&upstream=glibc"
+      ]
+    },
+    {
+      "ref": "pkg:deb/pop/passwd@1%3A4.13%2Bdfsg1-1%2Bdeb12u2?arch=amd64&distro=pop-22.04&package-id=d8463abb16a91e8e&upstream=shadow",
+      "dependsOn": [
+        "pkg:deb/pop/libc6@2.36-9%2Bdeb12u14?arch=amd64&distro=pop-22.04&package-id=d5cfab4d2af88102&upstream=glibc"
+      ]
+    }
+  ]
+}
