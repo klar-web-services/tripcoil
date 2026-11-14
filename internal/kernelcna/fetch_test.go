@@ -365,16 +365,24 @@ func TestLoadLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ranges := 0
+	ranges, text := 0, 0
 	for _, r := range d.Records {
+		text += len(r.ID)
+		if r.CVSS != nil {
+			text += len(r.CVSS.Vector) + len(r.CVSS.Severity)
+		}
 		for _, e := range r.Affected {
 			ranges += len(e.Versions)
+			text += len(e.DefaultStatus)
+			for _, v := range e.Versions {
+				text += len(v.Version) + len(v.LessThan) + len(v.LessThanOrEqual) + len(v.Status) + len(v.VersionType)
+			}
 		}
 	}
 	t.Cleanup(func() {
-		snapshotCap, snapshotTarCap, recordsCap, rangesCap = maxSnapshotBytes, maxSnapshotTarBytes, maxRecords, maxRanges
+		snapshotCap, snapshotTarCap, recordsCap, rangesCap, textCap = maxSnapshotBytes, maxSnapshotTarBytes, maxRecords, maxRanges, maxTextBytes
 	})
-	snapshotCap, snapshotTarCap, recordsCap, rangesCap = int64(len(body)), int64(len(unpack(t, body))), 29, ranges
+	snapshotCap, snapshotTarCap, recordsCap, rangesCap, textCap = int64(len(body)), int64(len(unpack(t, body))), 29, ranges, text
 	if err := load(); err != nil {
 		t.Fatalf("a snapshot at every limit: %v", err)
 	}
@@ -396,5 +404,10 @@ func TestLoadLimits(t *testing.T) {
 	rangesCap--
 	if err := load(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("the snapshot holds more than %d version ranges", rangesCap)) {
 		t.Fatalf("version ranges: %v", err)
+	}
+	rangesCap++
+	textCap--
+	if err := load(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("the snapshot keeps more than %d bytes of text", textCap)) {
+		t.Fatalf("text: %v", err)
 	}
 }

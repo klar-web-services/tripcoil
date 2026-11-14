@@ -29,7 +29,8 @@ const (
 	maxSnapshotBytes    = 256 << 20 // compressed; about 35 MB in 2026
 	maxSnapshotTarBytes = 2 << 30   // unpacked; about 364 MB in 2026
 	maxRecordBytes      = 4 << 20
-	maxRanges           = 2000000 // version ranges kept across all records; about 180,000 in 2026
+	maxRanges           = 2000000  // version ranges kept across all records; 138,933 in November 2026
+	maxTextBytes        = 64 << 20 // bytes of the strings kept across all records; 4.56 MB in November 2026
 )
 
 var (
@@ -37,6 +38,7 @@ var (
 	snapshotTarCap int64 = maxSnapshotTarBytes // lowered by tests
 	recordsCap           = maxRecords          // lowered by tests
 	rangesCap            = maxRanges           // lowered by tests
+	textCap              = maxTextBytes        // lowered by tests
 )
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -172,7 +174,7 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 	unpacked := &limited{r: gz, max: snapshotTarCap, what: "the unpacked snapshot"}
 	tr := tar.NewReader(unpacked)
 	var records []Record
-	ranges := 0
+	ranges, text := 0, 0
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -204,6 +206,9 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 		if ranges > rangesCap {
 			return nil, fmt.Errorf("the snapshot holds more than %d version ranges", rangesCap)
 		}
+		if text += textBytes(r); text > textCap {
+			return nil, fmt.Errorf("the snapshot keeps more than %d bytes of text", textCap)
+		}
 		records = append(records, r)
 	}
 	// archive/tar also stops at a file boundary when the stream ends there, without the two zero
@@ -219,6 +224,21 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 	return records, nil
+}
+
+// textBytes is the length of the strings a record keeps.
+func textBytes(r Record) int {
+	n := len(r.ID)
+	for _, e := range r.Affected {
+		n += len(e.DefaultStatus)
+		for _, v := range e.Versions {
+			n += len(v.Version) + len(v.LessThan) + len(v.LessThanOrEqual) + len(v.Status) + len(v.VersionType)
+		}
+	}
+	if r.CVSS != nil {
+		n += len(r.CVSS.Vector) + len(r.CVSS.Severity)
+	}
+	return n
 }
 
 // limited fails a read that goes past max bytes, and counts the zero bytes the read ended on.
