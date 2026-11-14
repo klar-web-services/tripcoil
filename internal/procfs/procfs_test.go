@@ -185,3 +185,15 @@ func TestOpenMapFile(t *testing.T) {
 		t.Fatalf("%q", b)
 	}
 }
+
+func TestStartTimeLongUptime(t *testing.T) {
+	f, root := fixture(t)
+	proc(t, root, 50, map[string]string{
+		"stat": "50 (old) S 1 50 50 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 10368000000 1000 1\n",
+	}, nil)
+	got, err := f.StartTime(50)
+	want := time.Unix(1700000000+103680000, 0).UTC()
+	if err != nil || !got.Equal(want) {
+		t.Fatalf("%v %v, want %v", got, err, want)
+	}
+}

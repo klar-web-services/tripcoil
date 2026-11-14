@@ -117,7 +117,7 @@ func (f FS) StartTime(pid int) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Unix(btime, 0).Add(time.Duration(ticks) * time.Second / userHZ).UTC(), nil
+	return time.Unix(btime, 0).Add(time.Duration(ticks) * (time.Second / userHZ)).UTC(), nil
 }
 
 func (f FS) bootTime() (int64, error) {
