@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/dockerapi"
@@ -102,6 +103,21 @@ func TestDockerProblems(t *testing.T) {
 	_, _, p := collectDocker(ctx, "unix:///nonexistent/docker.sock", connect, nil)
 	if len(p) != 1 || p[0].Code != problem.DockerAbsent || p[0].Kind != problem.Notice {
 		t.Fatalf("absent: %+v", p)
+	}
+	// dockerd stopped with live-restore: its socket is gone, but its containers still run.
+	_, _, p = collectDocker(ctx, "unix:///nonexistent/docker.sock", connect, map[string][]int{shopID: {2201}})
+	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
+		!strings.Contains(p[0].Message, "1 container(s) have running processes") {
+		t.Fatalf("socket missing with running containers: %+v", p)
+	}
+	// A stat error other than a missing file (ENOTDIR here; EACCES needs a non-root user).
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, p = collectDocker(ctx, "unix://"+notDir+"/docker.sock", connect, nil)
+	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error {
+		t.Fatalf("stat error: %+v", p)
 	}
 	_, _, p = collectDocker(ctx, "tcp://10.0.0.5:2375", connect, nil)
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error {

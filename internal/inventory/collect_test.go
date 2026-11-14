@@ -66,6 +66,19 @@ func TestCollect(t *testing.T) {
 	}
 }
 
+func TestCollectContainersWithoutDockerSocket(t *testing.T) {
+	d := collectDeps(t)
+	procs := hostProcesses()
+	d.Proc = fakeSource{10: procs[10], 40: procs[40]} // 40 runs in a Docker container
+	inv, err := Collect(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Errors) != 1 || inv.Errors[0].Code != problem.DockerUnavailable || len(inv.Notices) != 0 || inv.Status() != "partial" {
+		t.Fatalf("errors %+v notices %+v status %s", inv.Errors, inv.Notices, inv.Status())
+	}
+}
+
 func TestCollectWithoutPackageTool(t *testing.T) {
 	for name, mutate := range map[string]func(*Deps){
 		"unknown distribution": func(d *Deps) { d.Tool = nil; d.Release = osrel.Release{ID: "gentoo"} },

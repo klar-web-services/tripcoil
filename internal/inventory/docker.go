@@ -36,7 +36,18 @@ func collectDocker(ctx context.Context, dockerHost string, connect func(string) 
 	if err != nil {
 		return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory", "%v", err)}
 	}
-	if fi, err := os.Stat(socket); err != nil || fi.Mode()&fs.ModeSocket == 0 {
+	fi, err := os.Stat(socket)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
+			"cannot check the Docker socket at %s (%v), so running containers are missing from this run", socket, err)}
+	}
+	if err != nil || fi.Mode()&fs.ModeSocket == 0 {
+		// dockerd stopped with live-restore keeps its containers running without a socket.
+		if len(containerPIDs) > 0 {
+			return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
+				"%d container(s) have running processes, but the Docker socket %s is missing, so they are not inventoried; start Docker or set DOCKER_HOST to its socket",
+				len(containerPIDs), socket)}
+		}
 		return nil, nil, []problem.Problem{problem.New(problem.Notice, problem.DockerAbsent, "inventory", "no Docker socket at %s, so there are no containers to inventory", socket)}
 	}
 	api := connect(socket)
