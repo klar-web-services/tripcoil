@@ -25,6 +25,9 @@ func TestSBOMPackages(t *testing.T) {
 		if p.Name == "openssl-libs" && p.Version != "1:3.0.7-24.el9" {
 			t.Errorf("an rpm epoch is part of the version: %+v", p)
 		}
+		if p.Type != "rpm" {
+			t.Errorf("Syft's package type: %+v", p)
+		}
 	}
 	// An Arch Linux SBOM: its operating system has no version, so matching the SBOM finds nothing.
 	arch := `{"bomFormat":"CycloneDX","components":[{"type":"operating-system","name":"cachyos"},{"type":"library","name":"openssl","version":"4.1.0-1","purl":"pkg:alpm/cachyos/openssl@4.1.0-1"}]}`

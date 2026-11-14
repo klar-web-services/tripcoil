@@ -2,7 +2,6 @@ package audit
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -165,23 +164,10 @@ func countPackages(data []byte) (counts, error) {
 	if err != nil {
 		return counts{}, err
 	}
-	var doc struct {
-		Components []struct {
-			Properties []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"properties"`
-		} `json:"components"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return counts{}, err
-	}
 	n := counts{packages: len(pkgs)}
-	for _, c := range doc.Components {
-		for _, p := range c.Properties {
-			if p.Name == "syft:package:type" && slices.Contains(osPackageTypes, p.Value) {
-				n.os++
-			}
+	for _, p := range pkgs {
+		if slices.Contains(osPackageTypes, p.Type) {
+			n.os++
 		}
 	}
 	return n, nil

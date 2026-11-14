@@ -12,6 +12,7 @@ import (
 // Component is one package in a CycloneDX SBOM written by Grype.
 type Component struct {
 	Name, Version, PURL string
+	Type                string // Syft's package type, such as deb or npm
 }
 
 type cdxComponent struct {
@@ -66,7 +67,13 @@ func SBOMPackages(data []byte) ([]Component, error) {
 	}
 	var out []Component
 	for _, c := range pkgs {
-		out = append(out, Component{Name: c.Name, Version: c.Version, PURL: c.PURL})
+		comp := Component{Name: c.Name, Version: c.Version, PURL: c.PURL}
+		for _, p := range c.Properties {
+			if p.Name == "syft:package:type" {
+				comp.Type = p.Value
+			}
+		}
+		out = append(out, comp)
 	}
 	return out, nil
 }
