@@ -119,7 +119,11 @@ func TestUpgrades(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Upgrades(tc.findings); !reflect.DeepEqual(got, tc.want) {
+			var got []Upgrade
+			for _, c := range upgradeCandidates(tc.findings) {
+				got = append(got, c.Upgrade)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %+v\nwant %+v", got, tc.want)
 			}
 		})

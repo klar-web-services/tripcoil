@@ -13,23 +13,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// Upgrades returns the candidate upgrade lines of spec section 6.6: for each package in an app
-// directory or jar whose findings all have a fix, the one version that may clear them all. That is
-// the highest fix version, given only when every installed and fix version is semver, the highest
-// is spelled one way only, and it is above every installed version. The version is always one that
-// Grype reported; none is derived. Grype reports for each finding only the fix of the version range
-// that matched, so the highest fix may still be in another range: the Audit gives a line only when
-// matching the package at that version finds nothing (checkUpgrades). A package is told apart by
-// its purl without the version, or by its name when it has none. Sorted by findings cleared, then
-// path and package.
-func Upgrades(findings []Finding) []Upgrade {
-	var out []Upgrade
-	for _, c := range upgradeCandidates(findings) {
-		out = append(out, c.Upgrade)
-	}
-	return out
-}
-
 // upgradeCandidate is a candidate upgrade line with the packages to match at its version: each
 // purl of its findings once, with the candidate version. check is nil when a finding cannot be
 // matched again that way: it has no purl, or Grype matched it by CPE, which the purl does not carry.
@@ -38,7 +21,15 @@ type upgradeCandidate struct {
 	check []grype.Component
 }
 
-// upgradeCandidates is Upgrades with the packages that check each candidate.
+// upgradeCandidates returns the candidate upgrade lines of spec section 6.6: for each package in
+// an app directory or jar whose findings all have a fix, the one version that may clear them all.
+// That is the highest fix version, given only when every installed and fix version is semver, the
+// highest is spelled one way only, and it is above every installed version. The version is always
+// one that Grype reported; none is derived. Grype reports for each finding only the fix of the
+// version range that matched, so the highest fix may still be in another range: the Audit gives a
+// line only when matching the package at that version finds nothing (checkUpgrades). A package is
+// told apart by its purl without the version, or by its name when it has none. Sorted by findings
+// cleared, then path and package.
 func upgradeCandidates(findings []Finding) []upgradeCandidate {
 	type key struct{ origin, typ, purl, name string }
 	groups := map[key][]Finding{}
