@@ -220,6 +220,8 @@ func TestOpenMapFileUnpadded(t *testing.T) {
 
 func TestParseMapsKeepsPathVerbatim(t *testing.T) {
 	data := "7f0000000000-7f0000001000 r-xp 00000000 08:01 200                        /opt/my  app/lib.so\n" +
+		"7f0000004000-7f0000005000 rw-p 00000000 00:00 0      [anon:x /tmp/evil.so.1]\n" +
+		"7f0000006000-7f0000007000 rw-p 00000000 00:00 0      [anon_shmem:y /usr/lib/libssl.so.3]\n" +
 		"7f0000002000-7f0000003000 r-xp 00000000 08:01 201                        /opt/my  app/old.so (deleted)\n"
 	want := []Mapping{
 		{Start: "7f0000000000", End: "7f0000001000", Path: "/opt/my  app/lib.so"},
