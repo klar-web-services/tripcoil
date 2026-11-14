@@ -224,6 +224,12 @@ func (f FS) RootDir(pid int) (string, error) {
 	return root, nil
 }
 
+// RootFileID identifies the process's root directory (through /proc, so also from another mount
+// namespace).
+func (f FS) RootFileID(pid int) (FileID, error) {
+	return f.statID(f.proc(pid, "root"))
+}
+
 // ExeFileID identifies the running executable's file (through /proc, so also in another root).
 func (f FS) ExeFileID(pid int) (FileID, error) {
 	return f.statID(f.proc(pid, "exe"))

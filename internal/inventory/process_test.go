@@ -69,13 +69,15 @@ func hostTool() fakeTool {
 
 func hostRoot(t *testing.T) string {
 	return files(t, map[string]string{
-		"etc/passwd":            "root:x:0:0::/root:/bin/sh\nwww-data:x:33:33::/var/www:/usr/sbin/nologin\n",
-		"srv/shop/package.json": "{}",
-		"srv/shop/server.js":    "",
-		"opt/api/api":           "not what runs: files are read through /proc",
-		"opt/api/old":           "go binary v1, installed while v0 runs",
-		"usr/sbin/sshd":         "sshd",
-		"usr/bin/bash":          "bash",
+		"etc/passwd":                 "root:x:0:0::/root:/bin/sh\nwww-data:x:33:33::/var/www:/usr/sbin/nologin\n",
+		"srv/shop/package.json":      "{}",
+		"srv/shop/server.js":         "",
+		"opt/api/api":                "not what runs: files are read through /proc",
+		"opt/api/old":                "go binary v1, installed while v0 runs",
+		"usr/sbin/sshd":              "sshd",
+		"usr/bin/bash":               "bash",
+		"run/sshd/.keep":             "",
+		"var/lib/machines/box/.keep": "",
 	})
 }
 
@@ -102,7 +104,9 @@ func TestProcessCollector(t *testing.T) {
 	tool := hostTool()
 	src := hostProcesses()
 	src[60].exeID = fileID(t, root, "usr/sbin/sshd") // not the host's /usr/bin/bash
+	src[60].rootID = fileID(t, root, "var/lib/machines/box")
 	src[61].exeID = fileID(t, root, "usr/sbin/sshd") // the host's own sshd, run in a chroot
+	src[61].rootID = fileID(t, root, "run/sshd")
 	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: cache}
 	res, err := c.collect(context.Background())
 	if err != nil {
@@ -543,14 +547,17 @@ func TestProcessCollectorUnresolvedOriginsAreStable(t *testing.T) {
 }
 
 func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
-	root := files(t, map[string]string{"usr/sbin/sshd": "sshd", "usr/bin/tool": "tool", "usr/lib/libc.so.6": "libc"})
+	root := files(t, map[string]string{"usr/sbin/sshd": "sshd", "usr/bin/tool": "tool", "usr/lib/libc.so.6": "libc",
+		"run/sshd/.keep": "", "var/lib/tool/.keep": ""})
 	src := fakeSource{
 		// sshd's chrooted pre-authentication child maps the host's own C library.
-		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", exeID: fileID(t, root, "usr/sbin/sshd"),
-			maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
-		// A container runs the host's executable, bind-mounted, with its own C library.
-		70: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/containers/tool", exeID: fileID(t, root, "usr/bin/tool"),
-			maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
+		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", rootID: fileID(t, root, "run/sshd"),
+			exeID: fileID(t, root, "usr/sbin/sshd"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
+		// A container runs the host's executable, bind-mounted: its root is not a host directory.
+		70: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/containers/tool", exeID: fileID(t, root, "usr/bin/tool")},
+		// A chroot in a host directory runs the host's executable, but maps another C library.
+		71: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/tool", rootID: fileID(t, root, "var/lib/tool"),
+			exeID: fileID(t, root, "usr/bin/tool"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
 	}
 	tool := hostTool()
 	tool.owners["/usr/bin/tool"] = pkgtool.Package{Name: "tool", Version: "1", Arch: "amd64", Type: "deb"}
@@ -571,12 +578,21 @@ func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
 	if got := names(byName(res.items, "sshd")); !slices.Equal(got, []string{"package:libc6", "package:openssh-server"}) {
 		t.Fatalf("sshd origins %q", got)
 	}
-	if got := names(byName(res.items, "tool")); !slices.Equal(got, []string{"package:tool", "unresolved:" + libc.Path}) {
-		t.Fatalf("tool origins %q: its C library is not the host's", got)
-	}
-	for _, id := range byName(res.items, "tool").Origins {
-		if o := originByID(res.origins, id); o.Kind == OriginUnresolved && !strings.Contains(o.Reason, "another root") {
-			t.Fatalf("reason %q", o.Reason)
+	for _, it := range res.items {
+		if it.Name != "tool" {
+			continue
+		}
+		want := []string{"package:tool", "unresolved:" + libc.Path} // its C library is not the host's
+		if it.Processes[0].PID == 70 {
+			want = []string{"unresolved:/usr/bin/tool"}
+		}
+		if got := names(it); len(it.Processes) != 1 || !slices.Equal(got, want) {
+			t.Errorf("tool %d origins %q, want %q", it.Processes[0].PID, got, want)
+		}
+		for _, id := range it.Origins {
+			if o := originByID(res.origins, id); o.Kind == OriginUnresolved && !strings.Contains(o.Reason, "another root") {
+				t.Errorf("reason %q", o.Reason)
+			}
 		}
 	}
 }
@@ -613,12 +629,13 @@ func TestProcessCollectorReadBudget(t *testing.T) {
 }
 
 func TestProcessCollectorReplacedLibraryOfChrootedDaemon(t *testing.T) {
-	root := files(t, map[string]string{"usr/sbin/haproxy": "haproxy", "usr/lib/libssl.so.3": "libssl, upgraded"})
+	root := files(t, map[string]string{"usr/sbin/haproxy": "haproxy", "usr/lib/libssl.so.3": "libssl, upgraded", "var/lib/haproxy/.keep": ""})
 	ssl := procfs.Mapping{Start: "3", End: "4", Path: "/usr/lib/libssl.so.3", Deleted: true}
 	src := fakeSource{
 		// haproxy with "chroot /var/lib/haproxy" still maps the libssl that was replaced on disk.
-		40: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", otherRoot: true, root: "/var/lib/haproxy", exeID: fileID(t, root, "usr/sbin/haproxy"),
-			maps: []procfs.Mapping{ssl}, mapIDs: map[string]procfs.FileID{ssl.Path: {Dev: 99, Ino: 2}}},
+		40: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", otherRoot: true, root: "/var/lib/haproxy", rootID: fileID(t, root, "var/lib/haproxy"),
+			exeID: fileID(t, root, "usr/sbin/haproxy"),
+			maps:  []procfs.Mapping{ssl}, mapIDs: map[string]procfs.FileID{ssl.Path: {Dev: 99, Ino: 2}}},
 	}
 	tool := hostTool()
 	tool.owners["/usr/sbin/haproxy"] = pkgtool.Package{Name: "haproxy", Version: "2.6.12-1", Arch: "amd64", Type: "deb"}
@@ -635,12 +652,13 @@ func TestProcessCollectorReplacedLibraryOfChrootedDaemon(t *testing.T) {
 }
 
 func TestProcessCollectorPlainChroot(t *testing.T) {
-	root := files(t, map[string]string{"srv/jail/sleeper": "sleeper", "usr/sbin/haproxy": "haproxy, upgraded"})
+	root := files(t, map[string]string{"srv/jail/sleeper": "sleeper", "usr/sbin/haproxy": "haproxy, upgraded", "var/lib/haproxy/.keep": ""})
 	src := fakeSource{
 		// unshare -Ur chroot /srv/jail /sleeper: seen from the host, its executable is the jail's file.
 		80: {cmdline: []string{"/sleeper"}, exe: "/srv/jail/sleeper", otherRoot: true, root: "/srv/jail", exeID: fileID(t, root, "srv/jail/sleeper"), exeData: "sleeper"},
 		// A chrooted haproxy whose own binary was upgraded on disk.
-		81: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", deleted: true, otherRoot: true, root: "/var/lib/haproxy"},
+		81: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", deleted: true, otherRoot: true, root: "/var/lib/haproxy",
+			rootID: fileID(t, root, "var/lib/haproxy")},
 	}
 	tool := hostTool()
 	tool.owners["/usr/sbin/haproxy"] = pkgtool.Package{Name: "haproxy", Version: "2.6.12-1", Arch: "amd64", Type: "deb"}
@@ -711,5 +729,37 @@ func TestProcessCollectorFileUnlinkedBetweenProcesses(t *testing.T) {
 	o := originByID(res.origins, BinaryOriginID(sum("go binary v1")))
 	if data, err := os.ReadFile(o.Copy); err != nil || string(data) != "go binary v1" {
 		t.Fatalf("origin %+v: copy %q %v", o, data, err)
+	}
+}
+
+func TestProcessCollectorChrootInAContainer(t *testing.T) {
+	root := hostRoot(t)
+	src := fakeSource{
+		62: {cmdline: []string{"sshd: /usr/sbin/sshd -D [listener]"}, exe: "/usr/sbin/sshd", cgroup: cg("/system.slice/ssh.service")},
+		// sshd's chrooted child in an LXC container, whose own sshd was upgraded: its /run/sshd is
+		// the container's, not the host's.
+		90: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", deleted: true, otherRoot: true, root: "/run/sshd", rootID: procfs.FileID{Dev: 99, Ino: 5}},
+	}
+	tool := hostTool()
+	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.items) != 2 {
+		t.Fatalf("items %+v", res.items)
+	}
+	for _, it := range res.items {
+		o := originByID(res.origins, it.Origins[0])
+		switch it.Processes[0].PID {
+		case 62:
+			if len(it.Processes) != 1 || len(it.Origins) != 1 || o.Name != "openssh-server" || o.RunningOlderCopy || len(it.RestartNeeded) != 0 {
+				t.Errorf("host sshd %+v, origin %+v", it, o)
+			}
+		case 90:
+			if len(it.Origins) != 1 || o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "another root") {
+				t.Errorf("container sshd %+v, origin %+v", it, o)
+			}
+		}
 	}
 }

@@ -33,6 +33,7 @@ type Source interface {
 	Maps(pid int) ([]procfs.Mapping, error)
 	SameRootAsInit(pid int) (bool, error)
 	RootDir(pid int) (string, error)
+	RootFileID(pid int) (procfs.FileID, error)
 	OpenExe(pid int) (io.ReadCloser, error)
 	OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error)
 }
@@ -194,11 +195,15 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 // chrooted daemon does (sshd's pre-authentication child, Postfix's daemons, haproxy): it executed
 // that file before it chrooted, so the file lies outside its root. Such a process is resolved
 // like a host process: its executable is the host's, and so are the libraries it maps that are
-// the host's files. A container that runs a bind-mounted host executable maps its own. A process
-// in a plain chroot runs a file inside its root, whose packages the host does not know.
+// the host's files. A process in a plain chroot runs a file inside its root, whose packages the
+// host does not know; a chroot inside a container (LXC) has a root that only names a host path,
+// and a container that runs a bind-mounted host executable maps its own libraries.
 func (c *processCollector) runsHostFile(pid int, exe string, deleted bool) bool {
 	root, err := c.src.RootDir(pid)
 	if err != nil || root == "/" || within(exe, root) {
+		return false
+	}
+	if id, err := c.src.RootFileID(pid); err != nil || !c.isHostFile(root, id) {
 		return false
 	}
 	if deleted {

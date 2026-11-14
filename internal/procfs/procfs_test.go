@@ -363,3 +363,15 @@ func TestOpenNeverOpensNonRegularFilesForReading(t *testing.T) {
 		t.Fatalf("opened the FIFO: %v, the regular file: %v", opened[fifoWatch], opened[libWatch])
 	}
 }
+
+func TestRootFileID(t *testing.T) {
+	f, root := fixture(t)
+	got, err := f.RootFileID(43) // root links to other-root
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, _ := os.Stat(filepath.Join(root, "other-root"))
+	if want, ok := IDOf(fi); !ok || got != want {
+		t.Fatalf("%+v, want %+v", got, want)
+	}
+}
