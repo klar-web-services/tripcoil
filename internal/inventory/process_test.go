@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/klar-web-services/tripcoil/internal/pkgtool"
@@ -418,5 +419,35 @@ func TestProcessCollectorRestartForReplacedLibraryInAppDir(t *testing.T) {
 	it := byName(res.items, "python3.12")
 	if it.AppDir != "/srv/api" || !slices.Equal(it.RestartNeeded, []string{lib}) {
 		t.Fatalf("appDir %q restartNeeded %v: the workers run the old %s", it.AppDir, it.RestartNeeded, filepath.Base(lib))
+	}
+}
+
+func TestProcessCollectorIgnoresProcessesThatEnd(t *testing.T) {
+	src := fakeSource{
+		// Its PID was reused after the process list was read: the files are another process's.
+		30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeData: "another process's file", reused: true,
+			maps:    []procfs.Mapping{{Start: "5", End: "6", Path: "/tmp/libnetty_transport.so"}},
+			mapData: map[string]string{"/tmp/libnetty_transport.so": "another process's library"}},
+		// It exited between the reads of its command line and its executable.
+		90: {cmdline: []string{"worker"}, exeErr: &fs.PathError{Op: "readlink", Path: "/proc/90/exe", Err: syscall.ENOENT}},
+	}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.items) != 1 || res.items[0].Name != "api" {
+		t.Fatalf("items %+v: a process that ended is not an item", res.items)
+	}
+	if len(res.items[0].Origins) != 2 {
+		t.Fatalf("api origins %v", res.items[0].Origins)
+	}
+	for _, id := range res.items[0].Origins {
+		if o := originByID(res.origins, id); o.Kind != OriginUnresolved || !strings.Contains(o.Reason, "ended during the inventory") {
+			t.Errorf("origin %+v", o)
+		}
+	}
+	if src[30].read != 0 {
+		t.Fatalf("read %d bytes of another process's files", src[30].read)
 	}
 }

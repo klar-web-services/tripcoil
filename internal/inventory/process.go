@@ -135,7 +135,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 		return nil, "", false
 	}
 	exe, deleted, exeErr := c.src.Exe(pid)
-	if exeErr != nil && errors.Is(exeErr, fs.ErrNotExist) && len(cmdline) == 0 {
+	if errors.Is(exeErr, fs.ErrNotExist) { // a kernel thread or zombie, or it exited meanwhile
 		return nil, "", false
 	}
 	cgroup, _ := c.src.Cgroup(pid)
@@ -302,7 +302,7 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			d.note(problem.AppDirNotFound)
 		}
 	}
-	c.linkFile(ctx, b, d, p.exe, p.exeDeleted, owners, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) })
+	c.linkFile(ctx, b, d, p.exe, p.exeDeleted, owners, c.opener(p, func() (io.ReadCloser, error) { return c.src.OpenExe(p.pid) }))
 	for _, m := range p.libs {
 		if found && !dir.Jar && within(m.Path, dir.Path) {
 			if m.Deleted && c.existsOnHost(m.Path) {
@@ -310,10 +310,28 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			}
 			continue // covered by the app directory
 		}
-		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) })
+		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, c.opener(p, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) }))
 	}
 	if p.libLimit != "" {
 		b.link(d, Origin{ID: UnresolvedOriginID("libraries:" + p.libLimit), Kind: OriginUnresolved, Reason: p.libLimit})
+	}
+}
+
+var errProcessEnded = errors.New("the process ended during the inventory")
+
+// opener wraps open, which opens a running file of p, with a check that the PID is still p's: a
+// PID reused since p was read would supply another process's file.
+func (c *processCollector) opener(p *rawProcess, open func() (io.ReadCloser, error)) func() (io.ReadCloser, error) {
+	return func() (io.ReadCloser, error) {
+		r, err := open()
+		if err != nil {
+			return nil, err
+		}
+		if t, err := c.src.StartTime(p.pid); err != nil || !t.Equal(p.started) {
+			r.Close()
+			return nil, errProcessEnded
+		}
+		return r, nil
 	}
 }
 

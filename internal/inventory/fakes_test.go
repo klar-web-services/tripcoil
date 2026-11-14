@@ -35,6 +35,8 @@ type fakeProc struct {
 	openErr   error                    // what opening a running file returns
 	onRead    func()                   // called on every read of a running file
 	read      int                      // bytes read from running files
+	reused    bool                     // the PID belongs to another process after the first read
+	started   int                      // StartTime calls
 }
 
 type fakeSource map[int]*fakeProc
@@ -67,7 +69,12 @@ func (s fakeSource) Cmdline(pid int) ([]string, error) { return s[pid].cmdline, 
 func (s fakeSource) Cwd(pid int) (string, error)       { return s[pid].cwd, nil }
 func (s fakeSource) UID(pid int) (int, error)          { return s[pid].uid, nil }
 func (s fakeSource) StartTime(pid int) (time.Time, error) {
-	return time.Unix(1700000000+int64(pid), 0).UTC(), nil
+	t := time.Unix(1700000000+int64(pid), 0).UTC()
+	if s[pid].reused && s[pid].started > 0 {
+		t = t.Add(time.Hour)
+	}
+	s[pid].started++
+	return t, nil
 }
 func (s fakeSource) Cgroup(pid int) (string, error)         { return s[pid].cgroup, nil }
 func (s fakeSource) Maps(pid int) ([]procfs.Mapping, error) { return s[pid].maps, nil }
