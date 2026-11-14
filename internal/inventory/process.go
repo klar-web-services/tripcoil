@@ -149,7 +149,10 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 	if id := procfs.DockerContainerID(cgroup); id != "" {
 		return nil, id, true
 	}
-	p = &rawProcess{pid: pid, cmdline: cmdline, exe: exe, exeDeleted: deleted, unit: procfs.SystemdUnit(procfs.ParseCgroup([]byte(cgroup)))}
+	p = &rawProcess{pid: pid, cmdline: cmdline, exe: exe, exeDeleted: deleted}
+	if !procfs.UserManaged(cgroup) { // a unit of a user's own manager is not a system unit
+		p.unit = procfs.SystemdUnit(procfs.ParseCgroup([]byte(cgroup)))
+	}
 	if uid, err := c.src.UID(pid); err == nil {
 		p.user = c.userName(uid)
 	}

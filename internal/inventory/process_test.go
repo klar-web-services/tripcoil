@@ -865,6 +865,19 @@ func TestProcessCollectorFindsDockerd(t *testing.T) {
 	}
 }
 
+func TestProcessCollectorUserUnits(t *testing.T) {
+	src := fakeSource{30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeData: "go binary v1",
+		cgroup: cg("/user.slice/user-1000.slice/user@1000.service/app.slice/api.service")}}
+	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
+	res, err := c.collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if units := byName(res.items, "api").Units; len(units) != 0 {
+		t.Fatalf("units %v: api.service is the user's own unit, not a system unit", units)
+	}
+}
+
 func TestProcessCollectorSnapsOnArchAndFedora(t *testing.T) {
 	// Arch and Fedora mount snaps under /var/lib/snapd/snap; /snap is at most a symlink to it.
 	src := fakeSource{50: {cmdline: []string{"lxd"}, exe: "/var/lib/snapd/snap/lxd/123/bin/lxd"}}
