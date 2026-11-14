@@ -47,7 +47,7 @@ func collectDocker(ctx context.Context, dockerHost string, connect func(string) 
 		// dockerd stopped with live-restore keeps its containers running without a socket.
 		if len(containerPIDs) > 0 {
 			return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
-				"%d container(s) have running processes, but the Docker socket %s is missing, so they are not inventoried; start Docker or set DOCKER_HOST to its socket",
+				"%d container(s) have running processes, but the Docker socket %s is missing or not a socket, so they are not inventoried; start Docker or set DOCKER_HOST to its socket",
 				len(containerPIDs), socket)}
 		}
 		return nil, nil, []problem.Problem{problem.New(problem.Notice, problem.DockerAbsent, "inventory", "no Docker socket at %s, so there are no containers to inventory", socket)}
