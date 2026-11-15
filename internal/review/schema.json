@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings", "coverageNotes"],
+  "properties": {
+    "summary": {"type": "string"},
+    "coverageNotes": {"type": "array", "items": {"type": "string"}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["findingId", "verdict", "exploitability", "priority", "reasoning", "evidence", "fix", "sources", "corrections", "item", "vulnerability"],
+        "properties": {
+          "findingId": {"type": "string"},
+          "verdict": {"type": "string", "enum": ["confirmed", "corrected", "false_positive", "added"]},
+          "exploitability": {"type": ["string", "null"], "enum": ["exploitable", "conditional", "not_exploitable", "unknown", null]},
+          "priority": {"type": ["string", "null"], "enum": ["now", "soon", "scheduled", "none", null]},
+          "reasoning": {"type": "string"},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "fix": {"type": "array", "items": {"type": "string"}},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "corrections": {"type": "array", "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["field", "old", "new", "why"],
+            "properties": {"field": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}, "why": {"type": "string"}}}},
+          "item": {"type": ["string", "null"]},
+          "vulnerability": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}
