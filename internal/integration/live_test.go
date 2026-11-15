@@ -4,7 +4,9 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/dockerapi"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/kernelcna"
 	"github.com/klar-web-services/tripcoil/internal/osrel"
@@ -96,4 +99,30 @@ func TestLiveHost(t *testing.T) {
 		tiers[f.Risk]++
 	}
 	t.Logf("audit: %d findings %v; origins %v; database built %s", len(a.Findings), tiers, statuses, a.Grype.DBBuilt)
+
+	// The facts of a healthy host: everything but sshd.txt (when sshd is not installed) is collected.
+	fd := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath}
+	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
+		fd.Docker, fd.DockerSocket = dockerapi.New(socket), socket
+	}
+	runDir := t.TempDir()
+	idx, err := facts.Collect(context.Background(), fd, inv, runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Missing) != 0 || len(idx.Collected) < 6 {
+		t.Fatalf("facts on a healthy host: %+v", idx)
+	}
+	data, _ := os.ReadFile(filepath.Join(runDir, "facts", "network.json"))
+	var net facts.Network
+	if err := json.Unmarshal(data, &net); err != nil {
+		t.Fatal(err)
+	}
+	mapped := 0
+	for _, s := range net.Sockets {
+		if len(s.Items) > 0 {
+			mapped++
+		}
+	}
+	t.Logf("facts: %v, notes %v; %d sockets, %d mapped to items", idx.Collected, idx.Notes, len(net.Sockets), mapped)
 }

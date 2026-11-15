@@ -88,7 +88,7 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 	case "report":
 		return runReport(args[1:], stdout, stderr, d)
 	case "version", "--version":
-		fmt.Fprintf(stdout, "tripcoil %s\ngrype %s\n", buildinfo.Version, grype.Version)
+		fmt.Fprintf(stdout, "tripcoil %s\ngrype %s\nprompt %s\n", buildinfo.Version, grype.Version, review.PromptVersion)
 		return 0
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)

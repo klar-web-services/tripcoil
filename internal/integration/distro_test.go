@@ -17,12 +17,17 @@ import (
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// split separates inventory.json from audit.json in a container's output. The script prints it
-// from "@@@$((6*7))@@@", so its own command line, which the Inventory lists, does not hold it.
-const split = "@@@42@@@"
+// split separates inventory.json from audit.json, and splitFacts audit.json from facts/index.json, in
+// a container's output. The script prints them from "@@@$((6*7))@@@" and "@@@$((6*7+1))@@@", so its
+// own command line, which the Inventory lists, does not hold them.
+const (
+	split      = "@@@42@@@"
+	splitFacts = "@@@43@@@"
+)
 
 func buildBinary(t *testing.T) string {
 	t.Helper()
@@ -94,7 +99,7 @@ func TestDistros(t *testing.T) {
 			// command line; one with a path it executes.
 			script := "/bin/sleep 600 & sleep 1; /usr/local/bin/tripcoil run >/tmp/run.out 2>&1; code=$?; cat /tmp/run.out >&2; " +
 				"cat /var/lib/tripcoil/runs/latest/inventory.json; echo; echo @@@$((6*7))@@@; " +
-				"cat /var/lib/tripcoil/runs/latest/audit.json; exit $code"
+				"cat /var/lib/tripcoil/runs/latest/audit.json; echo; echo @@@$((6*7+1))@@@; cat /var/lib/tripcoil/runs/latest/facts/index.json; exit $code"
 			ctx, cancel := context.WithTimeout(interrupt, 5*time.Minute)
 			defer cancel()
 			var stdout, stderr bytes.Buffer
@@ -105,7 +110,8 @@ func TestDistros(t *testing.T) {
 			cmd.WaitDelay = time.Minute
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			runErr := cmd.Run()
-			invOut, audOut, _ := bytes.Cut(stdout.Bytes(), []byte(split))
+			invOut, rest, _ := bytes.Cut(stdout.Bytes(), []byte(split))
+			audOut, idxOut, _ := bytes.Cut(rest, []byte(splitFacts))
 			var inv inventory.Inventory
 			if err := json.Unmarshal(invOut, &inv); err != nil {
 				t.Fatalf("no inventory.json (run: %v): %v\nstdout: %s\nstderr: %s", runErr, err, stdout.Bytes(), stderr.Bytes())
@@ -199,6 +205,21 @@ func TestDistros(t *testing.T) {
 			}
 			if !self {
 				t.Fatal("tripcoil itself must show up as an unpackaged binary")
+			}
+			// A plain container has no sshd or systemd: every fact but sshd.txt is collected. The
+			// firewall says there are no rules, except where the image has nft (Arch Linux), which
+			// an unprivileged container may not use: firewall.txt is then missing, with the reason.
+			var idx facts.Index
+			if err := json.Unmarshal(idxOut, &idx); err != nil {
+				t.Fatalf("no facts/index.json: %v\n%s", err, idxOut)
+			}
+			want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "users.json"}
+			if len(idx.Missing) == 1 && idx.Missing[0].Fact == "firewall.txt" && strings.Contains(idx.Missing[0].Reason, "Operation not permitted") {
+				want = slices.DeleteFunc(want, func(f string) bool { return f == "firewall.txt" })
+				idx.Missing = nil
+			}
+			if !slices.Equal(idx.Collected, want) || len(idx.Missing) != 0 {
+				t.Errorf("facts: %+v", idx)
 			}
 		})
 	}
