@@ -177,7 +177,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 			rec.Stages["audit"] = run.StageFailed
 		}
 	}
-	rec.Counts["coverageGaps"] = len(report.Gaps(inv, aud))
+	rec.Counts["coverageGaps"] = len(report.Gaps(inv, aud, nil))
 
 	if rec.Status != run.Interrupted {
 		rec.Finish(d.now())

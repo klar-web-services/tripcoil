@@ -241,7 +241,7 @@ func TestRenderNamesAtMostFiveItems(t *testing.T) {
 }
 
 func TestGaps(t *testing.T) {
-	gaps := Gaps(hostInventory(), hostAudit())
+	gaps := Gaps(hostInventory(), hostAudit(), nil)
 	var codes []string
 	for _, g := range gaps {
 		codes = append(codes, g.Code)
@@ -250,7 +250,7 @@ func TestGaps(t *testing.T) {
 		t.Fatalf("gaps %v", gaps)
 	}
 	// Without an audit, the Inventory's unresolved origins are still gaps.
-	if gaps := Gaps(hostInventory(), nil); len(gaps) != 3 || gaps[0].Code != problem.OriginUnresolved {
+	if gaps := Gaps(hostInventory(), nil, nil); len(gaps) != 3 || gaps[0].Code != problem.OriginUnresolved {
 		t.Fatalf("gaps without an audit %v", gaps)
 	}
 }

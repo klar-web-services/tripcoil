@@ -11,18 +11,26 @@ import (
 	"unicode"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/problem"
+	"github.com/klar-web-services/tripcoil/internal/review"
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// Input is what a run produced. Inventory and Audit are nil when their stage wrote nothing.
+// Input is what a run produced. Inventory, Audit, Facts and Review are nil when their stage wrote
+// nothing.
 type Input struct {
 	Run       *run.Record
 	Inventory *inventory.Inventory
 	Audit     *audit.Audit
-	// NoReview says why the report is audit-only.
+	Facts     *facts.Index
+	// Review is the run's review, or the one it carries forward (Run.CarriedFrom). Without it, the
+	// report is audit-only, and NoReview says why.
+	Review   *review.Review
 	NoReview string
+	// Agent names the agent CLI, its version and the model, for the host line.
+	Agent string
 }
 
 // maxItems is how many items a finding names; the C library belongs to nearly every process.
@@ -37,14 +45,19 @@ type Gap struct {
 }
 
 // Gaps lists the coverage gaps of a run: unresolved and unidentified origins, items without an
-// app directory, and containers audited by their image only.
-func Gaps(inv *inventory.Inventory, aud *audit.Audit) []Gap {
+// app directory, containers audited by their image only, and facts that could not be collected.
+func Gaps(inv *inventory.Inventory, aud *audit.Audit, idx *facts.Index) []Gap {
+	var gaps []Gap
+	if idx != nil {
+		for _, m := range idx.Missing {
+			gaps = append(gaps, Gap{problem.FactMissing, "facts/" + m.Fact, m.Reason})
+		}
+	}
 	if inv == nil {
-		return nil
+		return gaps
 	}
 	names := itemNames(inv)
 	origins := originsByID(inv)
-	var gaps []Gap
 	for _, o := range inv.Origins {
 		if o.Kind == inventory.OriginUnresolved {
 			gaps = append(gaps, Gap{problem.OriginUnresolved, describe(o, names[o.ID]), o.Reason})
@@ -72,8 +85,11 @@ func Gaps(inv *inventory.Inventory, aud *audit.Audit) []Gap {
 
 // Render writes report.md. It always renders, whatever the run produced.
 func Render(in Input) string {
+	if in.Review != nil && in.Audit != nil && in.Run.Status != run.Interrupted && in.Run.Stages["audit"] != run.StageFailed {
+		return renderReviewed(in)
+	}
 	var b strings.Builder
-	gaps := Gaps(in.Inventory, in.Audit)
+	gaps := Gaps(in.Inventory, in.Audit, in.Facts)
 	b.WriteString(verdict(in, len(gaps)) + "\n\n")
 	b.WriteString(hostLine(in) + "\n\n")
 	if len(in.Run.Errors) > 0 {
@@ -208,6 +224,11 @@ var severities = []string{"Critical", "High", "Medium", "Low", "Negligible", "Un
 // writeFindings lists critical and high findings in full, grouped by vulnerability, and
 // summarizes medium and low ones by where they are.
 func writeFindings(b *strings.Builder, findings []audit.Finding, inv *inventory.Inventory) {
+	writeFindingsAt(b, "##", findings, inv)
+}
+
+// writeFindingsAt is writeFindings with the tiers' headings at level (## or ###).
+func writeFindingsAt(b *strings.Builder, level string, findings []audit.Finding, inv *inventory.Inventory) {
 	byTier := map[string][]audit.Finding{}
 	for _, f := range findings {
 		byTier[f.Risk] = append(byTier[f.Risk], f)
@@ -217,7 +238,7 @@ func writeFindings(b *strings.Builder, findings []audit.Finding, inv *inventory.
 		if len(fs) == 0 {
 			continue
 		}
-		fmt.Fprintf(b, "## %s risk (%d)\n\n", titleCase(tier), len(fs))
+		fmt.Fprintf(b, "%s %s risk (%d)\n\n", level, titleCase(tier), len(fs))
 		if tier == audit.RiskCritical || tier == audit.RiskHigh {
 			writeByVulnerability(b, fs, itemNamesByID(inv))
 		} else {
