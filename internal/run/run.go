@@ -37,10 +37,17 @@ type Record struct {
 	Stages        map[string]string `json:"stages"`
 	Status        string            `json:"status"`
 	Counts        map[string]int    `json:"counts"`
-	Errors        []problem.Problem `json:"errors"`
-	Warnings      []problem.Problem `json:"warnings"`
-	Notices       []problem.Problem `json:"notices"`
-	ExitCode      int               `json:"exitCode"`
+	// Fingerprint is the change check's fingerprint (spec section 8.6); empty when the run has none.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Reviewed says the run has a review of its own. CarriedFrom names the run whose review it carries
+	// forward instead. ReviewedAt is when the review it shows was made.
+	Reviewed    bool              `json:"reviewed"`
+	CarriedFrom string            `json:"carriedFrom,omitempty"`
+	ReviewedAt  time.Time         `json:"reviewedAt,omitzero"`
+	Errors      []problem.Problem `json:"errors"`
+	Warnings    []problem.Problem `json:"warnings"`
+	Notices     []problem.Problem `json:"notices"`
+	ExitCode    int               `json:"exitCode"`
 }
 
 // NewRecord starts a run.json.

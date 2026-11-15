@@ -40,6 +40,21 @@ const (
 	UpgradeCheckFailed     = "UPGRADE_CHECK_FAILED"      // warning: Grype could not check the upgrade lines, so none are given
 )
 
+// Codes of the Facts stage and the AI Review (spec sections 7, 8 and 12).
+const (
+	FactMissing          = "FACT_MISSING"           // gap: a fact could not be collected
+	AgentMissing         = "AGENT_MISSING"          // the agent CLI is not installed safely
+	AgentAuth            = "AGENT_AUTH"             // the agent CLI has no working credentials
+	AgentSandbox         = "AGENT_SANDBOX"          // the sandbox could not be set up or did not hold
+	AgentTimeout         = "AGENT_TIMEOUT"          // the review ran past review.timeout
+	AgentFailed          = "AGENT_FAILED"           // the agent CLI failed
+	AgentRefused         = "AGENT_REFUSED"          // the model refused the task
+	AgentOutputInvalid   = "AGENT_OUTPUT_INVALID"   // the review does not parse or does not match the schema
+	ReviewUnsupported    = "REVIEW_UNSUPPORTED"     // notice: systemd older than 247, so no review
+	ReviewEntriesDropped = "REVIEW_ENTRIES_DROPPED" // warning: review entries for unknown findings or items were dropped
+	AgentNetworkRestored = "AGENT_NETWORK_RESTORED" // warning: the agent's network table was recreated during the review
+)
+
 // Problem is one recorded error, warning, notice or coverage gap.
 type Problem struct {
 	Code    string `json:"code"`

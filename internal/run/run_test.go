@@ -2,6 +2,8 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,5 +50,25 @@ func TestRecord(t *testing.T) {
 	i.Interrupt(start.Add(time.Second), "inventory")
 	if i.Status != Interrupted || i.ExitCode != 2 || i.Stages["inventory"] != StageFailed || len(i.Errors) != 1 || i.Errors[0].Code != problem.Interrupted {
 		t.Fatalf("interrupted %+v", i)
+	}
+}
+
+func TestRecordReviewFields(t *testing.T) {
+	r := NewRecord("20261114T061500Z-3fa2", time.Date(2026, 11, 14, 6, 15, 0, 0, time.UTC), "manual", map[string]string{})
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"reviewed":false`) || strings.Contains(s, "carriedFrom") || strings.Contains(s, "reviewedAt") || strings.Contains(s, "fingerprint") {
+		t.Errorf("a run without a review: %s", s)
+	}
+	r.Fingerprint, r.CarriedFrom, r.ReviewedAt = "ab", "20261113T061500Z-0001", time.Date(2026, 11, 13, 7, 0, 0, 0, time.UTC)
+	data, _ = json.Marshal(r)
+	s = string(data)
+	for _, want := range []string{`"fingerprint":"ab"`, `"carriedFrom":"20261113T061500Z-0001"`, `"reviewedAt":"2026-11-13T07:00:00Z"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %s in %s", want, s)
+		}
 	}
 }
