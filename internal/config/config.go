@@ -174,6 +174,9 @@ func validate(c Config, root *yaml.Node, stat StatFunc) []string {
 	default:
 		p = append(p, at("version")+fmt.Sprintf("version must be 1, found %d", c.Version))
 	}
+	if c.Review.Timeout.Std() < time.Second { // systemd reads RuntimeMaxSec=0 as no limit
+		p = append(p, at("review", "timeout")+fmt.Sprintf("review.timeout must be at least 1s, found %s", c.Review.Timeout.Std()))
+	}
 	if c.Interval.Std() < 15*time.Minute {
 		p = append(p, at("interval")+fmt.Sprintf("interval must be at least 15m, found %s", c.Interval.Std()))
 	}

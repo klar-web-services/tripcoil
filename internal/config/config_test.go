@@ -81,6 +81,7 @@ func TestProblems(t *testing.T) {
 		{"bad address", "version: 1\nreview:\n  allowAddresses: [10.0.0.5, nope]\n", `line 3: review.allowAddresses[1]: "nope" is not an IP address or CIDR range`},
 		{"memory", "version: 1\nreview:\n  memoryMax: 2GB\n", `line 3: review.memoryMax must be a size such as 2G or 512M, found "2GB"`},
 		{"cpu", "version: 1\nreview:\n  cpuQuota: \"100\"\n", `line 3: review.cpuQuota must be a percentage such as 100%, found "100"`},
+		{"short timeout", "version: 1\nreview:\n  timeout: 500ms\n", "line 3: review.timeout must be at least 1s, found 500ms"},
 		{"relative command", "version: 1\nreview:\n  command: claude\n", `line 3: review.command must be an absolute path, found "claude"`},
 		{"keepRuns", "version: 1\nretention:\n  keepRuns: 0\n", "line 3: retention.keepRuns must be at least 1"},
 		{"db age", "version: 1\naudit:\n  maxDatabaseAgeHours: 0\n", "line 3: audit.maxDatabaseAgeHours must be at least 1"},
