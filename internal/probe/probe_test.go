@@ -20,8 +20,13 @@ func setup(t *testing.T) (*Setup, string) {
 			t.Fatal(err)
 		}
 	}
+	// Leftovers of a probe a killed Tripcoil did not clean up.
+	for _, p := range []string{"etc-tripcoil/.probe-0123456789ab", "cache/.probe-0123456789ab", ".probe-0123456789ab-w/file", "runs/.probe-0123456789ab/run.json"} {
+		os.MkdirAll(filepath.Join(state, filepath.Dir(p)), 0o755)
+		os.WriteFile(filepath.Join(state, p), nil, 0o644)
+	}
 	os.MkdirAll(run, 0o755)
-	s, err := Prepare(state, filepath.Join(state, "etc-tripcoil"), run, os.Getuid(), os.Getgid(),
+	s, err := Prepare(state, filepath.Join(state, "etc-tripcoil"), run, "", os.Getuid(), os.Getgid(),
 		[]netip.Addr{netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("fe80::1")}, []netip.Addr{netip.MustParseAddr("127.0.0.53"), netip.MustParseAddr("10.53.0.1"), netip.MustParseAddr("1.1.1.1")})
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +40,11 @@ func setup(t *testing.T) (*Setup, string) {
 func TestRunOutsideSandbox(t *testing.T) {
 	s, state := setup(t)
 	a := s.Args
+	for _, p := range []string{"etc-tripcoil/.probe-0123456789ab", "cache/.probe-0123456789ab", ".probe-0123456789ab-w", "runs/.probe-0123456789ab"} {
+		if _, err := os.Lstat(filepath.Join(state, p)); err == nil {
+			t.Errorf("stale %s not removed", p)
+		}
+	}
 	if len(a.Reads) != 3 || len(a.Writes) != 1 || a.RootPID != os.Getpid() || a.RunID != "20261115T061500Z-3fa2" ||
 		!slices.Contains(a.Private, "/tmp/"+filepath.Base(a.Reads[0])) {
 		t.Fatalf("args %+v", a)
@@ -105,6 +115,18 @@ func TestChecksBlocked(t *testing.T) {
 	data, _ := json.Marshal(checks)
 	if f := Failures(a, data); len(f) != 0 {
 		t.Errorf("failures %q", f)
+	}
+}
+
+func TestHomeCheck(t *testing.T) {
+	if c := homeCheck("/proc"); c.Blocked || c.Result != "not a tmpfs" {
+		t.Errorf("/proc: %+v", c)
+	}
+	if c := homeCheck("/no/such/home"); c.Blocked || c.Result != "no such file or directory" {
+		t.Errorf("missing: %+v", c)
+	}
+	if c := homeCheck("/dev/shm"); c.Blocked != (c.Result == "a tmpfs it can write to") {
+		t.Errorf("/dev/shm: %+v", c)
 	}
 }
 

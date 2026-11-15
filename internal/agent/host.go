@@ -208,7 +208,7 @@ func (h *Host) probe(ctx context.Context, sb sandbox.Sandbox, base sandbox.Spec,
 		return fail(problem.AgentSandbox, "cannot copy Tripcoil's binary for the probe: %v", err)
 	}
 	defer os.Remove(bin)
-	setup, err := probe.Prepare(h.stateDir, h.configDir, base.RunDir, int(base.User.UID), int(base.User.GID), policy.Own, policy.Nameservers)
+	setup, err := probe.Prepare(h.stateDir, h.configDir, base.RunDir, base.Home(), int(base.User.UID), int(base.User.GID), policy.Own, policy.Nameservers)
 	if err != nil {
 		return fail(problem.AgentSandbox, "cannot prepare the sandbox probe: %v", err)
 	}

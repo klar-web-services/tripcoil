@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -24,6 +25,7 @@ type Args struct {
 	Reads   []string `json:"reads"`   // files the agent could read without the sandbox
 	Writes  []string `json:"writes"`  // files it could create without the sandbox, in a folder of its group
 	Private []string `json:"private"` // files in folders anyone may write to, which must not show on the host
+	Home    string   `json:"home"`    // the per-review home: it must be a tmpfs the agent can write to
 	Runs    string   `json:"runs"`    // the runs folder, which may show only RunID
 	RunID   string   `json:"runId"`   //
 	RootPID int      `json:"rootPid"` // Tripcoil's PID, whose command line must stay unreadable
@@ -91,6 +93,9 @@ func Run(a Args) []Check {
 		}
 		out = append(out, c)
 	}
+	if a.Home != "" {
+		out = append(out, homeCheck(a.Home))
+	}
 	if a.RootPID > 0 {
 		p := fmt.Sprintf("/proc/%d/cmdline", a.RootPID)
 		_, err := os.ReadFile(p)
@@ -103,6 +108,30 @@ func Run(a Args) []Check {
 		out = append(out, udpCheck(t))
 	}
 	return out
+}
+
+// homeCheck passes when the home is a tmpfs, which bounds what the agent writes there, and the
+// agent can write to it. A Tripcoil running in a mount namespace of its own mounts the tmpfs where
+// the sandbox does not see it.
+func homeCheck(home string) Check {
+	c := Check{Check: "home", Target: home}
+	var st unix.Statfs_t
+	if err := unix.Statfs(home, &st); err != nil {
+		c.Result = errText(err)
+		return c
+	}
+	if st.Type != unix.TMPFS_MAGIC {
+		c.Result = "not a tmpfs"
+		return c
+	}
+	p := filepath.Join(home, ".probe-home")
+	if err := os.WriteFile(p, []byte("tripcoil sandbox probe\n"), 0o600); err != nil {
+		c.Result = "not writable: " + errText(err)
+		return c
+	}
+	os.Remove(p)
+	c.Result, c.Blocked = "a tmpfs it can write to", true // "blocked" here means the check passed
+	return c
 }
 
 // fileCheck counts a permission, read-only or not-found error as blocked.
@@ -184,7 +213,7 @@ func Failures(a Args, output []byte) []string {
 		}
 	}
 	// Every check must have run: a probe that stopped early proves nothing.
-	if want := len(a.Reads) + len(a.Writes) + len(a.Private) + len(a.TCP) + len(a.UDP) + btoi(a.Runs != "") + btoi(a.RootPID > 0); len(checks) != want {
+	if want := len(a.Reads) + len(a.Writes) + len(a.Private) + len(a.TCP) + len(a.UDP) + btoi(a.Runs != "") + btoi(a.RootPID > 0) + btoi(a.Home != ""); len(checks) != want {
 		out = append(out, fmt.Sprintf("the probe made %d checks, expected %d", len(checks), want))
 	}
 	return out

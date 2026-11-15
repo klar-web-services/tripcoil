@@ -26,11 +26,23 @@ type Setup struct {
 // could write to, listens on every address on a free port, and returns the probe's arguments.
 // The cache folder is root's alone (0700), so its check holds even without the sandbox; the
 // others do not.
-func Prepare(stateDir, configDir, runDir string, agentUID, agentGID int, own, nameservers []netip.Addr) (*Setup, error) {
+func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, own, nameservers []netip.Addr) (*Setup, error) {
 	b := make([]byte, 6)
 	rand.Read(b)
 	tok := ".probe-" + hex.EncodeToString(b)
-	s := &Setup{Args: Args{Runs: filepath.Join(stateDir, "runs"), RunID: filepath.Base(runDir), RootPID: os.Getpid(), ClearKeyrings: true}, agentUID: agentUID}
+	// What a killed Tripcoil left of an earlier probe (the run lock keeps probes apart).
+	for _, dir := range []string{configDir, filepath.Join(stateDir, "cache"), stateDir, filepath.Join(stateDir, "runs")} {
+		stale, _ := filepath.Glob(filepath.Join(dir, ".probe-*"))
+		for _, p := range stale {
+			os.RemoveAll(p)
+		}
+	}
+	s := &Setup{Args: Args{Runs: filepath.Join(stateDir, "runs"), RunID: filepath.Base(runDir), RootPID: os.Getpid(), Home: home, ClearKeyrings: true}, agentUID: agentUID}
+	if s.Args.RootPID <= 2 {
+		// Tripcoil is a container's first process: in bubblewrap's PID namespace these numbers
+		// are bubblewrap's and the probe's own, so the check would read the probe itself.
+		s.Args.RootPID = 0
+	}
 	ok := false
 	defer func() {
 		if !ok {

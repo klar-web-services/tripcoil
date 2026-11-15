@@ -47,7 +47,7 @@ func (f *fakeSandbox) Run(ctx context.Context, s sandbox.Spec) (sandbox.Result, 
 		if f.leak {
 			os.WriteFile(a.Private[0], []byte("x"), 0o600)
 		}
-		for _, list := range [][]string{a.Reads, a.Writes, a.Private, {a.Runs}, {fmt.Sprintf("/proc/%d/cmdline", a.RootPID)}, a.TCP, a.UDP} {
+		for _, list := range [][]string{a.Reads, a.Writes, a.Private, {a.Runs}, {a.Home}, {fmt.Sprintf("/proc/%d/cmdline", a.RootPID)}, a.TCP, a.UDP} {
 			for _, target := range list {
 				checks = append(checks, probe.Check{Check: "x", Target: target, Result: "r", Blocked: target != f.notBlocked})
 			}
