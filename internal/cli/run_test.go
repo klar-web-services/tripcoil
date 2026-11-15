@@ -261,6 +261,28 @@ func TestRunInterruptedDuringAudit(t *testing.T) {
 	}
 }
 
+func TestRunInterruptedDuringFacts(t *testing.T) {
+	d := testDeps(t, sampleInventory(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.interrupts = func() (context.Context, context.CancelFunc) { return ctx, cancel }
+	d.facts = func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
+		cancel()
+		return &facts.Index{Collected: []string{}, Missing: []facts.Missing{}, Notes: []string{}}, nil
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"run"}, &out, &errb, d); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	rec := readRecord(t, d.stateDir)
+	if rec.Status != run.Interrupted || rec.Stages["audit"] != run.StageOK || rec.Stages["facts"] != run.StageFailed ||
+		len(rec.Errors) != 1 || rec.Errors[0].Code != problem.Interrupted || rec.Errors[0].Stage != "facts" {
+		t.Fatalf("run.json %+v", rec)
+	}
+	if _, err := os.Lstat(filepath.Join(d.stateDir, "runs", "latest")); !os.IsNotExist(err) {
+		t.Fatal("latest must keep pointing at the last finished run")
+	}
+}
+
 func TestRunLowersItsPriority(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	called := false
