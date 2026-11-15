@@ -1,10 +1,13 @@
 package facts
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/klar-web-services/tripcoil/internal/dockerapi"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
@@ -42,8 +45,11 @@ func (c collector) containers() ([]Container, error) {
 			return nil, errNoDocker
 		}
 		det, err := c.d.Docker.Inspect(c.ctx, it.ContainerID)
-		if err != nil {
+		if errors.Is(err, dockerapi.ErrNotFound) {
 			continue // it stopped since the Inventory
+		}
+		if err != nil {
+			return nil, fmt.Errorf("container %s: %w", it.Name, err)
 		}
 		ct := Container{Item: it.ID, Name: it.Name, Privileged: det.HostConfig.Privileged, CapAdd: det.HostConfig.CapAdd,
 			HostNetwork: det.HostConfig.NetworkMode == "host", PIDMode: det.HostConfig.PidMode, User: det.Config.User,

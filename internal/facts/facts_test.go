@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -129,9 +130,16 @@ type fakeDocker map[string]dockerapi.Detail
 func (f fakeDocker) Inspect(_ context.Context, id string) (dockerapi.Detail, error) {
 	d, ok := f[id]
 	if !ok {
-		return dockerapi.Detail{}, errors.New("No such container")
+		return dockerapi.Detail{}, fmt.Errorf("GET /containers/%s/json: %w", id, dockerapi.ErrNotFound)
 	}
 	return d, nil
+}
+
+// brokenDocker is a daemon that fails every request.
+type brokenDocker struct{ err error }
+
+func (b brokenDocker) Inspect(context.Context, string) (dockerapi.Detail, error) {
+	return dockerapi.Detail{}, b.err
 }
 
 // fakeRun answers commands from a table; a missing command is not installed.
@@ -312,6 +320,33 @@ func TestCollectMissingFacts(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(runDir, "facts", name)); err == nil {
 			t.Errorf("%s written although it is missing", name)
 		}
+	}
+}
+
+func TestContainersDockerFails(t *testing.T) {
+	root, inv := fixture(t)
+	var calls []string
+	d := Deps{Root: root, Run: fakeRun(t, nil, &calls), LookPath: func(string) (string, error) { return "", errNotFound },
+		Docker: brokenDocker{errors.New(`Get "http://docker/containers/c1/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`)}}
+	runDir := t.TempDir()
+	idx, err := Collect(context.Background(), d, inv, runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(idx.Collected, "containers.json") {
+		t.Fatalf("containers.json collected although Docker failed: %+v", idx)
+	}
+	var reason string
+	for _, m := range idx.Missing {
+		if m.Fact == "containers.json" {
+			reason = m.Reason
+		}
+	}
+	if !strings.Contains(reason, "web") || !strings.Contains(reason, "deadline exceeded") {
+		t.Errorf("reason %q", reason)
+	}
+	if _, err := os.Stat(filepath.Join(runDir, "facts/containers.json")); err == nil {
+		t.Error("containers.json written although it is missing")
 	}
 }
 
