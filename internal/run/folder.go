@@ -169,3 +169,16 @@ func UpdateLatest(stateDir, name, id string) error {
 	}
 	return syncDir(runs)
 }
+
+// ReadRecord reads a run folder's run.json.
+func ReadRecord(dir string) (*Record, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
+	if err != nil {
+		return nil, err
+	}
+	var r Record
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
