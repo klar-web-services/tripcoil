@@ -137,6 +137,7 @@ func Exec(ctx context.Context, name string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = []string{"PATH=" + systemPath, "LC_ALL=C"}
+	cmd.WaitDelay = waitDelay // a process of systemd-run's transient unit can keep stdout open after the kill
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -152,6 +153,10 @@ func Exec(ctx context.Context, name string, args ...string) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// waitDelay is how long Exec waits for the command's output to close after the timeout; tests
+// shorten it.
+var waitDelay = 5 * time.Second
 
 // systemPath is where Tripcoil looks for the host's tools, never the caller's PATH.
 const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

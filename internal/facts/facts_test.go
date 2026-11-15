@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/dockerapi"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
@@ -393,6 +394,18 @@ func TestFirewallWithoutNft(t *testing.T) {
 	c.d.Run = fakeRun(t, map[string]string{"nft -s list ruleset": "table inet tripcoil {\n}\n"}, &calls)
 	if fw, _ := c.firewall(); fw != "### nft -s list ruleset\n\n# No firewall rules are loaded.\n" {
 		t.Errorf("empty ruleset gives %q", fw)
+	}
+}
+
+func TestExecTimeoutWithChildHoldingStdout(t *testing.T) {
+	defer func(d time.Duration) { waitDelay = d }(waitDelay)
+	waitDelay = 100 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := Exec(ctx, "sh", "-c", "sleep 5 & sleep 5")
+	if err == nil || time.Since(start) > 2*time.Second {
+		t.Errorf("returned after %v: %v", time.Since(start), err)
 	}
 }
 
