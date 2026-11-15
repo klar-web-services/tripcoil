@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/klar-web-services/tripcoil/internal/agentnet"
 	"github.com/klar-web-services/tripcoil/internal/config"
 	"github.com/klar-web-services/tripcoil/internal/probe"
@@ -52,6 +54,9 @@ type deps struct {
 	resolv   string // resolv.conf
 	exe      func() (string, error)
 	watch    time.Duration // how often the network table is checked
+	// mount mounts the home's tmpfs, unmount removes it (and every one stacked below it).
+	mount   func(home string, size int64, uid, gid uint32) error
+	unmount func(home string)
 }
 
 // New returns the agent for the config's review settings.
@@ -59,7 +64,7 @@ func New(cfg config.Config, stateDir, configDir string) *Host {
 	return &Host{cfg: cfg, stateDir: stateDir, configDir: configDir, d: deps{
 		platform: hostPlatform, user: lookupUser, findCLI: FindCLI,
 		apply: agentnet.Apply, present: agentnet.Present, remove: agentnet.Delete, own: agentnet.OwnAddrs,
-		resolv: "/etc/resolv.conf", exe: os.Executable, watch: 5 * time.Second,
+		resolv: "/etc/resolv.conf", exe: os.Executable, watch: 5 * time.Second, mount: mountHome, unmount: unmountHome,
 	}}
 }
 
@@ -93,11 +98,23 @@ func (h *Host) Review(ctx context.Context, runDir string) (out review.Output, _ 
 	}
 	base := sandbox.Spec{StateDir: h.stateDir, ConfigDir: h.configDir, RunDir: runDir, User: u, EnvFile: h.cfg.Review.EnvFile,
 		MemoryMax: h.cfg.Review.MemoryMax, CPUQuota: h.cfg.Review.CPUQuota}
+	// The home is a tmpfs of at most review.memoryMax, whose pages count against the agent's
+	// memory cap: on the state folder's disk, the agent could fill the host's disk.
 	home := base.Home()
-	if err := ResetHome(home, filepath.Join(h.configDir, "agent-home"), int(u.UID), int(u.GID)); err != nil {
+	size, err := sandbox.Bytes(h.cfg.Review.MemoryMax)
+	if err != nil {
+		return out, fail(problem.AgentSandbox, "%v", err)
+	}
+	h.d.unmount(home) // a mount that a killed Tripcoil left
+	mount := func(dir string) error { return h.d.mount(dir, size, u.UID, u.GID) }
+	if err := ResetHome(home, filepath.Join(h.configDir, "agent-home"), int(u.UID), int(u.GID), mount); err != nil {
+		h.d.unmount(home)
 		return out, fail(problem.AgentSandbox, "cannot prepare the agent's home %s: %v", home, err)
 	}
-	defer os.RemoveAll(home)
+	defer func() {
+		h.d.unmount(home)
+		os.RemoveAll(home)
+	}()
 	// The adapter's files go in before anything runs as the agent, so no link or pipe it made
 	// can be in their way.
 	in := Inputs{Prompt: review.Prompt, Schema: review.Schema, Home: home, Model: h.cfg.Review.Model, Extra: h.cfg.Review.ExtraArgs}
@@ -114,10 +131,17 @@ func (h *Host) Review(ctx context.Context, runDir string) (out review.Output, _ 
 	if err := h.d.apply(policy); err != nil {
 		return out, fail(problem.AgentSandbox, "cannot write the agent's network table (nftables): %v", err)
 	}
-	defer h.d.remove()
-	if stopLeftovers != nil {
-		defer stopLeftovers() // no unit of this review may outlive its network table
-	}
+	defer func() {
+		// No unit of this review may outlive its network table: one that cannot be stopped keeps it.
+		if stopLeftovers != nil {
+			if err := stopLeftovers(); err != nil {
+				out.Warnings = append(out.Warnings, problem.New(problem.Warning, problem.AgentUnitLeft, "review",
+					"a unit of the review could not be stopped, so the agent's network table stays in place: %v", err))
+				return
+			}
+		}
+		h.d.remove()
+	}()
 	rctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	warnings := h.watchNetwork(rctx, cancel, policy)
@@ -304,6 +328,19 @@ func hostPlatform() (sandbox.Sandbox, func() error, error) {
 		return nil, nil, fail(problem.AgentSandbox, "the review's sandbox needs cgroup v2 mounted at /sys/fs/cgroup")
 	}
 	return sandbox.Bwrap{Bwrap: bwrap, CgroupRoot: "/sys/fs/cgroup"}, nil, nil
+}
+
+func mountHome(home string, size int64, uid, gid uint32) error {
+	return unix.Mount("tmpfs", home, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV,
+		fmt.Sprintf("size=%d,mode=0700,uid=%d,gid=%d", size, uid, gid))
+}
+
+func unmountHome(home string) {
+	for range 10 {
+		if unix.Unmount(home, unix.MNT_DETACH) != nil {
+			return
+		}
+	}
 }
 
 // lookPath finds a tool on the fixed system path.

@@ -53,6 +53,7 @@ const (
 	ReviewUnsupported    = "REVIEW_UNSUPPORTED"     // notice: systemd older than 247, so no review
 	ReviewEntriesDropped = "REVIEW_ENTRIES_DROPPED" // warning: review entries for unknown findings or items were dropped
 	AgentNetworkRestored = "AGENT_NETWORK_RESTORED" // warning: the agent's network table was recreated during the review
+	AgentUnitLeft        = "AGENT_UNIT_LEFT"        // warning: a unit of the review could not be stopped, so its network table stays
 )
 
 // Problem is one recorded error, warning, notice or coverage gap.

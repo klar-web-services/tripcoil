@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ func TestResetHome(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpl, ".claude.json"), []byte("{}"), 0o644)
 	os.Symlink(".claude.json", filepath.Join(tmpl, "link"))
 	uid, gid := os.Getuid(), os.Getgid()
-	if err := ResetHome(home, tmpl, uid, gid); err != nil {
+	if err := ResetHome(home, tmpl, uid, gid, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "old")); err == nil {
@@ -77,7 +78,14 @@ func TestResetHome(t *testing.T) {
 		t.Errorf("auth.json: %q", data)
 	}
 	// Without a template the home is empty.
-	if err := ResetHome(home, filepath.Join(dir, "none"), uid, gid); err != nil {
+	mounted := ""
+	if err := ResetHome(home, filepath.Join(dir, "none"), uid, gid, func(d string) error { mounted = d; return nil }); err != nil || mounted != home {
+		t.Fatalf("%v, mounted %q", err, mounted)
+	}
+	if err := ResetHome(home, filepath.Join(dir, "none"), uid, gid, func(string) error { return errors.New("mount: permission denied") }); err == nil {
+		t.Fatal("mount error ignored")
+	}
+	if err := ResetHome(home, filepath.Join(dir, "none"), uid, gid, nil); err != nil {
 		t.Fatal(err)
 	}
 	if es, _ := os.ReadDir(home); len(es) != 0 {

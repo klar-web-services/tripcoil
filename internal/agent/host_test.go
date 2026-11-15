@@ -131,6 +131,13 @@ func newEnv(t *testing.T, agent string, run func(ctx context.Context, s sandbox.
 	h.d.findCLI = func(command, name string) (string, error) { return "/usr/local/bin/" + name, nil }
 	h.d.own = func() ([]netip.Addr, error) { return []netip.Addr{netip.MustParseAddr("203.0.113.7")}, nil }
 	h.d.resolv, h.d.exe, h.d.watch = resolv, func() (string, error) { return exe, nil }, 10*time.Millisecond
+	h.d.mount = func(home string, size int64, uid, gid uint32) error {
+		if size != 2<<30 || uid != uint32(os.Getuid()) {
+			t.Errorf("mount %s size %d uid %d", home, size, uid)
+		}
+		return nil
+	}
+	h.d.unmount = func(string) {}
 	n.deps(&h.d)
 	return &env{h: h, sb: sb, net: n, runDir: runDir}
 }
@@ -311,6 +318,46 @@ func TestReviewWritesFilesFirst(t *testing.T) {
 	os.Symlink("/etc/passwd", filepath.Join(tmpl, "tripcoil-schema.json"))
 	if _, err := e.h.Review(context.Background(), e.runDir); code(err) != problem.AgentSandbox || !strings.Contains(err.Error(), "file exists") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// The home is a tmpfs, mounted before the template is copied and gone after the review, also
+// when a killed Tripcoil left one.
+func TestReviewMountsHome(t *testing.T) {
+	e := newEnv(t, "claude", print(fixture(t, "agent/claude-success.json"), 0))
+	var calls []string
+	e.h.d.mount = func(home string, size int64, uid, gid uint32) error {
+		calls = append(calls, "mount "+filepath.Base(home))
+		return nil
+	}
+	e.h.d.unmount = func(home string) { calls = append(calls, "unmount "+filepath.Base(home)) }
+	if _, err := e.h.Review(context.Background(), e.runDir); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"unmount agent-home", "mount agent-home", "unmount agent-home"}; !slices.Equal(calls, want) {
+		t.Errorf("got %q", calls)
+	}
+	e.h.d.mount = func(string, int64, uint32, uint32) error { return errors.New("operation not permitted") }
+	if _, err := e.h.Review(context.Background(), e.runDir); code(err) != problem.AgentSandbox || !strings.Contains(err.Error(), "operation not permitted") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A unit that cannot be stopped keeps the network table, and says so.
+func TestReviewKeepsNetworkWhenUnitsStay(t *testing.T) {
+	e := newEnv(t, "claude", print(fixture(t, "agent/claude-success.json"), 0))
+	calls := 0
+	e.h.d.platform = func() (sandbox.Sandbox, func() error, error) {
+		return e.sb, func() error {
+			if calls++; calls > 1 {
+				return errors.New("Failed to stop tripcoil-review-x.service: Connection timed out")
+			}
+			return nil
+		}, nil
+	}
+	out, err := e.h.Review(context.Background(), e.runDir)
+	if err != nil || e.net.removed != 0 || len(out.Warnings) != 1 || out.Warnings[0].Code != problem.AgentUnitLeft || !strings.Contains(out.Warnings[0].Message, "network table stays in place") {
+		t.Fatalf("%v removed %d warnings %v", err, e.net.removed, out.Warnings)
 	}
 }
 

@@ -104,13 +104,19 @@ func safe(p string) error {
 }
 
 // ResetHome deletes home and creates it again for the agent's user, with a copy of the template
-// when there is one (spec section 8.2).
-func ResetHome(home, template string, uid, gid int) error {
+// when there is one (spec section 8.2). mount, when set, mounts a file system on the new folder
+// before the template is copied.
+func ResetHome(home, template string, uid, gid int, mount func(dir string) error) error {
 	if err := os.RemoveAll(home); err != nil {
 		return err
 	}
 	if err := os.Mkdir(home, 0o700); err != nil {
 		return err
+	}
+	if mount != nil {
+		if err := mount(home); err != nil {
+			return err
+		}
 	}
 	if err := os.Chown(home, uid, gid); err != nil {
 		return err
