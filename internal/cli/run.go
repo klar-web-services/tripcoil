@@ -18,6 +18,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/buildinfo"
 	"github.com/klar-web-services/tripcoil/internal/config"
 	"github.com/klar-web-services/tripcoil/internal/dockerapi"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/kernelcna"
@@ -29,16 +30,12 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-const runUsage = `Usage: tripcoil run [--json]
+const runUsage = `Usage: tripcoil run [--json] [--no-review] [--force-review]
 
 Run once now, as root, and write an evidence folder to /var/lib/tripcoil/runs/<run ID>/.
-This build runs the Inventory and the Audit; the AI Review comes in a later build.
 
 Flags:
 `
-
-// noReview says why reports are audit-only in this build.
-const noReview = "the AI review is not part of this build"
 
 // collectHost inventories the real host.
 func collectHost(ctx context.Context, cacheDir string) (*inventory.Inventory, error) {
@@ -64,6 +61,8 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	fs := flag.NewFlagSet("tripcoil run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "print run.json to stdout (logs go to stderr)")
+	noReviewFlag := fs.Bool("no-review", false, "skip the AI review; the report is audit-only")
+	forceReview := fs.Bool("force-review", false, "review even when nothing changed since the last review")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, runUsage)
 		fs.PrintDefaults()
@@ -76,6 +75,10 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "tripcoil run: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	if *noReviewFlag && *forceReview {
+		fmt.Fprintln(stderr, "tripcoil run: --no-review and --force-review exclude each other")
 		return 2
 	}
 	if d.euid() != 0 {
@@ -177,12 +180,28 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 			rec.Stages["audit"] = run.StageFailed
 		}
 	}
-	rec.Counts["coverageGaps"] = len(report.Gaps(inv, aud, nil))
+	var idx *facts.Index
+	if inv != nil && rec.Status != run.Interrupted {
+		idx, err = d.facts(ctx, inv, dir)
+		switch {
+		case ctx.Err() != nil:
+			rec.Interrupt(d.now(), "facts")
+		case err != nil:
+			rec.Stages["facts"] = run.StageFailed
+			rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write facts/: %v", err))
+		default:
+			rec.Stages["facts"] = run.StageOK
+		}
+	}
+
+	rv := reviewRun{d: d, cfg: cfg, rec: rec, dir: dir, inv: inv, aud: aud, idx: idx, noReview: *noReviewFlag, force: *forceReview}
+	rev, why := rv.run(ctx)
+	rec.Counts["coverageGaps"] = len(report.Gaps(inv, aud, idx))
 
 	if rec.Status != run.Interrupted {
 		rec.Finish(d.now())
 	}
-	md := report.Render(report.Input{Run: rec, Inventory: inv, Audit: aud, NoReview: noReview})
+	md := report.Render(report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, NoReview: why, Agent: rv.agentName()})
 	if err := run.WriteFile(filepath.Join(dir, "report.md"), []byte(md), 0o640); err != nil {
 		rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write report.md: %v", err))
 		if rec.Status != run.Interrupted {
@@ -197,8 +216,22 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		if err := run.UpdateLatest(d.stateDir, "latest", id); err != nil {
 			fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest: %v\n", err) // only a pointer; run.json stands
 		}
+		if rec.Reviewed {
+			if err := run.UpdateLatest(d.stateDir, "latest-reviewed", id); err != nil {
+				fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest-reviewed: %v\n", err) // the next run reviews again
+			}
+		}
 	}
 	return printRun(stdout, rec, dir, *jsonOut)
+}
+
+// factsHost collects the facts snapshot of the real host.
+func factsHost(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error) {
+	d := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath}
+	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
+		d.Docker, d.DockerSocket = dockerapi.New(socket), socket
+	}
+	return facts.Collect(ctx, d, inv, runDir)
 }
 
 // auditHost audits the Inventory with the pinned Grype and the kernel CNA data.

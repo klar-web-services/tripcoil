@@ -14,9 +14,11 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/buildinfo"
 	"github.com/klar-web-services/tripcoil/internal/config"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/priority"
+	"github.com/klar-web-services/tripcoil/internal/review"
 )
 
 const usage = `Tripcoil watches a running Linux server: it finds what is running, audits the
@@ -42,6 +44,9 @@ type deps struct {
 	stateDir   string
 	collect    func(ctx context.Context, cacheDir string) (*inventory.Inventory, error)
 	audit      func(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir string, cfg config.Config) *audit.Audit
+	facts      func(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error)
+	// agent returns the review agent for the config, or nil when this build cannot review.
+	agent func(cfg config.Config) review.Agent
 	// lowerPriority makes the run as light on the host as a scheduled one (spec section 13).
 	lowerPriority func() error
 	// interrupts returns a context that is cancelled by Ctrl-C or SIGTERM.
@@ -57,6 +62,8 @@ func defaultDeps() deps {
 		stateDir:      StateDir,
 		collect:       collectHost,
 		audit:         auditHost,
+		facts:         factsHost,
+		agent:         func(config.Config) review.Agent { return nil },
 		lowerPriority: priority.Lower,
 		interrupts: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

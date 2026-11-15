@@ -16,8 +16,10 @@ import (
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/config"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/problem"
+	"github.com/klar-web-services/tripcoil/internal/review"
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
@@ -37,6 +39,10 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		audit: func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
 			return sampleAudit(audit.Complete)
 		},
+		facts: func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
+			return &facts.Index{Collected: []string{}, Missing: []facts.Missing{}, Notes: []string{}}, nil
+		},
+		agent:         func(config.Config) review.Agent { return nil },
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
 	}
