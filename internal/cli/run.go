@@ -182,7 +182,11 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		}
 	}
 	var idx *facts.Index
-	if inv != nil && rec.Status != run.Interrupted {
+	switch {
+	case rec.Status == run.Interrupted:
+	case inv == nil:
+		rec.Stages["facts"] = run.StageSkipped
+	default:
 		idx, err = d.facts(ctx, inv, dir)
 		switch {
 		case ctx.Err() != nil:

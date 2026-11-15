@@ -200,8 +200,8 @@ func TestRunInventoryFailed(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d.stateDir, "runs", runID, "inventory.json")); !os.IsNotExist(err) {
 		t.Fatal("no inventory.json without an inventory")
 	}
-	if rec.Stages["audit"] != run.StageSkipped {
-		t.Fatalf("audit stage %q", rec.Stages["audit"])
+	if rec.Stages["audit"] != run.StageSkipped || rec.Stages["facts"] != run.StageSkipped {
+		t.Fatalf("stages %v", rec.Stages)
 	}
 	if md, _ := os.ReadFile(filepath.Join(d.stateDir, "runs", runID, "report.md")); !strings.HasPrefix(string(md), "⛔ Run incomplete: cannot inventory the host") {
 		t.Fatalf("report.md %s", md)
