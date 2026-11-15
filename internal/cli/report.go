@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,11 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/klar-web-services/tripcoil/internal/audit"
+	"github.com/klar-web-services/tripcoil/internal/facts"
+	"github.com/klar-web-services/tripcoil/internal/inventory"
+	"github.com/klar-web-services/tripcoil/internal/report"
+	"github.com/klar-web-services/tripcoil/internal/review"
+	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-const reportUsage = `Usage: tripcoil report [--run <run ID>]
+const reportUsage = `Usage: tripcoil report [--run <run ID>] [--json]
 
-Print the report of the latest finished run, or of the given run, as root.
+Print the report of the latest finished run, or of the given run, as root. With --json, print the
+run, its findings with their review entries, the added findings, coverage gaps and errors as JSON.
 
 Flags:
 `
@@ -24,6 +33,7 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 	flags := flag.NewFlagSet("tripcoil report", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	id := flags.String("run", "", "the run ID, such as 20261114T061500Z-3fa2 (default: the latest finished run)")
+	asJSON := flags.Bool("json", false, "print JSON instead of report.md")
 	flags.Usage = func() {
 		fmt.Fprint(stderr, reportUsage)
 		flags.PrintDefaults()
@@ -51,6 +61,9 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 		name = *id
 	}
 	runs := filepath.Join(d.stateDir, "runs")
+	if *asJSON {
+		return printJSONReport(stdout, stderr, filepath.Join(runs, name), *id)
+	}
 	data, err := os.ReadFile(filepath.Join(runs, name, "report.md"))
 	switch {
 	case errors.Is(err, fs.ErrNotExist) && *id == "":
@@ -72,4 +85,48 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 		return 2
 	}
 	return 0
+}
+
+// printJSONReport prints `tripcoil report --json` for a run folder.
+func printJSONReport(stdout, stderr io.Writer, dir, id string) int {
+	rec, err := run.ReadRecord(dir)
+	if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist) && id == "":
+			fmt.Fprintln(stderr, "No run has finished yet, or the latest run has no run.json. Start one with: sudo tripcoil run")
+		case errors.Is(err, fs.ErrNotExist):
+			fmt.Fprintf(stderr, "Run %s has no run.json.\n", id)
+		default:
+			fmt.Fprintf(stderr, "tripcoil report: %v\n", err)
+		}
+		return 2
+	}
+	in := report.Input{Run: rec}
+	var inv inventory.Inventory
+	if readOptional(filepath.Join(dir, "inventory.json"), &inv) {
+		in.Inventory = &inv
+	}
+	var aud audit.Audit
+	if readOptional(filepath.Join(dir, "audit.json"), &aud) {
+		in.Audit = &aud
+	}
+	var idx facts.Index
+	if readOptional(filepath.Join(dir, "facts", "index.json"), &idx) {
+		in.Facts = &idx
+	}
+	if rev, err := review.Load(dir); err == nil {
+		in.Review = rev
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report.JSON(in)); err != nil {
+		return 2
+	}
+	return 0
+}
+
+// readOptional reads a JSON file of a run folder that a stage may not have written.
+func readOptional(path string, v any) bool {
+	data, err := os.ReadFile(path)
+	return err == nil && json.Unmarshal(data, v) == nil
 }

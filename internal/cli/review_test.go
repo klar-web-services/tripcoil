@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -267,5 +268,39 @@ func TestRunReviewsAgainWhenUsersChange(t *testing.T) {
 	_, rec, _ = runOnce(t, d)
 	if calls != 2 || !rec.Reviewed {
 		t.Errorf("a new user with an empty password: calls %d, %+v", calls, rec)
+	}
+}
+
+func TestReportJSON(t *testing.T) {
+	calls := 0
+	d := reviewDeps(t, fakeAgent{out: validReview, calls: &calls})
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"report", "--json"}, &out, &errb, *d); code != 2 || !strings.Contains(errb.String(), "No run has finished yet") {
+		t.Fatalf("before any run: exit %d %q", code, errb.String())
+	}
+	_, rec, _ := runOnce(t, d)
+	out.Reset()
+	if code := dispatch([]string{"report", "--json"}, &out, &errb, *d); code != 0 {
+		t.Fatalf("exit %d %q", code, errb.String())
+	}
+	var got struct {
+		Run      run.Record       `json:"run"`
+		Summary  string           `json:"summary"`
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Run.RunID != rec.RunID || got.Summary != "The kernel CVE needs a local user." || len(got.Findings) != 1 ||
+		got.Findings[0]["review"].(map[string]any)["exploitability"] != "conditional" {
+		t.Errorf("%s", out.String())
+	}
+	out.Reset()
+	if code := dispatch([]string{"report", "--json", "--run", rec.RunID}, &out, &errb, *d); code != 0 || !strings.Contains(out.String(), rec.RunID) {
+		t.Errorf("--run: exit %d", code)
+	}
+	errb.Reset()
+	if code := dispatch([]string{"report", "--json", "--run", "20261114T061500Z-0000"}, &out, &errb, *d); code != 2 || !strings.Contains(errb.String(), "has no run.json") {
+		t.Errorf("unknown run: exit %d %q", code, errb.String())
 	}
 }
