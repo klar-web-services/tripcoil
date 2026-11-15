@@ -23,7 +23,7 @@ type Systemd struct {
 func SystemdArgs(s Spec) []string {
 	a := []string{"--wait", "--pipe", "--collect", "--service-type=exec", "--unit=" + UnitPrefix + s.Name,
 		"--uid=" + s.User.Name, "--gid=" + s.User.Name, "--working-directory=" + s.RunDir,
-		"-p", "ProtectSystem=strict", "-p", "ProtectHome=yes", "-p", "PrivateTmp=yes", "-p", "PrivateDevices=yes",
+		"-p", "ProtectSystem=strict", "-p", "ProtectHome=yes", "-p", "PrivateDevices=yes",
 		"-p", "ProtectProc=invisible", "-p", "NoNewPrivileges=yes",
 		"-p", "ReadWritePaths=" + s.Home()}
 	var hide []string
@@ -32,14 +32,18 @@ func SystemdArgs(s Spec) []string {
 	}
 	a = append(a, "-p", "InaccessiblePaths="+strings.Join(hide, " "),
 		"-p", "TemporaryFileSystem="+s.runs(), "-p", "BindReadOnlyPaths="+s.RunDir,
-		// PrivateDevices binds the host's /dev/shm; a private one leaves nothing behind.
-		"-p", "TemporaryFileSystem=/dev/shm:mode=1777", "-p", "RemoveIPC=yes",
+		// Private tmpfs instead of PrivateTmp's folders on disk: what the agent writes there counts
+		// against MemoryMax and cannot fill the host's disk. PrivateDevices binds the host's
+		// /dev/shm; a private one leaves nothing behind.
+		"-p", "TemporaryFileSystem=/tmp:mode=1777 /var/tmp:mode=1777 /dev/shm:mode=1777", "-p", "RemoveIPC=yes",
 		// ProtectSystem=strict leaves /run writable, with world-writable folders such as /run/lock.
 		"-p", "ReadOnlyPaths=/run",
 		// The kernel's keyrings and core dumps belong to the user, not the unit, and would carry
 		// what one review stored or held in memory into the next.
 		"-p", "SystemCallFilter=~@keyring", "-p", "SystemCallErrorNumber=EPERM", "-p", "LimitCORE=0",
 		"-p", fmt.Sprintf("RuntimeMaxSec=%d", int(s.Timeout.Seconds())), "-p", "MemoryMax="+s.MemoryMax, "-p", "CPUQuota="+s.CPUQuota,
+		// memory.max leaves swap out; without swap the cap holds. TasksMax stops a fork bomb.
+		"-p", "MemorySwapMax=0", "-p", fmt.Sprintf("TasksMax=%d", MaxTasks),
 		"-p", "Nice=10", "-p", "IOSchedulingClass=idle")
 	if s.EnvFile != "" {
 		a = append(a, "-p", "EnvironmentFile="+s.EnvFile)

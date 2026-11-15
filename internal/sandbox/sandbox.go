@@ -76,6 +76,9 @@ func Booted() bool {
 	return err == nil && fi.IsDir()
 }
 
+// MaxTasks caps the agent's processes and threads, so it cannot take every PID of the host.
+const MaxTasks = 4096
+
 // MinSystemd is the oldest systemd whose transient units give the sandbox (spec section 8.2).
 const MinSystemd = 247
 

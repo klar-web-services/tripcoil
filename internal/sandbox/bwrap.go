@@ -99,13 +99,13 @@ func (d Bwrap) Run(ctx context.Context, s Spec) (Result, error) {
 	case err = <-done:
 	case <-timer.C:
 		res.TimedOut = true
-		d.kill(cmd)
+		d.kill()
 		err = <-done
 	case <-ctx.Done():
-		d.kill(cmd)
+		d.kill()
 		err = <-done
 	}
-	d.kill(cmd) // whatever the command left behind
+	d.kill() // whatever the command left behind
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit):
@@ -134,7 +134,7 @@ func (d Bwrap) prepare(s Spec) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range []string{"memory", "cpu"} {
+	for _, c := range []string{"memory", "cpu", "pids"} {
 		if !strings.Contains(" "+strings.TrimSpace(string(have))+" ", " "+c+" ") {
 			if err := os.WriteFile(ctl, []byte("+"+c), 0); err != nil {
 				return nil, fmt.Errorf("enable the %s controller: %w", c, err)
@@ -145,7 +145,8 @@ func (d Bwrap) prepare(s Spec) (*os.File, error) {
 	if err := os.Mkdir(d.Cgroup(), 0o755); err != nil {
 		return nil, err
 	}
-	for f, v := range map[string]string{"memory.max": strconv.FormatInt(mem, 10), "cpu.max": fmt.Sprintf("%d 100000", quota*1000)} {
+	for f, v := range map[string]string{"memory.max": strconv.FormatInt(mem, 10), "cpu.max": fmt.Sprintf("%d 100000", quota*1000),
+		"pids.max": strconv.Itoa(MaxTasks)} {
 		if err := os.WriteFile(filepath.Join(d.Cgroup(), f), []byte(v), 0); err != nil {
 			return nil, fmt.Errorf("%s: %w", f, err)
 		}
@@ -157,10 +158,26 @@ func (d Bwrap) prepare(s Spec) (*os.File, error) {
 	return os.Open(d.Cgroup())
 }
 
-// kill ends bubblewrap's process group and every process left in the cgroup.
-func (d Bwrap) kill(cmd *exec.Cmd) {
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	os.WriteFile(filepath.Join(d.Cgroup(), "cgroup.kill"), []byte("1"), 0)
+// kill ends every process in the cgroup, bubblewrap included: a process the agent moved out of
+// bubblewrap's process group is still in it. Kernels before 5.14 have no cgroup.kill; there each
+// process the group lists is killed, until none is left.
+func (d Bwrap) kill() {
+	if err := os.WriteFile(filepath.Join(d.Cgroup(), "cgroup.kill"), []byte("1"), 0); !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	for range 50 {
+		procs, err := os.ReadFile(filepath.Join(d.Cgroup(), "cgroup.procs"))
+		pids := strings.Fields(string(procs))
+		if err != nil || len(pids) == 0 {
+			return
+		}
+		for _, p := range pids {
+			if pid, err := strconv.Atoi(p); err == nil {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // remove deletes the cgroup once its processes are gone.
@@ -168,7 +185,7 @@ func (d Bwrap) remove() {
 	if !exists(d.Cgroup()) {
 		return
 	}
-	os.WriteFile(filepath.Join(d.Cgroup(), "cgroup.kill"), []byte("1"), 0)
+	d.kill()
 	for range 50 {
 		if err := os.Remove(d.Cgroup()); err == nil || errors.Is(err, os.ErrNotExist) {
 			return

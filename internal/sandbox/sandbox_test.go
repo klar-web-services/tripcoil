@@ -41,8 +41,6 @@ ProtectSystem=strict
 -p
 ProtectHome=yes
 -p
-PrivateTmp=yes
--p
 PrivateDevices=yes
 -p
 ProtectProc=invisible
@@ -57,7 +55,7 @@ TemporaryFileSystem=/var/lib/tripcoil/runs
 -p
 BindReadOnlyPaths=/var/lib/tripcoil/runs/20261115T061500Z-3fa2
 -p
-TemporaryFileSystem=/dev/shm:mode=1777
+TemporaryFileSystem=/tmp:mode=1777 /var/tmp:mode=1777 /dev/shm:mode=1777
 -p
 RemoveIPC=yes
 -p
@@ -74,6 +72,10 @@ RuntimeMaxSec=3600
 MemoryMax=2G
 -p
 CPUQuota=100%
+-p
+MemorySwapMax=0
+-p
+TasksMax=4096
 -p
 Nice=10
 -p
