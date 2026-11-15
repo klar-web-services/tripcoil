@@ -18,7 +18,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// notInBuild says why reports are audit-only in this build.
+// notInBuild says why a report is audit-only when there is no agent to run, as in tests.
 const notInBuild = "the AI review is not part of this build"
 
 // reviewRun is the change check and the AI Review of one run (spec sections 8 and 8.6).
@@ -100,9 +100,16 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 		return nil, notInBuild
 	}
 	out, err := agent.Review(ctx, r.dir)
+	rec.Add(out.Warnings...)
 	if ctx.Err() != nil {
 		rec.Interrupt(r.d.now(), "review")
 		return nil, ""
+	}
+	var unsupported *review.Failure
+	if errors.As(err, &unsupported) && unsupported.Code == problem.ReviewUnsupported {
+		rec.Add(problem.New(problem.Notice, problem.ReviewUnsupported, "review", "%s", unsupported.Message))
+		rec.Stages["review"] = run.StageSkipped
+		return nil, "no AI review: " + unsupported.Message
 	}
 	if out.CLI != "" {
 		rec.Versions["agentCli"], r.cli = out.CLI, out.CLI

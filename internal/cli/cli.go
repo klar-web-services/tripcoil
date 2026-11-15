@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/klar-web-services/tripcoil/internal/agent"
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/buildinfo"
 	"github.com/klar-web-services/tripcoil/internal/config"
@@ -18,6 +20,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/priority"
+	"github.com/klar-web-services/tripcoil/internal/probe"
 	"github.com/klar-web-services/tripcoil/internal/review"
 )
 
@@ -63,12 +66,17 @@ func defaultDeps() deps {
 		collect:       collectHost,
 		audit:         auditHost,
 		facts:         factsHost,
-		agent:         func(config.Config) review.Agent { return nil },
+		agent:         hostAgent,
 		lowerPriority: priority.Lower,
 		interrupts: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
 	}
+}
+
+// hostAgent is the review agent of this machine (spec section 8).
+func hostAgent(cfg config.Config) review.Agent {
+	return agent.New(cfg, StateDir, filepath.Dir(config.DefaultPath))
 }
 
 // Run executes the command line and returns the process exit code.
@@ -87,6 +95,8 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 		return runRun(args[1:], stdout, stderr, d)
 	case "report":
 		return runReport(args[1:], stdout, stderr, d)
+	case "sandbox-probe": // hidden: run by Tripcoil itself inside the sandbox (spec section 8.2)
+		return probe.Main(args[1:], stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "tripcoil %s\ngrype %s\nprompt %s\n", buildinfo.Version, grype.Version, review.PromptVersion)
 		return 0

@@ -332,3 +332,55 @@ func TestReportJSON(t *testing.T) {
 		t.Errorf("unknown run: exit %d %q", code, errb.String())
 	}
 }
+
+func TestRunReviewUnsupported(t *testing.T) {
+	calls := 0
+	d := reviewDeps(t, fakeAgent{calls: &calls})
+	d.agent = func(config.Config) review.Agent {
+		return agentFunc(func(context.Context, string) (review.Output, error) {
+			return review.Output{}, &review.Failure{Code: problem.ReviewUnsupported, Message: "systemd 245 is older than 247, which the review's sandbox needs"}
+		})
+	}
+	code, rec, md := runOnce(t, d)
+	if code != 0 || rec.Status != run.Complete || rec.Stages["review"] != run.StageSkipped || len(rec.Errors) != 0 ||
+		len(rec.Notices) == 0 || rec.Notices[len(rec.Notices)-1].Code != problem.ReviewUnsupported {
+		t.Fatalf("exit %d %+v", code, rec)
+	}
+	if !strings.HasPrefix(md, "⚠️ Audit only (no AI review: systemd 245 is older than 247, which the review's sandbox needs)") {
+		t.Errorf("report:\n%s", md)
+	}
+}
+
+// Warnings from the review are recorded even when it failed.
+func TestRunReviewWarningsOnFailure(t *testing.T) {
+	calls := 0
+	d := reviewDeps(t, fakeAgent{calls: &calls})
+	restored := problem.New(problem.Warning, problem.AgentNetworkRestored, "review", "restored")
+	d.agent = func(config.Config) review.Agent {
+		return agentFunc(func(context.Context, string) (review.Output, error) {
+			return review.Output{CLI: "claude 2.1.309", Warnings: []problem.Problem{restored}},
+				&review.Failure{Code: problem.AgentTimeout, Message: "the review ran longer than review.timeout (1h0m0s) and was stopped"}
+		})
+	}
+	code, rec, md := runOnce(t, d)
+	if code != 1 || rec.Status != run.Partial || len(rec.Warnings) != 1 || rec.Warnings[0] != restored ||
+		rec.Errors[0].Code != problem.AgentTimeout || rec.Versions["agentCli"] != "claude 2.1.309" {
+		t.Fatalf("exit %d %+v", code, rec)
+	}
+	if !strings.HasPrefix(md, "⚠️ Audit only (AI review failed: AGENT_TIMEOUT)") {
+		t.Errorf("report:\n%s", md)
+	}
+}
+
+func TestSandboxProbeCommand(t *testing.T) {
+	var out, errb bytes.Buffer
+	d := testDeps(t, sampleInventory(), nil)
+	d.euid = func() int { return 990 } // the probe runs as the agent's user
+	missing := filepath.Join(t.TempDir(), "missing")
+	if code := dispatch([]string{"sandbox-probe", `{"reads":["` + missing + `"]}`}, &out, &errb, d); code != 0 {
+		t.Fatalf("exit %d %q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), `"blocked":true`) {
+		t.Errorf("got %q", out.String())
+	}
+}

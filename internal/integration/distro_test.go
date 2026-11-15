@@ -96,8 +96,9 @@ func TestDistros(t *testing.T) {
 				}
 			})
 			// Alpine 3.18's busybox runs a plain "sleep" in a fork of the shell, under the shell's
-			// command line; one with a path it executes.
-			script := "/bin/sleep 600 & sleep 1; /usr/local/bin/tripcoil run >/tmp/run.out 2>&1; code=$?; cat /tmp/run.out >&2; " +
+			// command line; one with a path it executes. There is no agent CLI here: TestSandbox
+			// tests the review.
+			script := "/bin/sleep 600 & sleep 1; /usr/local/bin/tripcoil run --no-review >/tmp/run.out 2>&1; code=$?; cat /tmp/run.out >&2; " +
 				"cat /var/lib/tripcoil/runs/latest/inventory.json; echo; echo @@@$((6*7))@@@; " +
 				"cat /var/lib/tripcoil/runs/latest/audit.json; echo; echo @@@$((6*7+1))@@@; cat /var/lib/tripcoil/runs/latest/facts/index.json; exit $code"
 			ctx, cancel := context.WithTimeout(interrupt, 5*time.Minute)
