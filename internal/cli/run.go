@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -200,6 +201,10 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 
 	if rec.Status != run.Interrupted {
 		rec.Finish(d.now())
+		// Evidence that could not be written fails the run, whichever file it was (spec section 12).
+		if slices.ContainsFunc(rec.Errors, func(e problem.Problem) bool { return e.Code == problem.RunFolderUnwritable }) {
+			rec.Status, rec.ExitCode = run.Failed, 2
+		}
 	}
 	md := report.Render(report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, NoReview: why, Agent: rv.agentName()})
 	if err := run.WriteFile(filepath.Join(dir, "report.md"), []byte(md), 0o640); err != nil {

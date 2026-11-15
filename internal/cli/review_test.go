@@ -228,9 +228,37 @@ func TestRunFactsWriteFailed(t *testing.T) {
 	d.facts = func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
 		return nil, errors.New("no space left on device")
 	}
-	code, rec, _ := runOnce(t, d)
-	if code != 1 || rec.Stages["facts"] != run.StageFailed || rec.Errors[0].Code != problem.RunFolderUnwritable {
+	code, rec, md := runOnce(t, d)
+	if code != 2 || rec.Status != run.Failed || rec.Stages["facts"] != run.StageFailed || rec.Errors[0].Code != problem.RunFolderUnwritable {
 		t.Errorf("exit %d %+v", code, rec)
+	}
+	if !strings.Contains(md, "(run failed: RUN_FOLDER_UNWRITABLE)") {
+		t.Errorf("report:\n%s", md)
+	}
+}
+
+type agentFunc func(ctx context.Context, dir string) (review.Output, error)
+
+func (f agentFunc) Review(ctx context.Context, dir string) (review.Output, error) { return f(ctx, dir) }
+
+func TestRunReviewWriteFailed(t *testing.T) {
+	calls := 0
+	d := reviewDeps(t, fakeAgent{calls: &calls})
+	d.agent = func(config.Config) review.Agent {
+		return agentFunc(func(_ context.Context, dir string) (review.Output, error) {
+			if err := os.MkdirAll(filepath.Join(dir, "review.json", "x"), 0o750); err != nil { // a directory where review.json goes
+				t.Fatal(err)
+			}
+			return review.Output{Data: []byte(validReview), CLI: "claude 2.1.309"}, nil
+		})
+	}
+	code, rec, md := runOnce(t, d)
+	if code != 2 || rec.Status != run.Failed || rec.Stages["review"] != run.StageFailed || rec.Reviewed ||
+		len(rec.Errors) != 1 || rec.Errors[0].Code != problem.RunFolderUnwritable {
+		t.Errorf("exit %d %+v", code, rec)
+	}
+	if !strings.Contains(md, "(run failed: RUN_FOLDER_UNWRITABLE)") {
+		t.Errorf("report:\n%s", md)
 	}
 }
 
