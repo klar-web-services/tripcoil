@@ -63,7 +63,7 @@ func TestBlocked(t *testing.T) {
 	p := Policy{Own: []netip.Addr{netip.MustParseAddr("203.0.113.7"), netip.MustParseAddr("::ffff:198.51.100.2"), netip.MustParseAddr("127.0.0.1")}}
 	v4, v6 := split(p.Blocked())
 	want4 := prefixes("0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
-		"224.0.0.0/4", "240.0.0.0/4", "203.0.113.7/32", "198.51.100.2/32")
+		"224.0.0.0/4", "240.0.0.0/4", "168.63.129.16/32", "203.0.113.7/32", "198.51.100.2/32")
 	want6 := prefixes("::1/128", "fe80::/10", "fc00::/7", "ff00::/8")
 	if !slices.Equal(v4, want4) || !slices.Equal(v6, want6) {
 		t.Fatalf("got %v %v", v4, v6)

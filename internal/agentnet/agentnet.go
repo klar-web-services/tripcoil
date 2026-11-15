@@ -23,10 +23,12 @@ const Name = "tripcoil"
 const rules = 10
 
 // blocked are the ranges the agent may never reach, besides the host's own addresses: loopback,
-// link-local, private, shared and multicast space, "this network" (0.0.0.0/8) and the reserved
-// 240.0.0.0/4, which holds the limited broadcast 255.255.255.255.
+// link-local, private, shared and multicast space, "this network" (0.0.0.0/8), the reserved
+// 240.0.0.0/4, which holds the limited broadcast 255.255.255.255, and Azure's platform address
+// 168.63.129.16, a public address that serves the VM's configuration like a metadata service
+// (DNS to it stays allowed where it is the nameserver).
 var blocked = []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
-	"224.0.0.0/4", "240.0.0.0/4", "::1/128", "fe80::/10", "fc00::/7", "ff00::/8"}
+	"224.0.0.0/4", "240.0.0.0/4", "168.63.129.16/32", "::1/128", "fe80::/10", "fc00::/7", "ff00::/8"}
 
 // Policy is what the table enforces for one review.
 type Policy struct {
