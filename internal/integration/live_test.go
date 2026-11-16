@@ -87,8 +87,9 @@ func TestLiveHost(t *testing.T) {
 		if o.ID == kernel.Origins[0] && o.Status != audit.Scanned {
 			t.Fatalf("kernel origin %+v", o)
 		}
-		// Without the distribution, every package origin is unidentified and nothing matches.
-		if strings.Contains(o.Reason, "did not recognise the distribution") {
+		// Without the distribution, every package origin is unidentified and nothing matches. A
+		// single binary may carry an operating system package without a distribution.
+		if o.Kind == inventory.OriginPackage && strings.Contains(o.Reason, "did not recognise the distribution") {
 			t.Fatalf("origin %+v", o)
 		}
 	}
