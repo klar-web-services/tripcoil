@@ -14,7 +14,10 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/grype"
 	"github.com/klar-web-services/tripcoil/internal/kernelcna"
 	"github.com/klar-web-services/tripcoil/internal/procfs"
+	"github.com/klar-web-services/tripcoil/internal/run"
 )
+
+func init() { run.AgentGID = func() (int, bool) { return 0, false } }
 
 // fakeScanner imitates Grype. Scan writes the SBOM listed for the source and matches it; Match
 // matches every package of the SBOM it is given against vulns, keyed by name@version, by purl or
