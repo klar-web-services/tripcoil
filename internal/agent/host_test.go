@@ -407,3 +407,33 @@ func TestReviewInterrupted(t *testing.T) {
 		t.Error("agent-home left behind")
 	}
 }
+
+func TestCheck(t *testing.T) {
+	claudeOK := []byte(`{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","structured_output":{"ok":true}}`)
+	e := newEnv(t, "claude", print(claudeOK, 0))
+	dir := filepath.Join(e.h.stateDir, "runs", ".doctor")
+	os.Mkdir(dir, 0o750)
+	cli, err := e.h.Check(context.Background(), dir)
+	if err != nil || cli != "claude 2.1.309" {
+		t.Fatalf("%q %v", cli, err)
+	}
+	a := e.sb.specs[2]
+	if a.Name != "doctor-agent" || a.Command[2] != checkPrompt || a.Command[6] != checkSchema || e.sb.specs[0].Name != "doctor-probe" {
+		t.Fatalf("agent %q %q", a.Name, a.Command)
+	}
+
+	e = newEnv(t, "codex", print([]byte(`{"ok":false}`), 0))
+	os.Mkdir(dir, 0o750)
+	if _, err := e.h.Check(context.Background(), e.runDir); !isCode(err, problem.AgentOutputInvalid) || !strings.Contains(err.Error(), `answered the check with "{\"ok\":false}"`) {
+		t.Fatalf("got %v", err)
+	}
+	e = newEnv(t, "claude", print(fixture(t, "agent/claude-noauth.json"), 1))
+	if _, err := e.h.Check(context.Background(), e.runDir); !isCode(err, problem.AgentAuth) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func isCode(err error, code string) bool {
+	var f *review.Failure
+	return errors.As(err, &f) && f.Code == code
+}

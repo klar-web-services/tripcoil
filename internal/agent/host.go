@@ -62,7 +62,7 @@ type deps struct {
 // New returns the agent for the config's review settings.
 func New(cfg config.Config, stateDir, configDir string) *Host {
 	return &Host{cfg: cfg, stateDir: stateDir, configDir: configDir, d: deps{
-		platform: hostPlatform, user: lookupUser, findCLI: FindCLI,
+		platform: hostPlatform, user: LookupUser, findCLI: FindCLI,
 		apply: agentnet.Apply, present: agentnet.Present, remove: agentnet.Delete, own: agentnet.OwnAddrs,
 		resolv: "/etc/resolv.conf", exe: os.Executable, watch: 5 * time.Second, mount: mountHome, unmount: unmountHome,
 	}}
@@ -73,7 +73,36 @@ const probeTimeout = 2 * time.Minute
 
 // Review runs one review of runDir in the sandbox. The output's warnings are set on every return
 // after the network table was written.
-func (h *Host) Review(ctx context.Context, runDir string) (out review.Output, _ error) {
+func (h *Host) Review(ctx context.Context, runDir string) (review.Output, error) {
+	return h.session(ctx, runDir, filepath.Base(runDir), review.Prompt, review.Schema)
+}
+
+// checkPrompt and checkSchema are tripcoil doctor's check that the CLI's credentials work: a short
+// prompt that needs no tool (verified with Claude Code 2.1.309 and Codex 0.154.0).
+const (
+	checkPrompt = "This is a connectivity check. Do not use any tools. Reply with ok set to true."
+	checkSchema = `{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}`
+)
+
+// Check proves the sandbox with the probe and runs the CLI once with a short prompt, as a review
+// would, in runDir, an empty folder in runs/ (tripcoil doctor). It returns the CLI and its version.
+func (h *Host) Check(ctx context.Context, runDir string) (string, error) {
+	out, err := h.session(ctx, runDir, "doctor", checkPrompt, []byte(checkSchema))
+	if err != nil {
+		return out.CLI, err
+	}
+	var r struct {
+		OK bool `json:"ok"`
+	}
+	if json.Unmarshal(out.Data, &r) != nil || !r.OK {
+		return out.CLI, fail(problem.AgentOutputInvalid, "the CLI answered the check with %q instead of {\"ok\":true}", lastLine(out.Data))
+	}
+	return out.CLI, nil
+}
+
+// session runs the probe, the CLI's --version and then the CLI with prompt and schema, in the
+// sandbox, for runDir; name goes into the units' names.
+func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema []byte) (out review.Output, _ error) {
 	ad := For(h.cfg.Review.Agent)
 	sb, stopLeftovers, err := h.d.platform()
 	if err != nil {
@@ -117,7 +146,7 @@ func (h *Host) Review(ctx context.Context, runDir string) (out review.Output, _ 
 	}()
 	// The adapter's files go in before anything runs as the agent, so no link or pipe it made
 	// can be in their way.
-	in := Inputs{Prompt: review.Prompt, Schema: review.Schema, Home: home, Model: h.cfg.Review.Model, Extra: h.cfg.Review.ExtraArgs}
+	in := Inputs{Prompt: prompt, Schema: schema, Home: home, Model: h.cfg.Review.Model, Extra: h.cfg.Review.ExtraArgs}
 	for name, data := range ad.Files(in) {
 		if err := writeNew(filepath.Join(home, name), data); err != nil {
 			return out, fail(problem.AgentSandbox, "cannot prepare the agent's home: %v", err)
@@ -156,7 +185,7 @@ func (h *Host) Review(ctx context.Context, runDir string) (out review.Output, _ 
 		return err
 	}
 
-	id := filepath.Base(runDir)
+	id := name
 	if err := h.probe(rctx, sb, base, id, agentDir, policy); err != nil {
 		return out, stopped(err)
 	}
@@ -354,8 +383,8 @@ func LookPath(name string) (string, error) {
 	return "", fmt.Errorf("%s is not installed on %s", name, sandbox.Path)
 }
 
-// lookupUser finds the agent's user, and its group, which may read run folders.
-func lookupUser() (sandbox.User, error) {
+// LookupUser finds the agent's user, and its group, which may read run folders.
+func LookupUser() (sandbox.User, error) {
 	hint := "create it with: useradd --system --user-group --no-create-home --shell /usr/sbin/nologin " + UserName
 	u, err := user.Lookup(UserName)
 	if err != nil {
