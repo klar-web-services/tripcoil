@@ -87,6 +87,8 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Allow mounts in unprivileged user namespaces (Ubuntu's AppArmor), for the mount test
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Check
         run: test -z "$(gofmt -l .)" && go vet ./... && go test ./...
       - name: Build

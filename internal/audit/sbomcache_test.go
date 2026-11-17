@@ -204,7 +204,7 @@ func TestTreeFingerprintStopsWithTheRun(t *testing.T) {
 // no key. The test mounts a tmpfs in a user and mount namespace of its own.
 func TestTreeFingerprintStaysOnOneFileSystem(t *testing.T) {
 	if dir := os.Getenv("TRIPCOIL_TEST_MOUNT"); dir != "" {
-		if err := syscall.Mount("tripcoil-test", filepath.Join(dir, "data"), "tmpfs", 0, ""); errors.Is(err, syscall.EPERM) {
+		if err := syscall.Mount("tripcoil-test", filepath.Join(dir, "data"), "tmpfs", 0, ""); errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 			t.Skip("no mount in a user namespace (Ubuntu's AppArmor restricts unprivileged user namespaces)")
 		} else if err != nil {
 			t.Fatal(err)
