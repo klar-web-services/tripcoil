@@ -22,6 +22,8 @@ jobs:
       - name: shellcheck
         run: shellcheck -s sh install.sh
       - run: go vet ./... && go vet -tags integration ./internal/integration/ && go vet -tags live ./internal/integration/
+      - name: Allow mounts in unprivileged user namespaces, for TestTreeFingerprintStaysOnOneFileSystem
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: go test ./...
   integration:
     runs-on: ubuntu-24.04
