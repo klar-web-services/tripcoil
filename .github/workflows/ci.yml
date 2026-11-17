@@ -19,6 +19,8 @@ jobs:
           go-version-file: go.mod
       - name: gofmt
         run: out=$(gofmt -l .) && test -z "$out"
+      - name: shellcheck
+        run: shellcheck -s sh install.sh
       - run: go vet ./... && go vet -tags integration ./internal/integration/ && go vet -tags live ./internal/integration/
       - run: go test ./...
   integration:
@@ -29,7 +31,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Audit fixtures and distribution containers, with the real Grype
+      - name: Audit fixtures, distribution containers, the sandbox, the service and install.sh, with the real Grype
         run: |
           go test -tags integration -count=1 -v -timeout 40m ./internal/integration/ | tee docker.out
           ! grep -q -e '--- SKIP' docker.out

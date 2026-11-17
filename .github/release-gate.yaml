@@ -1,0 +1,13 @@
+# Gate for Tripcoil's release candidates (spec section 14), run by Shearbolt's pinned release in
+# release.yml. CANDIDATE_DIR holds <triple>/tripcoil for each build; unset, it is a config error
+# (exit 2), so the gate fails closed. Paths are relative to this file.
+version: 1
+project: tripcoil-release
+targets:
+  - name: linux-amd64
+    file: ${CANDIDATE_DIR}/x86_64-unknown-linux-gnu/tripcoil
+  - name: linux-arm64
+    file: ${CANDIDATE_DIR}/aarch64-unknown-linux-gnu/tripcoil
+  - name: repo
+    source: ..
+    exclude: [testdata/, internal/integration/testdata/]

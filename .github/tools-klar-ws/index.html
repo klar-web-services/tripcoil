@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>tripcoil</title>
+    <!-- Published by release.yml through the publish action's scripts: input, which generates no landing page. -->
+    <style>
+      body { margin: 0; padding: 3rem 1rem; background: #10131a; color: #d7dbe4; font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+      main { max-width: 46rem; margin: 0 auto; }
+      h1 { font-size: 1.4rem; margin: 0 0 .35rem; color: #fff; }
+      p { color: #98a0b0; margin: 0 0 1.5rem; }
+      h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: #7d8698; margin: 2rem 0 .6rem; font-weight: 600; }
+      pre { background: #171b24; border: 1px solid #252b38; border-radius: 8px; padding: .9rem 1.1rem; overflow-x: auto; margin: 0; }
+      code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #9ecbff; }
+      a { color: #9ecbff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>tripcoil</h1>
+      <p>Tripcoil watches a running Linux server: it finds what is running, audits the running versions for known vulnerabilities, and has an AI agent judge which findings can be exploited on that machine.</p>
+      <h2>Install (Linux, as root)</h2>
+      <pre><code>curl -fsSL https://tools.klar.ws/tripcoil/install.sh | sudo sh</code></pre>
+      <h2>Then set up the host</h2>
+      <pre><code>sudo tripcoil setup</code></pre>
+      <h2>Source</h2>
+      <p><a href="https://github.com/klar-web-services/tripcoil">github.com/klar-web-services/tripcoil</a></p>
+    </main>
+  </body>
+</html>
