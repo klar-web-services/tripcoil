@@ -115,6 +115,9 @@ func ServiceFiles(m Manager, exe string) []File {
 	}
 }
 
+// EnvFilePath is the token file the written config names in review.envFile.
+const EnvFilePath = "/etc/tripcoil/agent.env"
+
 // defaultConfig is the config setup writes, the defaults of spec section 10 with the chosen agent.
 const defaultConfig = `# Tripcoil's configuration. After a change: sudo tripcoil doctor, then restart or reload the service.
 version: 1
@@ -126,7 +129,7 @@ review:
   extraArgs: []            # appended to the CLI's arguments
   timeout: 60m
   maxAge: 168h             # re-review after this long even without changes
-  envFile: ""              # root-only file with KEY=value lines for the CLI, such as its token
+  envFile: /etc/tripcoil/agent.env # root-only KEY=value lines for the CLI, such as its token
   memoryMax: 2G
   cpuQuota: 100%%           # of one CPU
   allowAddresses: []       # private or local addresses the agent may reach (proxy, model gateway)

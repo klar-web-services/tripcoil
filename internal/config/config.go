@@ -109,6 +109,9 @@ func osStat(path string) (FileInfo, error) {
 	return FileInfo{UID: st.Uid, Mode: fi.Mode().Perm(), Regular: fi.Mode().IsRegular()}, nil
 }
 
+// OSStat is the StatFunc Load uses.
+func OSStat(path string) (FileInfo, error) { return osStat(path) }
+
 // Load reads the config at path. A missing file gives the defaults with Missing set.
 func Load(path string) (Config, error) {
 	return load(path, os.ReadFile, osStat)

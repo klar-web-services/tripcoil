@@ -31,7 +31,8 @@ type Host struct {
 	// CheckBinary checks that the binary is root-owned and writable only by root, with every
 	// folder above it (the service runs it as root).
 	CheckBinary func(path string) error
-	In          io.Reader // answers to questions
+	Stat        config.StatFunc // checks review.envFile
+	In          io.Reader       // answers to questions
 	Out         io.Writer
 }
 
@@ -48,6 +49,7 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 		UserExists:  func(n string) bool { _, err := user.Lookup(n); return err == nil },
 		GroupExists: func(n string) bool { _, err := user.LookupGroup(n); return err == nil },
 		CheckBinary: func(p string) error { _, err := agent.FindCLI(p, "tripcoil"); return err },
+		Stat:        config.OSStat,
 	}
 }
 
@@ -102,11 +104,11 @@ func (h Host) Setup(o Options) error {
 		return err
 	}
 	note(did, "Created the user and group "+agent.UserName+".", "The user "+agent.UserName+" exists.")
-	name, did, err := h.config(o)
+	name, envFile, did, err := h.config(o)
 	if err != nil {
 		return err
 	}
-	note(did, fmt.Sprintf("Wrote %s (review.agent: %s).", config.DefaultPath, name), fmt.Sprintf("%s exists (review.agent: %s).", config.DefaultPath, name))
+	note(did, fmt.Sprintf("Wrote %s (review.agent: %s) and %s.", config.DefaultPath, name, envFile), fmt.Sprintf("%s exists (review.agent: %s).", config.DefaultPath, name))
 	if m == OpenRC && name != "none" {
 		did, err := h.bubblewrap(o)
 		if err != nil {
@@ -122,7 +124,7 @@ func (h Host) Setup(o Options) error {
 	if !changed {
 		fmt.Fprintln(h.Out, "Nothing changed.")
 	}
-	fmt.Fprint(h.Out, nextSteps(name))
+	fmt.Fprint(h.Out, nextSteps(name, envFile))
 	return nil
 }
 
@@ -181,19 +183,20 @@ func (h Host) agentUser() (bool, error) {
 	return true, nil
 }
 
-// config writes the config file when there is none, with the chosen agent. An existing file is
-// kept as it is; it must be valid.
-func (h Host) config(o Options) (string, bool, error) {
+// config writes the config file when there is none, with the chosen agent, and the empty token
+// file it names. An existing config is kept as it is. Either way the config must be valid; it
+// returns review.agent and review.envFile.
+func (h Host) config(o Options) (string, string, bool, error) {
 	path := h.path(config.DefaultPath)
 	if _, err := os.Lstat(path); err == nil {
-		c, err := config.Load(path)
+		c, err := h.loadConfig()
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 		if o.Agent != "" && o.Agent != c.Review.Agent {
 			fmt.Fprintf(h.Out, "! --agent %s: %s keeps review.agent: %s; edit it to change the agent.\n", o.Agent, config.DefaultPath, c.Review.Agent)
 		}
-		return c.Review.Agent, false, nil
+		return c.Review.Agent, c.Review.EnvFile, false, nil
 	}
 	name := o.Agent
 	if name == "" {
@@ -201,18 +204,37 @@ func (h Host) config(o Options) (string, bool, error) {
 		if !o.Yes {
 			a, err := h.ask("Which agent CLI should review the runs? claude, codex or none", "claude", "claude", "codex", "none")
 			if err != nil {
-				return "", false, err
+				return "", "", false, err
 			}
 			name = a
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if err := os.WriteFile(path, []byte(DefaultConfig(name)), 0o644); err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	return name, true, nil
+	if f, err := os.OpenFile(h.path(EnvFilePath), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
+		f.Close()
+	} else if !errors.Is(err, fs.ErrExist) {
+		return "", "", false, err
+	}
+	c, err := h.loadConfig()
+	if err != nil {
+		return "", "", false, err
+	}
+	return name, c.Review.EnvFile, true, nil
+}
+
+// loadConfig reads and validates the config, with its paths under Root.
+func (h Host) loadConfig() (config.Config, error) {
+	path := h.path(config.DefaultPath)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return config.Config{}, err
+	}
+	return config.Parse(path, data, func(p string) (config.FileInfo, error) { return h.Stat(h.path(p)) })
 }
 
 // ask asks a question until the answer is one of choices; an empty answer is def.
@@ -344,33 +366,40 @@ func hasService(out []byte) bool {
 	return false
 }
 
-// nextSteps says how to install the agent CLI system-wide and give it credentials (spec 8.3).
-func nextSteps(name string) string {
+// nextSteps says how to install the agent CLI system-wide and give it credentials in envFile
+// (spec 8.3), and how each agent is billed.
+func nextSteps(name, envFile string) string {
+	var install, token, line string
 	switch name {
 	case "claude":
-		return `
-Next, install Claude Code system-wide (root-owned, outside /home), for example:
-  sudo npm install -g @anthropic-ai/claude-code
-Create a long-lived token with "claude setup-token" (as any user), store it root-only as the line
-CLAUDE_CODE_OAUTH_TOKEN=<token>, and point review.envFile in /etc/tripcoil/tripcoil.yaml at it:
-  sudo install -m 600 /dev/null /etc/tripcoil/agent.env
-  sudoedit /etc/tripcoil/agent.env
-Then check the host: sudo tripcoil doctor
-`
+		install = "Claude Code system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @anthropic-ai/claude-code"
+		token = `Create a token with "claude setup-token" (as any user, on any machine). It uses your Claude
+     subscription (Pro or Max), not API billing.`
+		line = "CLAUDE_CODE_OAUTH_TOKEN=<token>"
 	case "codex":
+		install = "Codex system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @openai/codex"
+		token = `Create an OpenAI API key. Codex bills it per use through the OpenAI API (a ChatGPT login is
+     not supported).`
+		line = "CODEX_API_KEY=<key>"
+	default:
 		return `
-Next, install Codex system-wide (root-owned, outside /home), for example:
-  sudo npm install -g @openai/codex
-Store an OpenAI API key root-only as the line CODEX_API_KEY=<key> (codex exec reads it), and point
-review.envFile in /etc/tripcoil/tripcoil.yaml at it:
-  sudo install -m 600 /dev/null /etc/tripcoil/agent.env
-  sudoedit /etc/tripcoil/agent.env
-Then check the host: sudo tripcoil doctor
-`
-	}
-	return `
 review.agent is none, so reports are audit-only. Check the host: sudo tripcoil doctor
 `
+	}
+	store := fmt.Sprintf("Add it to %s as the line %s:\n       sudoedit %s", envFile, line, envFile)
+	if envFile == "" {
+		store = fmt.Sprintf(`Store it root-only as the line %s, and set review.envFile in
+     %s to that file:
+       sudo install -m 600 /dev/null %s
+       sudoedit %s`, line, config.DefaultPath, EnvFilePath, EnvFilePath)
+	}
+	return fmt.Sprintf(`
+Next, give the review its credentials:
+  1. Install %s
+  2. %s
+  3. %s
+Then check the host: sudo tripcoil doctor
+`, install, token, store)
 }
 
 // Service is the tripcoil service's state.

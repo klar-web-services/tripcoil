@@ -72,8 +72,21 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 		UserExists:  func(string) bool { return f.users["user"] },
 		GroupExists: func(string) bool { return f.users["group"] || (f.users["user"] && f.tools["useradd"]) },
 		CheckBinary: func(string) error { return nil },
+		Stat:        rootStat,
 	}
 	return f
+}
+
+// rootStat stats a file but reports root as its owner, since the tests do not run as root.
+func rootStat(p string) (config.FileInfo, error) {
+	fi, err := config.OSStat(p)
+	fi.UID = 0
+	return fi, err
+}
+
+// anyEnvFile is a stat that finds review.envFile root-only, wherever the config points it.
+func anyEnvFile(string) (config.FileInfo, error) {
+	return config.FileInfo{Mode: 0o600, Regular: true}, nil
 }
 
 func (f *fakeHost) started() {
@@ -105,8 +118,12 @@ func TestSetupSystemdTwice(t *testing.T) {
 	if !slices.Equal(f.cmds, want) {
 		t.Fatalf("commands\n%q\nwant\n%q", f.cmds, want)
 	}
-	if c, err := config.Parse("x", []byte(f.read(t, config.DefaultPath)), nil); err != nil || c.Review.Agent != "codex" {
+	if c, err := config.Parse("x", []byte(f.read(t, config.DefaultPath)), anyEnvFile); err != nil || c.Review.Agent != "codex" ||
+		c.Review.EnvFile != "/etc/tripcoil/agent.env" {
 		t.Fatalf("config %+v %v", c, err)
+	}
+	if fi, err := os.Stat(filepath.Join(f.Root, EnvFilePath)); err != nil || fi.Mode().Perm() != 0o600 || fi.Size() != 0 {
+		t.Fatalf("agent.env: %v %v", fi, err)
 	}
 	unit := f.read(t, UnitPath)
 	for _, l := range []string{"ExecStart=/usr/local/bin/tripcoil daemon\n", "Nice=10\n", "IOSchedulingClass=idle\n", "CPUWeight=20\n", "MemoryMax=4G\n",
@@ -115,14 +132,21 @@ func TestSetupSystemdTwice(t *testing.T) {
 			t.Errorf("the unit lacks %q", l)
 		}
 	}
-	for _, l := range []string{"✓ Created the user and group tripcoil-agent.", "✓ Wrote /etc/tripcoil/tripcoil.yaml (review.agent: codex).",
-		"✓ Installed and started the tripcoil service.", "sudo npm install -g @openai/codex"} {
+	for _, l := range []string{"✓ Created the user and group tripcoil-agent.", "✓ Wrote /etc/tripcoil/tripcoil.yaml (review.agent: codex) and /etc/tripcoil/agent.env.",
+		"✓ Installed and started the tripcoil service.", "sudo npm install -g @openai/codex",
+		"Add it to /etc/tripcoil/agent.env as the line CODEX_API_KEY=<key>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(f.out.String(), l) {
 			t.Errorf("output lacks %q:\n%s", l, f.out.String())
 		}
 	}
 
 	f.started()
+	f.cmds, f.out = nil, bytes.Buffer{}
+	os.Remove(filepath.Join(f.Root, EnvFilePath))
+	if err := f.Setup(Options{Agent: "claude", Yes: true}); err == nil || !strings.Contains(err.Error(), "review.envFile /etc/tripcoil/agent.env cannot be read") {
+		t.Fatalf("an existing config is not rewritten, and does not create agent.env: %v", err)
+	}
+	os.WriteFile(filepath.Join(f.Root, EnvFilePath), nil, 0o600)
 	f.cmds, f.out = nil, bytes.Buffer{}
 	if err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
 		t.Fatal(err)
@@ -249,11 +273,14 @@ func TestSetupWarnsAboutOldSystemd(t *testing.T) {
 
 func TestDefaultConfigIsValid(t *testing.T) {
 	for _, a := range []string{"claude", "codex", "none"} {
-		c, err := config.Parse("x", []byte(DefaultConfig(a)), nil)
+		c, err := config.Parse("x", []byte(DefaultConfig(a)), anyEnvFile)
 		if err != nil || c.Review.Agent != a {
 			t.Fatalf("%s: %+v %v", a, c, err)
 		}
 		d := config.Default()
+		if c.Review.EnvFile != EnvFilePath {
+			t.Fatalf("%s: review.envFile %q", a, c.Review.EnvFile)
+		}
 		if c.Interval != d.Interval || c.Review.Timeout != d.Review.Timeout || c.Retention != d.Retention || c.Review.MemoryMax != d.Review.MemoryMax {
 			t.Fatalf("%s: the written config must hold the defaults: %+v", a, c)
 		}
@@ -276,5 +303,66 @@ func TestService(t *testing.T) {
 		if s, _ := f.Service(); s != (Service{Manager: m, Installed: true, Running: true}) {
 			t.Fatalf("%s running: %+v", m, s)
 		}
+	}
+}
+
+func TestSetupKeepsAnExistingEnvFile(t *testing.T) {
+	f := newFake(t, Systemd)
+	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
+	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("CLAUDE_CODE_OAUTH_TOKEN=x\n"), 0o600)
+	if err := f.Setup(Options{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.read(t, EnvFilePath); got != "CLAUDE_CODE_OAUTH_TOKEN=x\n" {
+		t.Fatalf("agent.env %q", got)
+	}
+}
+
+func TestSetupRefusesABadEnvFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		stat       config.StatFunc
+	}{
+		{"owner", "review.envFile /etc/tripcoil/agent.env must be owned by root", func(p string) (config.FileInfo, error) {
+			fi, err := config.OSStat(p)
+			fi.UID = 1000
+			return fi, err
+		}},
+		{"mode", "review.envFile /etc/tripcoil/agent.env must not be readable by group or others", func(p string) (config.FileInfo, error) {
+			fi, err := rootStat(p)
+			fi.Mode = 0o644
+			return fi, err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t, Systemd)
+			f.Stat = tc.stat
+			if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("a new config: %v", err)
+			}
+			if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("an existing config: %v", err)
+			}
+		})
+	}
+}
+
+func TestNextSteps(t *testing.T) {
+	claude := nextSteps("claude", "/etc/tripcoil/agent.env")
+	for _, l := range []string{"sudo npm install -g @anthropic-ai/claude-code", `"claude setup-token"`, "subscription (Pro or Max), not API billing",
+		"  3. Add it to /etc/tripcoil/agent.env as the line CLAUDE_CODE_OAUTH_TOKEN=<token>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
+		if !strings.Contains(claude, l) {
+			t.Errorf("claude lacks %q:\n%s", l, claude)
+		}
+	}
+	old := nextSteps("codex", "")
+	for _, l := range []string{"sudo npm install -g @openai/codex", "per use through the OpenAI API", "Store it root-only as the line CODEX_API_KEY=<key>",
+		"set review.envFile in\n     /etc/tripcoil/tripcoil.yaml", "sudo install -m 600 /dev/null /etc/tripcoil/agent.env\n       sudoedit /etc/tripcoil/agent.env\n"} {
+		if !strings.Contains(old, l) {
+			t.Errorf("codex without envFile lacks %q:\n%s", l, old)
+		}
+	}
+	if !strings.Contains(nextSteps("none", ""), "audit-only") {
+		t.Error("none")
 	}
 }

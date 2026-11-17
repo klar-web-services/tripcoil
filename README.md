@@ -27,8 +27,10 @@ sudo tripcoil status    # the service, the last and next run
 ```
 
 `setup` asks which agent CLI reviews the runs (Claude Code, Codex, or none) and ends by printing
-how to install it system-wide and give it credentials. The review runs the CLI as the unprivileged
-user `tripcoil-agent` in an OS-enforced sandbox; on systemd it needs systemd 247 or later.
+how to install it system-wide and give it credentials. Claude Code reviews run on your Claude
+subscription through a `claude setup-token` token; Codex needs an OpenAI API key, billed per use.
+The review runs the CLI as the unprivileged user `tripcoil-agent` in an OS-enforced sandbox; on
+systemd it needs systemd 247 or later.
 
 ## Configuration
 
@@ -44,7 +46,7 @@ review:
   extraArgs: []            # appended to the CLI's arguments
   timeout: 60m
   maxAge: 168h             # re-review after this long even without changes
-  envFile: ""              # root-only file with KEY=value lines for the CLI, such as its token
+  envFile: /etc/tripcoil/agent.env # root-only KEY=value lines for the CLI, such as its token
   memoryMax: 2G
   cpuQuota: 100%           # of one CPU
   allowAddresses: []       # private or local addresses the agent may reach (proxy, model gateway)
