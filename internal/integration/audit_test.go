@@ -26,6 +26,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/kernelcna"
 	"github.com/klar-web-services/tripcoil/internal/osrel"
 	"github.com/klar-web-services/tripcoil/internal/pkgtool"
+	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
 // The tests share one Tripcoil cache with the pinned Grype, today's database and the kernel CNA
@@ -43,6 +44,10 @@ var (
 var interrupt context.Context
 
 func TestMain(m *testing.M) {
+	// The tests that audit in-process run as the developer, who cannot give run folders the agent's
+	// group even where it exists; the containers run their own binary. The live tests need the real
+	// group, so never build the integration and live tags together.
+	run.AgentGID = func() (int, bool) { return 0, false }
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	interrupt = ctx
 	context.AfterFunc(interrupt, stop)

@@ -2,7 +2,7 @@
 // answers --version, and otherwise tries a few things the sandbox must allow or stop, writes a
 // marker into its home, and returns a review in the CLI's format that confirms every finding.
 // /etc/tripcoil-stub selects another behaviour: "sleep" (run past the timeout) or "auth" (no
-// credentials). Run as "stubcli listen <addr>" or "stubcli dns <listen> <upstream>", it is a TCP
+// credentials). tripcoil doctor's connectivity check gets {"ok":true}. Run as "stubcli listen <addr>" or "stubcli dns <listen> <upstream>", it is a TCP
 // listener or a UDP DNS forwarder for the tests.
 package main
 
@@ -50,7 +50,12 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	out, _ := json.Marshal(review())
+	var out []byte
+	if strings.Contains(strings.Join(os.Args, " "), "This is a connectivity check.") {
+		out = []byte(`{"ok":true}`)
+	} else {
+		out, _ = json.Marshal(review())
+	}
 	if name == "codex" {
 		fmt.Println(string(out))
 		return

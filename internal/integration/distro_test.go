@@ -29,9 +29,21 @@ const (
 	splitFacts = "@@@43@@@"
 )
 
+// buildBinary builds Tripcoil, or copies the binary TRIPCOIL_CANDIDATE names, such as a release
+// candidate, so the tests run that instead.
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "tripcoil")
+	if c := os.Getenv("TRIPCOIL_CANDIDATE"); c != "" {
+		data, err := os.ReadFile(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(bin, data, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return bin
+	}
 	cmd := exec.Command("go", "build", "-o", bin, "github.com/klar-web-services/tripcoil/cmd/tripcoil")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
