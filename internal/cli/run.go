@@ -109,18 +109,28 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	defer stop()
 	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one ends tripcoil at once
 
+	rec, dir, err := execute(ctx, d, cfg, "manual", *noReviewFlag, *forceReview, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	return printRun(stdout, rec, dir, *jsonOut)
+}
+
+// execute runs the pipeline once, with the run lock held, and writes the run folder. It returns
+// an error only when the run could not start. It records the run in state.json and prunes old
+// run folders afterwards.
+func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noReview, force bool, stderr io.Writer) (*run.Record, string, error) {
 	start := d.now()
 	id, err := run.NewID(start, d.random)
 	if err != nil {
-		fmt.Fprintf(stderr, "cannot make a run ID: %v\n", err)
-		return 2
+		return nil, "", fmt.Errorf("cannot make a run ID: %v", err)
 	}
 	dir, err := run.CreateFolder(d.stateDir, id)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: cannot create the run folder: %v\n", problem.RunFolderUnwritable, err)
-		return 2
+		return nil, "", fmt.Errorf("%s: cannot create the run folder: %v", problem.RunFolderUnwritable, err)
 	}
-	rec := run.NewRecord(id, start, "manual", map[string]string{"tripcoil": buildinfo.Version, "grype": grype.Version})
+	rec := run.NewRecord(id, start, trigger, map[string]string{"tripcoil": buildinfo.Version, "grype": grype.Version})
 	cacheDir := filepath.Join(d.stateDir, "cache")
 	write := func(name string, v any) error {
 		err := run.WriteJSON(filepath.Join(dir, name), v, 0o640)
@@ -199,7 +209,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		}
 	}
 
-	rv := reviewRun{d: d, cfg: cfg, rec: rec, dir: dir, inv: inv, aud: aud, idx: idx, noReview: *noReviewFlag, force: *forceReview}
+	rv := reviewRun{d: d, cfg: cfg, rec: rec, dir: dir, inv: inv, aud: aud, idx: idx, noReview: noReview, force: force}
 	rev, why := rv.run(ctx)
 	rec.Counts["coverageGaps"] = len(report.Gaps(inv, aud, idx))
 
@@ -218,8 +228,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		}
 	}
 	if err := run.WriteJSON(filepath.Join(dir, "run.json"), rec, 0o640); err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", problem.RunFolderUnwritable, err)
-		return 2
+		return nil, "", fmt.Errorf("%s: %v", problem.RunFolderUnwritable, err)
 	}
 	if rec.Status != run.Interrupted { // latest keeps pointing at the last finished run
 		if err := run.UpdateLatest(d.stateDir, "latest", id); err != nil {
@@ -231,7 +240,18 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 			}
 		}
 	}
-	return printRun(stdout, rec, dir, *jsonOut)
+	st, err := run.ReadState(d.stateDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "tripcoil: %s is damaged and starts over: %v\n", filepath.Join(d.stateDir, "state.json"), err)
+	}
+	st.Record(rec)
+	if err := run.WriteState(d.stateDir, st); err != nil {
+		fmt.Fprintf(stderr, "tripcoil: cannot write state.json: %v\n", err)
+	}
+	if _, err := run.Prune(d.stateDir, int(cfg.Retention.KeepRuns)); err != nil {
+		fmt.Fprintf(stderr, "tripcoil: cannot remove old run folders: %v\n", err)
+	}
+	return rec, dir, nil
 }
 
 // factsHost collects the facts snapshot of the real host.
