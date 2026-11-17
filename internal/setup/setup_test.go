@@ -316,6 +316,9 @@ func TestSetupKeepsAnExistingEnvFile(t *testing.T) {
 	if got := f.read(t, EnvFilePath); got != "CLAUDE_CODE_OAUTH_TOKEN=x\n" {
 		t.Fatalf("agent.env %q", got)
 	}
+	if out := f.out.String(); !strings.Contains(out, "✓ Wrote /etc/tripcoil/tripcoil.yaml (review.agent: claude).\n") || strings.Contains(out, "and /etc/tripcoil/agent.env") {
+		t.Fatalf("output:\n%s", out)
+	}
 }
 
 func TestSetupRefusesABadEnvFile(t *testing.T) {

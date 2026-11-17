@@ -104,11 +104,15 @@ func (h Host) Setup(o Options) error {
 		return err
 	}
 	note(did, "Created the user and group "+agent.UserName+".", "The user "+agent.UserName+" exists.")
-	name, envFile, did, err := h.config(o)
+	name, envFile, did, created, err := h.config(o)
 	if err != nil {
 		return err
 	}
-	note(did, fmt.Sprintf("Wrote %s (review.agent: %s) and %s.", config.DefaultPath, name, envFile), fmt.Sprintf("%s exists (review.agent: %s).", config.DefaultPath, name))
+	wrote := fmt.Sprintf("Wrote %s (review.agent: %s).", config.DefaultPath, name)
+	if created {
+		wrote = fmt.Sprintf("Wrote %s (review.agent: %s) and %s.", config.DefaultPath, name, envFile)
+	}
+	note(did, wrote, fmt.Sprintf("%s exists (review.agent: %s).", config.DefaultPath, name))
 	if m == OpenRC && name != "none" {
 		did, err := h.bubblewrap(o)
 		if err != nil {
@@ -184,19 +188,20 @@ func (h Host) agentUser() (bool, error) {
 }
 
 // config writes the config file when there is none, with the chosen agent, and the empty token
-// file it names. An existing config is kept as it is. Either way the config must be valid; it
-// returns review.agent and review.envFile.
-func (h Host) config(o Options) (string, string, bool, error) {
+// file it names, unless that exists. An existing config is kept as it is. Either way the config
+// must be valid; it returns review.agent, review.envFile, and whether it wrote the config and
+// created the token file.
+func (h Host) config(o Options) (string, string, bool, bool, error) {
 	path := h.path(config.DefaultPath)
 	if _, err := os.Lstat(path); err == nil {
 		c, err := h.loadConfig()
 		if err != nil {
-			return "", "", false, err
+			return "", "", false, false, err
 		}
 		if o.Agent != "" && o.Agent != c.Review.Agent {
 			fmt.Fprintf(h.Out, "! --agent %s: %s keeps review.agent: %s; edit it to change the agent.\n", o.Agent, config.DefaultPath, c.Review.Agent)
 		}
-		return c.Review.Agent, c.Review.EnvFile, false, nil
+		return c.Review.Agent, c.Review.EnvFile, false, false, nil
 	}
 	name := o.Agent
 	if name == "" {
@@ -204,27 +209,30 @@ func (h Host) config(o Options) (string, string, bool, error) {
 		if !o.Yes {
 			a, err := h.ask("Which agent CLI should review the runs? claude, codex or none", "claude", "claude", "codex", "none")
 			if err != nil {
-				return "", "", false, err
+				return "", "", false, false, err
 			}
 			name = a
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", "", false, err
+		return "", "", false, false, err
 	}
-	if err := os.WriteFile(path, []byte(DefaultConfig(name)), 0o644); err != nil {
-		return "", "", false, err
-	}
+	// The token file comes first: should that fail, there is no config yet and a rerun starts over.
+	created := false
 	if f, err := os.OpenFile(h.path(EnvFilePath), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
 		f.Close()
+		created = true
 	} else if !errors.Is(err, fs.ErrExist) {
-		return "", "", false, err
+		return "", "", false, false, err
+	}
+	if err := os.WriteFile(path, []byte(DefaultConfig(name)), 0o644); err != nil {
+		return "", "", false, false, err
 	}
 	c, err := h.loadConfig()
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, false, err
 	}
-	return name, c.Review.EnvFile, true, nil
+	return name, c.Review.EnvFile, true, created, nil
 }
 
 // loadConfig reads and validates the config, with its paths under Root.
