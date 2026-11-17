@@ -113,6 +113,11 @@ func WriteJSON(path string, v any, mode fs.FileMode) error {
 
 // WriteFile writes data with the given mode and the agent group, atomically.
 func WriteFile(path string, data []byte, mode fs.FileMode) error {
+	return writeAtomic(path, data, mode, true)
+}
+
+// writeAtomic writes data through a temporary file and a rename; share gives it the agent group.
+func writeAtomic(path string, data []byte, mode fs.FileMode, share bool) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return err
@@ -133,8 +138,10 @@ func WriteFile(path string, data []byte, mode fs.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := shareWithAgent(tmp.Name()); err != nil {
-		return err
+	if share {
+		if err := shareWithAgent(tmp.Name()); err != nil {
+			return err
+		}
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err
