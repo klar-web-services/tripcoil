@@ -128,7 +128,7 @@ func TestSandbox(t *testing.T) {
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			image := tc.image
-			args := []string{"run", "-d", "--name", fmt.Sprintf("tripcoil-it-sandbox-%d-%d", os.Getpid(), i), "--privileged",
+			args := []string{"run", "-d", "--name", fmt.Sprintf("tripcoil-it-sandbox-%d-%d", os.Getpid(), i), "-t", "--cgroupns=private", "--privileged",
 				"-v", dir + ":/opt/tripcoil:ro", "-v", cache + ":/var/lib/tripcoil/cache"}
 			if df, ok := systemdImages[image]; ok {
 				image = "tripcoil-it-systemd-" + image
@@ -222,6 +222,8 @@ func waitForSystemd(t *testing.T, name string) {
 		}
 		time.Sleep(time.Second)
 	}
-	logs, _ := exec.Command("docker", "logs", "--tail", "40", name).CombinedOutput()
-	t.Fatalf("systemd did not start:\n%s", logs)
+	state, _ := exec.Command("docker", "inspect", "-f", "{{.State.Status}} exit={{.State.ExitCode}} {{.State.Error}}", name).CombinedOutput()
+	running, _ := exec.Command("docker", "exec", name, "systemctl", "is-system-running").CombinedOutput()
+	logs, _ := exec.Command("docker", "logs", "--tail", "60", name).CombinedOutput()
+	t.Fatalf("systemd did not start: %s%s%s", state, running, logs)
 }

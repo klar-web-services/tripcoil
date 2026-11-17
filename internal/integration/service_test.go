@@ -119,7 +119,7 @@ func TestService(t *testing.T) {
 					t.Errorf("give the cache back: %v\n%s", err, out)
 				}
 			})
-			if out, err := exec.CommandContext(interrupt, "docker", "run", "-d", "--name", name, "--privileged",
+			if out, err := exec.CommandContext(interrupt, "docker", "run", "-d", "-t", "--cgroupns=private", "--name", name, "--privileged",
 				"-v", dir+":/opt/tripcoil:ro", "-v", cache+":/var/lib/tripcoil/cache", image).CombinedOutput(); err != nil {
 				t.Fatalf("docker run: %v\n%s", err, out)
 			}
