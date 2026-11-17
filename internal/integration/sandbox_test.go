@@ -222,5 +222,6 @@ func waitForSystemd(t *testing.T, name string) {
 		}
 		time.Sleep(time.Second)
 	}
-	t.Fatal("systemd did not start")
+	logs, _ := exec.Command("docker", "logs", "--tail", "40", name).CombinedOutput()
+	t.Fatalf("systemd did not start:\n%s", logs)
 }

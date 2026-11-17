@@ -173,6 +173,8 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.version }}
         run: test "$("$RUNNER_TEMP/candidate/tripcoil" version | head -n1)" = "tripcoil $VERSION"
+      - name: Allow mounts in unprivileged user namespaces (Ubuntu's AppArmor), for bubblewrap and the mount test
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Integration tests on the candidate
         run: |
           TRIPCOIL_CANDIDATE="$RUNNER_TEMP/candidate/tripcoil" go test -tags integration -count=1 -v -timeout 50m ./internal/integration/ | tee it.out
