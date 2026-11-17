@@ -12,6 +12,13 @@ import (
 // Nice is the CPU priority of a run, as the service unit's Nice=10.
 const Nice = 10
 
+// CPUWeight and MemoryMax are the service's cgroup settings, which a manual run's transient
+// scope takes too: on cgroup v2, nice orders processes only within their own cgroup.
+const (
+	CPUWeight = 20
+	MemoryMax = "4G"
+)
+
 const (
 	ioprioWhoProcess = 1
 	ioprioClassShift = 13

@@ -87,6 +87,11 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		return 2
 	}
 	// As light on the host as a scheduled run, and so are the Grype processes it starts.
+	if code, ran, err := d.enterScope(args); ran {
+		return code
+	} else if err != nil {
+		fmt.Fprintf(stderr, "tripcoil: cannot move the run into a transient scope, so only its nice level makes it light: %v\n", err)
+	}
 	if err := d.lowerPriority(); err != nil {
 		fmt.Fprintf(stderr, "tripcoil: cannot lower the run's priority: %s\n", strings.ReplaceAll(err.Error(), "\n", "; "))
 	}

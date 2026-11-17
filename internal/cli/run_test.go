@@ -43,6 +43,7 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 			return &facts.Index{Collected: []string{}, Missing: []facts.Missing{}, Notes: []string{}}, nil
 		},
 		agent:         func(config.Config) review.Agent { return nil },
+		enterScope:    func([]string) (int, bool, error) { return 0, false, nil },
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
 	}

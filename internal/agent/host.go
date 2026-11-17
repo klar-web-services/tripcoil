@@ -301,8 +301,8 @@ func (h *Host) watchNetwork(ctx context.Context, stop context.CancelCauseFunc, p
 // later), bubblewrap with cgroup v2 otherwise.
 func hostPlatform() (sandbox.Sandbox, func() error, error) {
 	if sandbox.Booted() {
-		systemctl, err1 := lookPath("systemctl")
-		systemdRun, err2 := lookPath("systemd-run")
+		systemctl, err1 := LookPath("systemctl")
+		systemdRun, err2 := LookPath("systemd-run")
 		if err := errors.Join(err1, err2); err != nil {
 			return nil, nil, fail(problem.AgentSandbox, "%v", err)
 		}
@@ -320,7 +320,7 @@ func hostPlatform() (sandbox.Sandbox, func() error, error) {
 		s := sandbox.Systemd{SystemdRun: systemdRun, Systemctl: systemctl}
 		return s, s.StopLeftovers, nil
 	}
-	bwrap, err := lookPath("bwrap")
+	bwrap, err := LookPath("bwrap")
 	if err != nil {
 		return nil, nil, fail(problem.AgentSandbox, "bubblewrap is not installed (on Alpine: apk add bubblewrap)")
 	}
@@ -343,8 +343,8 @@ func unmountHome(home string) {
 	}
 }
 
-// lookPath finds a tool on the fixed system path.
-func lookPath(name string) (string, error) {
+// LookPath finds a tool on the fixed system path.
+func LookPath(name string) (string, error) {
 	for _, dir := range filepath.SplitList(sandbox.Path) {
 		p := filepath.Join(dir, name)
 		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {

@@ -50,6 +50,9 @@ type deps struct {
 	facts      func(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error)
 	// agent returns the review agent for the config, or nil when this build cannot review.
 	agent func(cfg config.Config) review.Agent
+	// enterScope runs a manual run again in a transient scope with the service's weights, and
+	// returns its exit code with ran set (see enterScope).
+	enterScope func(args []string) (code int, ran bool, err error)
 	// lowerPriority makes the run as light on the host as a scheduled one (spec section 13).
 	lowerPriority func() error
 	// interrupts returns a context that is cancelled by Ctrl-C or SIGTERM.
@@ -67,6 +70,7 @@ func defaultDeps() deps {
 		audit:         auditHost,
 		facts:         factsHost,
 		agent:         hostAgent,
+		enterScope:    enterScope,
 		lowerPriority: priority.Lower,
 		interrupts: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
