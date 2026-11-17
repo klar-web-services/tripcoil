@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 	"github.com/klar-web-services/tripcoil/internal/review"
 	"github.com/klar-web-services/tripcoil/internal/run"
+	"github.com/klar-web-services/tripcoil/internal/setup"
 )
 
 const runID = "20261114T061500Z-3fa2"
@@ -46,6 +48,7 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		enterScope:    func([]string) (int, bool, error) { return 0, false, nil },
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+		setup:         func(setup.Options, io.Writer) error { t.Fatal("setup must not run"); return nil },
 		hangups:       func() <-chan struct{} { return nil },
 		after:         func(time.Duration) <-chan time.Time { return nil },
 	}
