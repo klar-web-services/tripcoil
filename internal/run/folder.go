@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 // AgentGroup may read run folders: the review agent's user is its only member (Plan 3).
@@ -33,8 +35,17 @@ func shareWithAgent(path string) error {
 }
 
 // Lock takes the exclusive run lock in stateDir. If another run holds it, waiting is called once
-// and Lock blocks until the lock is free.
+// and Lock waits until the lock is free.
 func Lock(stateDir string, waiting func()) (unlock func(), err error) {
+	return LockContext(context.Background(), stateDir, waiting)
+}
+
+// lockPoll is how often a waiting LockContext tries the lock again.
+const lockPoll = 250 * time.Millisecond
+
+// LockContext is Lock that stops waiting when ctx is done, so a stopped daemon does not wait for
+// a manual run to end.
+func LockContext(ctx context.Context, stateDir string, waiting func()) (unlock func(), err error) {
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -45,15 +56,23 @@ func Lock(stateDir string, waiting func()) (unlock func(), err error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	for told := false; ; told = true {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			f.Close()
 			return nil, err
 		}
-		waiting()
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		if !told {
+			waiting()
+		}
+		select {
+		case <-ctx.Done():
 			f.Close()
-			return nil, err
+			return nil, ctx.Err()
+		case <-time.After(lockPoll):
 		}
 	}
 	return func() {

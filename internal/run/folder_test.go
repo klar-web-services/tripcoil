@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -163,5 +164,20 @@ func TestSubfolderShareAndWriteFile(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(md); string(data) != "# r\n" {
 		t.Fatalf("report.md %q", data)
+	}
+}
+
+func TestLockContextStopsWaiting(t *testing.T) {
+	dir := t.TempDir()
+	unlock, err := Lock(dir, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	waited := false
+	go func() { time.Sleep(300 * time.Millisecond); cancel() }()
+	if _, err := LockContext(ctx, dir, func() { waited = true }); !errors.Is(err, context.Canceled) || !waited {
+		t.Fatalf("err %v, waited %v", err, waited)
 	}
 }

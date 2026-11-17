@@ -30,6 +30,7 @@ running versions for known vulnerabilities, and has an AI agent judge what is ex
 Usage:
   tripcoil run [flags]     Run once now and write an evidence folder (as root)
   tripcoil report [flags]  Print the latest report (as root)
+  tripcoil daemon          The service's entrypoint: a run every interval (as root)
   tripcoil version         Print version information
 
 Run "tripcoil <command> -h" for a command's flags.
@@ -57,6 +58,9 @@ type deps struct {
 	lowerPriority func() error
 	// interrupts returns a context that is cancelled by Ctrl-C or SIGTERM.
 	interrupts func() (context.Context, context.CancelFunc)
+	// hangups delivers each SIGHUP; after is time.After.
+	hangups func() <-chan struct{}
+	after   func(time.Duration) <-chan time.Time
 }
 
 func defaultDeps() deps {
@@ -75,7 +79,25 @@ func defaultDeps() deps {
 		interrupts: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
+		hangups: hangups,
+		after:   time.After,
 	}
+}
+
+// hangups turns SIGHUP into a channel that holds at most one pending reload.
+func hangups() <-chan struct{} {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP)
+	out := make(chan struct{}, 1)
+	go func() {
+		for range sig {
+			select {
+			case out <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	return out
 }
 
 // hostAgent is the review agent of this machine (spec section 8).
@@ -99,6 +121,8 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 		return runRun(args[1:], stdout, stderr, d)
 	case "report":
 		return runReport(args[1:], stdout, stderr, d)
+	case "daemon":
+		return runDaemon(args[1:], stdout, stderr, d)
 	case "sandbox-probe": // hidden: run by Tripcoil itself inside the sandbox (spec section 8.2)
 		return probe.Main(args[1:], stdout, stderr)
 	case "version", "--version":

@@ -46,6 +46,8 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		enterScope:    func([]string) (int, bool, error) { return 0, false, nil },
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+		hangups:       func() <-chan struct{} { return nil },
+		after:         func(time.Duration) <-chan time.Time { return nil },
 	}
 }
 
