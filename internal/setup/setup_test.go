@@ -259,3 +259,22 @@ func TestDefaultConfigIsValid(t *testing.T) {
 		}
 	}
 }
+
+func TestService(t *testing.T) {
+	for _, m := range []Manager{Systemd, OpenRC} {
+		f := newFake(t, m)
+		if s, err := f.Service(); err != nil || s != (Service{Manager: m}) {
+			t.Fatalf("%s before setup: %+v %v", m, s, err)
+		}
+		if err := f.Setup(Options{Agent: "none"}); err != nil {
+			t.Fatal(err)
+		}
+		if s, _ := f.Service(); s != (Service{Manager: m, Installed: true}) {
+			t.Fatalf("%s stopped: %+v", m, s)
+		}
+		f.started()
+		if s, _ := f.Service(); s != (Service{Manager: m, Installed: true, Running: true}) {
+			t.Fatalf("%s running: %+v", m, s)
+		}
+	}
+}

@@ -49,6 +49,7 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
 		setup:         func(setup.Options, io.Writer) error { t.Fatal("setup must not run"); return nil },
+		service:       func() (setup.Service, error) { return setup.Service{Manager: setup.Systemd}, nil },
 		hangups:       func() <-chan struct{} { return nil },
 		after:         func(time.Duration) <-chan time.Time { return nil },
 	}

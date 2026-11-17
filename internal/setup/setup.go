@@ -372,3 +372,28 @@ Then check the host: sudo tripcoil doctor
 review.agent is none, so reports are audit-only. Check the host: sudo tripcoil doctor
 `
 }
+
+// Service is the tripcoil service's state.
+type Service struct {
+	Manager   Manager
+	Installed bool
+	Running   bool
+}
+
+// Service reports whether the tripcoil service is installed and running.
+func (h Host) Service() (Service, error) {
+	m, err := h.Manager()
+	if err != nil {
+		return Service{}, err
+	}
+	s := Service{Manager: m}
+	if m == Systemd {
+		s.Installed = h.exists(UnitPath)
+		_, err = h.Run("systemctl", "is-active", "--quiet", "tripcoil.service")
+	} else {
+		s.Installed = h.exists(InitScriptPath)
+		_, err = h.Run("rc-service", "tripcoil", "status")
+	}
+	s.Running = s.Installed && err == nil
+	return s, nil
+}
