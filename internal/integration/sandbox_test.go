@@ -16,10 +16,13 @@ import (
 )
 
 // systemdImages are the systemd versions the review's sandbox is tested on, and one too old for it.
+// systemd 245 and 247 in a privileged container wait 90 s for a serial console the host has
+// (ttyS0 on GitHub's runners), so their images mask the gettys.
 var systemdImages = map[string]string{
 	"debian11": `FROM debian:11
 RUN printf 'deb http://archive.debian.org/debian bullseye main\ndeb http://archive.debian.org/debian-security bullseye-security main\n' > /etc/apt/sources.list && \
     apt-get -o Acquire::Check-Valid-Until=false update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq systemd systemd-sysv >/dev/null && rm -rf /var/lib/apt/lists/*
+RUN systemctl mask getty.target serial-getty@ttyS0.service >/dev/null 2>&1
 CMD ["/lib/systemd/systemd"]
 `,
 	"ubuntu2204": `FROM ubuntu:22.04
@@ -36,6 +39,7 @@ CMD ["/lib/systemd/systemd"]
 `,
 	"ubuntu2004": `FROM ubuntu:20.04
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq systemd systemd-sysv >/dev/null && rm -rf /var/lib/apt/lists/*
+RUN systemctl mask getty.target serial-getty@ttyS0.service >/dev/null 2>&1
 CMD ["/lib/systemd/systemd"]
 `,
 }
@@ -128,7 +132,7 @@ func TestSandbox(t *testing.T) {
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			image := tc.image
-			args := []string{"run", "-d", "--name", fmt.Sprintf("tripcoil-it-sandbox-%d-%d", os.Getpid(), i), "-t", "--cgroupns=private", "--privileged",
+			args := []string{"run", "-d", "--name", fmt.Sprintf("tripcoil-it-sandbox-%d-%d", os.Getpid(), i), "--privileged",
 				"-v", dir + ":/opt/tripcoil:ro", "-v", cache + ":/var/lib/tripcoil/cache"}
 			if df, ok := systemdImages[image]; ok {
 				image = "tripcoil-it-systemd-" + image
