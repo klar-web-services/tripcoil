@@ -59,3 +59,7 @@ retention:
 Unknown fields and invalid values are errors that name the line. `interval` is at least `15m`.
 `review.envFile` must be owned by root and readable by nobody else. After a change, reload the
 service (`sudo systemctl reload tripcoil`, or `sudo rc-service tripcoil reload`).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
