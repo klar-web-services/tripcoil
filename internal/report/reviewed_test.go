@@ -138,3 +138,48 @@ func TestRenderReviewFailedIsAuditOnly(t *testing.T) {
 		t.Errorf("verdict:\n%s", strings.SplitN(got, "\n", 2)[0])
 	}
 }
+
+func TestRenderReviewedLowerPriorityConditional(t *testing.T) {
+	entry := func(id, exploitability, priority string) review.Entry {
+		return review.Entry{FindingID: id, Verdict: review.Confirmed, Exploitability: exploitability, Priority: priority, Reasoning: "why " + id, Fix: []string{"f"}}
+	}
+	mix := hostReview()
+	mix.Findings = append(mix.Findings[:0:0], mix.Findings...)
+	mix.Findings[0] = entry("f:0000000000000001", review.Conditional, "scheduled") // the exploitable one, now lower priority
+	mix.Findings[3] = entry("f:0000000000000003", review.Conditional, "none")
+	r := record(map[string]string{"inventory": "ok", "audit": "ok", "review": "ok"})
+	got := Render(Input{Run: r, Inventory: hostInventory(), Audit: hostAudit(), Review: mix})
+	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🔴 1 issue exploitable now; 3 not assessed") {
+		t.Errorf("verdict %q", line)
+	}
+	full, rest, ok := strings.Cut(got, "## Exploitable under conditions (1)\n")
+	lowerAt := strings.Index(rest, "## Exploitable under conditions, lower priority (2)\n\n<details>\n<summary>2 findings</summary>")
+	if !ok || lowerAt < 0 || !strings.Contains(rest[:lowerAt], "priority soon**: Needs a local user") || strings.Contains(full, "why f:") {
+		t.Fatalf("sections:\n%s", got)
+	}
+	lower, _, _ := strings.Cut(rest[lowerAt:], "</details>")
+	if !strings.Contains(lower, "priority scheduled**: why f:0000000000000001") || !strings.Contains(lower, "priority none**: why f:0000000000000003") ||
+		strings.Index(rest, "## Not assessed (3)") < lowerAt || strings.Contains(got, "## Not exploitable here") {
+		t.Errorf("lower priority section:\n%s", got)
+	}
+
+	// Only lower-priority conditional findings: the verdict falls through.
+	only := &review.Review{Summary: "s", NotReviewed: []string{}}
+	aud := &audit.Audit{Status: audit.Complete, Grype: audit.GrypeInfo{Version: "0.121.2"}}
+	for i, p := range []string{"scheduled", "none", ""} {
+		id := fmt.Sprintf("f:%016d", i)
+		aud.Findings = append(aud.Findings, audit.Finding{ID: id, Risk: audit.RiskLow, Origin: libssl, Package: audit.Package{Name: "libssl3", Version: "1"}, Vulnerability: audit.Vulnerability{ID: fmt.Sprintf("CVE-2026-%d", i)}})
+		only.Findings = append(only.Findings, entry(id, review.Conditional, p))
+	}
+	got = Render(Input{Run: r, Inventory: hostInventory(), Audit: aud, Review: only})
+	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🟢 No exploitable issues found") || strings.Contains(got, "## Exploitable under conditions (") ||
+		!strings.Contains(got, "## Exploitable under conditions, lower priority (3)") {
+		t.Errorf("all lower priority:\n%s", got)
+	}
+	only.NotReviewed = []string{"f:0000000000000009"}
+	aud.Findings = append(aud.Findings, audit.Finding{ID: "f:0000000000000009", Risk: audit.RiskLow, Origin: libssl, Package: audit.Package{Name: "libssl3", Version: "1"}, Vulnerability: audit.Vulnerability{ID: "CVE-2026-9"}})
+	got = Render(Input{Run: r, Inventory: hostInventory(), Audit: aud, Review: only})
+	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🟡 No issue found exploitable, but 1 finding was not assessed") {
+		t.Errorf("verdict %q", line)
+	}
+}

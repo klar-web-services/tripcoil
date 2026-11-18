@@ -88,7 +88,7 @@ func TestRunWithReviewThenCarryForward(t *testing.T) {
 		t.Fatalf("exit %d, run.json %+v", code, rec)
 	}
 	if rec.Fingerprint == "" || rec.Versions["prompt"] != review.PromptVersion || rec.Versions["agentCli"] != "claude 2.1.309" ||
-		rec.Counts["reviewConditional"] != 1 || rec.Counts["notReviewed"] != 0 || !rec.ReviewedAt.Equal(time.Date(2026, 11, 14, 6, 0, 0, 0, time.UTC)) {
+		rec.Counts["reviewConditional"] != 1 || rec.Counts["reviewConditionalLowerPriority"] != 0 || rec.Counts["notReviewed"] != 0 || !rec.ReviewedAt.Equal(time.Date(2026, 11, 14, 6, 0, 0, 0, time.UTC)) {
 		t.Errorf("run.json %+v", rec)
 	}
 	if !strings.HasPrefix(md, "🟠 No issue exploitable now; 1 exploitable under conditions") || !strings.Contains(md, "reviewed by claude 2.1.309") {
@@ -392,5 +392,19 @@ func TestSandboxProbeCommand(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"blocked":true`) {
 		t.Errorf("got %q", out.String())
+	}
+}
+
+func TestCountReviewLowerPriorityConditional(t *testing.T) {
+	rec := &run.Record{Counts: map[string]int{}}
+	rev := &review.Review{Findings: []review.Entry{
+		{FindingID: "a", Verdict: review.Confirmed, Exploitability: review.Conditional, Priority: "soon"},
+		{FindingID: "b", Verdict: review.Confirmed, Exploitability: review.Conditional, Priority: "scheduled"},
+		{FindingID: "c", Verdict: review.Confirmed, Exploitability: review.Conditional, Priority: "none"},
+		{FindingID: "d", Verdict: review.Confirmed, Exploitability: review.Exploitable, Priority: "none"},
+	}}
+	countReview(rec, rev)
+	if rec.Counts["reviewConditional"] != 3 || rec.Counts["reviewConditionalLowerPriority"] != 2 || rec.Counts["reviewExploitable"] != 1 {
+		t.Errorf("%v", rec.Counts)
 	}
 }

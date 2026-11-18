@@ -46,8 +46,17 @@ func renderReviewed(in Input) string {
 		}
 	}
 	unassessed := len(groups[review.Unknown]) + len(notReviewed)
+	// Only conditional findings worth acting on soon count in the verdict and are listed in full.
+	var conditional, lower []reviewed
+	for _, r := range groups[review.Conditional] {
+		if r.entry.Priority == "now" || r.entry.Priority == "soon" {
+			conditional = append(conditional, r)
+		} else {
+			lower = append(lower, r)
+		}
+	}
 
-	b.WriteString(reviewVerdict(len(groups[review.Exploitable]), len(groups[review.Conditional]), unassessed) + suffixes(in.Run, len(gaps), true) + "\n\n")
+	b.WriteString(reviewVerdict(len(groups[review.Exploitable]), len(conditional), unassessed) + suffixes(in.Run, len(gaps), true) + "\n\n")
 	b.WriteString(hostLine(in) + reviewHost(in) + "\n\n")
 	writeErrors(&b, in)
 	writeReviewWarnings(&b, in)
@@ -61,7 +70,8 @@ func renderReviewed(in Input) string {
 	b.WriteString("\n")
 	names := itemNamesByID(in.Inventory)
 	writeEntries(&b, "Exploitable now", groups[review.Exploitable], names)
-	writeEntries(&b, "Exploitable under conditions", groups[review.Conditional], names)
+	writeEntries(&b, "Exploitable under conditions", conditional, names)
+	writeCollapsed(&b, "Exploitable under conditions, lower priority", lower, names)
 	if unassessed > 0 {
 		fmt.Fprintf(&b, "## Not assessed (%d)\n\n", unassessed)
 		if len(groups[review.Unknown]) > 0 {
@@ -82,6 +92,7 @@ func renderReviewed(in Input) string {
 }
 
 // reviewVerdict is the verdict line of a reviewed run: the first rule of spec section 11.3 that applies.
+// conditional counts only conditional findings with priority now or soon.
 func reviewVerdict(exploitable, conditional, unassessed int) string {
 	switch {
 	case exploitable > 0:

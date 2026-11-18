@@ -15,7 +15,7 @@ import (
 
 // PromptVersion is the prompt's version (spec section 8.4). Change it with any change to the prompt
 // or the schema: it is part of the change check's fingerprint.
-const PromptVersion = "2"
+const PromptVersion = "3"
 
 // Prompt is the fixed task the agent gets. It holds no untrusted text: the agent reads the run's
 // files itself.

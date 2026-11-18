@@ -150,9 +150,10 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	return rev, ""
 }
 
-// countReview counts the reviewed findings by exploitability for run.json.
+// countReview counts the reviewed findings by exploitability for run.json. reviewConditionalLowerPriority
+// is the part of reviewConditional without priority now or soon, which the report's verdict leaves out.
 func countReview(rec *run.Record, rev *review.Review) {
-	for _, k := range []string{"reviewExploitable", "reviewConditional", "reviewNotExploitable", "reviewUnknown", "reviewFalsePositive", "reviewAdded"} {
+	for _, k := range []string{"reviewExploitable", "reviewConditional", "reviewConditionalLowerPriority", "reviewNotExploitable", "reviewUnknown", "reviewFalsePositive", "reviewAdded"} {
 		rec.Counts[k] = 0
 	}
 	for _, e := range rev.Findings {
@@ -163,6 +164,9 @@ func countReview(rec *run.Record, rev *review.Review) {
 			rec.Counts["reviewExploitable"]++
 		case e.Exploitability == review.Conditional:
 			rec.Counts["reviewConditional"]++
+			if e.Priority != "now" && e.Priority != "soon" {
+				rec.Counts["reviewConditionalLowerPriority"]++
+			}
 		case e.Exploitability == review.NotExploitable:
 			rec.Counts["reviewNotExploitable"]++
 		default:
