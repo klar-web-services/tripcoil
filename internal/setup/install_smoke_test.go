@@ -24,10 +24,9 @@ import (
 
 var smokeImages = []string{"debian:12", "ubuntu:24.04", "fedora:latest", "rockylinux:9", "alpine:3.21", "archlinux:latest"}
 
-// smokePrep is what an image needs first. The Alpine and Arch images ship without package
-// indexes, which a real host has; setup then stops and names these commands.
+// smokePrep is what an image needs first. The Arch image ships without a sync database, which a
+// real host has; setup then stops and names this command (it refreshes apt's and apk's indexes itself).
 var smokePrep = map[string]string{
-	"alpine:3.21":      "apk update",
 	"archlinux:latest": "pacman -Syu --noconfirm",
 }
 

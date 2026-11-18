@@ -138,6 +138,10 @@ func (h Host) planNode() (nodePlan, error) {
 	var candidate string
 	switch manager {
 	case "apk":
+		fmt.Fprintln(h.Out, "… Checking which Node.js apk offers.")
+		if _, err := h.run("apk", "update"); err != nil {
+			return p, err
+		}
 		out, err := h.run("apk", "search", "-x", "nodejs")
 		if err != nil {
 			return p, err

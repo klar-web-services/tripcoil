@@ -87,7 +87,7 @@ func TestClaudeCodePackageManagers(t *testing.T) {
 		cmds                   []string
 	}{
 		{"apk", "apk search -x nodejs", "nodejs-22.11.0-r0\n", "Node.js 22 (apk)",
-			[]string{"apk search -x nodejs", "apk add nodejs npm"}},
+			[]string{"apk update", "apk search -x nodejs", "apk add nodejs npm"}},
 		{"pacman", "pacman -Si nodejs", "Repository      : extra\nName            : nodejs\nVersion         : 23.1.0-1\n", "Node.js 23 (pacman)",
 			[]string{"pacman -Si nodejs", "pacman -S --noconfirm --needed nodejs npm"}},
 		{"apt-get", "apt-cache policy nodejs", "nodejs:\n  Installed: (none)\n  Candidate: 22.11.0+dfsg-1\n", "Node.js 22 (apt-get)",

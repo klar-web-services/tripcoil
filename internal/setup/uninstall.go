@@ -168,16 +168,17 @@ func (h Host) markedNodeSource() []string {
 func (h Host) removeNodeSource() ([]string, error) {
 	var removed []string
 	for _, p := range h.markedNodeSource() {
-		if err := os.Remove(h.path(p)); err != nil {
-			return removed, err
-		}
-		removed = append(removed, p)
+		// The key goes before its mark, so a failed removal leaves the mark for the next run.
 		if p == NodeSourceKeyMarkPath && h.exists(NodeSourceKeyPath) {
 			if err := os.Remove(h.path(NodeSourceKeyPath)); err != nil {
 				return removed, err
 			}
 			removed = append(removed, NodeSourceKeyPath)
 		}
+		if err := os.Remove(h.path(p)); err != nil {
+			return removed, err
+		}
+		removed = append(removed, p)
 	}
 	for _, p := range NodeSourceFiles {
 		if h.hostOwned(p) {

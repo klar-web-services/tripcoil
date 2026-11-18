@@ -158,7 +158,7 @@ func TestUninstallNodeSource(t *testing.T) {
 	}
 	out := f.out.String()
 	for _, s := range []string{"the user tripcoil-agent, NodeSource's repository and /usr/local/bin/tripcoil? yes or no [no]: ",
-		"✓ Removed NodeSource's repository: " + NodeSourceSourcesPath + ", " + NodeSourceKeyMarkPath + ", " + NodeSourceKeyPath + ", " + NodeSourcePinPath + ".\n",
+		"✓ Removed NodeSource's repository: " + NodeSourceSourcesPath + ", " + NodeSourceKeyPath + ", " + NodeSourceKeyMarkPath + ", " + NodeSourcePinPath + ".\n",
 		"· " + NodeSourceRepoPath + " is the host's own; it stays.\n"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("output lacks %q:\n%s", s, out)
