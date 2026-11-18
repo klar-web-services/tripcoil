@@ -133,8 +133,8 @@ func TestSetupSystemdTwice(t *testing.T) {
 		}
 	}
 	for _, l := range []string{"✓ Created the user and group tripcoil-agent.", "✓ Wrote /etc/tripcoil/tripcoil.yaml (review.agent: codex) and /etc/tripcoil/agent.env.",
-		"✓ Installed and started the tripcoil service.", "sudo npm install -g @openai/codex",
-		"Add it to /etc/tripcoil/agent.env as the line CODEX_API_KEY=<key>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
+		"✓ Installed and started the tripcoil service.", "       npm install -g @openai/codex",
+		"Add it to /etc/tripcoil/agent.env as the line CODEX_API_KEY=<key>:\n       vi /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(f.out.String(), l) {
 			t.Errorf("output lacks %q:\n%s", l, f.out.String())
 		}
@@ -350,22 +350,34 @@ func TestSetupRefusesABadEnvFile(t *testing.T) {
 	}
 }
 
+func TestSudo(t *testing.T) {
+	for _, c := range []struct {
+		euid     int
+		sudoUser string
+		want     string
+	}{{0, "", ""}, {0, "alice", "sudo "}, {1000, "", "sudo "}, {1000, "alice", "sudo "}} {
+		if got := Sudo(c.euid, c.sudoUser); got != c.want {
+			t.Errorf("Sudo(%d, %q) = %q, want %q", c.euid, c.sudoUser, got, c.want)
+		}
+	}
+}
+
 func TestNextSteps(t *testing.T) {
-	claude := nextSteps("claude", "/etc/tripcoil/agent.env")
+	claude := nextSteps("claude", "/etc/tripcoil/agent.env", "sudo ")
 	for _, l := range []string{"sudo npm install -g @anthropic-ai/claude-code", `"claude setup-token"`, "subscription (Pro or Max), not API billing",
 		"  3. Add it to /etc/tripcoil/agent.env as the line CLAUDE_CODE_OAUTH_TOKEN=<token>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(claude, l) {
 			t.Errorf("claude lacks %q:\n%s", l, claude)
 		}
 	}
-	old := nextSteps("codex", "")
-	for _, l := range []string{"sudo npm install -g @openai/codex", "per use through the OpenAI API", "Store it root-only as the line CODEX_API_KEY=<key>",
-		"set review.envFile in\n     /etc/tripcoil/tripcoil.yaml", "sudo install -m 600 /dev/null /etc/tripcoil/agent.env\n       sudoedit /etc/tripcoil/agent.env\n"} {
+	old := nextSteps("codex", "", "")
+	for _, l := range []string{"       npm install -g @openai/codex", "per use through the OpenAI API", "Store it root-only as the line CODEX_API_KEY=<key>",
+		"set review.envFile in\n     /etc/tripcoil/tripcoil.yaml", "       install -m 600 /dev/null /etc/tripcoil/agent.env\n       vi /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(old, l) {
 			t.Errorf("codex without envFile lacks %q:\n%s", l, old)
 		}
 	}
-	if !strings.Contains(nextSteps("none", ""), "audit-only") {
+	if !strings.Contains(nextSteps("none", "", ""), "audit-only") {
 		t.Error("none")
 	}
 }

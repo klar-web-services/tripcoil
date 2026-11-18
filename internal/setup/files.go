@@ -119,7 +119,7 @@ func ServiceFiles(m Manager, exe string) []File {
 const EnvFilePath = "/etc/tripcoil/agent.env"
 
 // defaultConfig is the config setup writes, the defaults of spec section 10 with the chosen agent.
-const defaultConfig = `# Tripcoil's configuration. After a change: sudo tripcoil doctor, then restart or reload the service.
+const defaultConfig = `# Tripcoil's configuration. After a change: run tripcoil doctor as root, then restart or reload the service.
 version: 1
 interval: 6h
 review:

@@ -55,7 +55,7 @@ func TestStatusBeforeTheFirstRun(t *testing.T) {
 	if code := dispatch([]string{"status"}, &out, &errb, d); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
-	want := `Service:           not installed; set it up with: sudo tripcoil setup
+	want := `Service:           not installed; set it up with: tripcoil setup
 Last run:          none yet
 Next run:          none: the service is not running
 Last reviewed:     none yet

@@ -119,7 +119,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	return printRun(stdout, rec, dir, *jsonOut)
+	return printRun(stdout, d.sudo, rec, dir, *jsonOut)
 }
 
 // execute runs the pipeline once, with the run lock held, and writes the run folder. It returns
@@ -332,7 +332,7 @@ func titleCase(s string) string {
 }
 
 // printRun prints run.json (--json) or a short summary, and returns the run's exit code.
-func printRun(stdout io.Writer, rec *run.Record, dir string, asJSON bool) int {
+func printRun(stdout io.Writer, sudo string, rec *run.Record, dir string, asJSON bool) int {
 	if asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -346,7 +346,7 @@ func printRun(stdout io.Writer, rec *run.Record, dir string, asJSON bool) int {
 	for _, e := range rec.Errors {
 		fmt.Fprintf(stdout, "  error %s: %s\n", e.Code, oneLine(e.Message))
 	}
-	fmt.Fprintf(stdout, "Evidence: %s\nRead the report with: sudo tripcoil report --run %s\n", dir, rec.RunID)
+	fmt.Fprintf(stdout, "Evidence: %s\nRead the report with: %stripcoil report --run %s\n", dir, sudo, rec.RunID)
 	return rec.ExitCode
 }
 

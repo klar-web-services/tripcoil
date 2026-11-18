@@ -59,7 +59,7 @@ func runStatus(args []string, stdout, stderr io.Writer, d deps) int {
 	case svc.Installed:
 		line("Service", fmt.Sprintf("installed but not running (%s)", svc.Manager))
 	default:
-		line("Service", "not installed; set it up with: sudo tripcoil setup")
+		line("Service", "not installed; set it up with: "+d.sudo+"tripcoil setup")
 	}
 
 	var last *run.Record

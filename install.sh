@@ -76,12 +76,14 @@ main() {
 	fi
 	new=
 	say "Installed tripcoil $version to $install_dir/tripcoil"
+	sudo=
+	[ -z "${SUDO_USER:-}" ] || sudo="sudo "
 	if [ -e /etc/systemd/system/tripcoil.service ]; then
-		say "Restart the service to use it: sudo systemctl restart tripcoil"
+		say "Restart the service to use it: ${sudo}systemctl restart tripcoil"
 	elif [ -e /etc/init.d/tripcoil ]; then
-		say "Restart the service to use it: sudo rc-service tripcoil restart"
+		say "Restart the service to use it: ${sudo}rc-service tripcoil restart"
 	else
-		say "Next: sudo tripcoil setup"
+		say "Next: ${sudo}tripcoil setup"
 	fi
 }
 

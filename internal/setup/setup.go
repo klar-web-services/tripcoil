@@ -23,6 +23,7 @@ import (
 type Host struct {
 	Root     string
 	Exe      string // Tripcoil's own binary, links resolved
+	Sudo     string // the prefix for a command in a hint (see Sudo)
 	Run      func(name string, args ...string) ([]byte, error)
 	LookPath func(name string) (string, error)
 	// UserExists and GroupExists look up the agent's user and group.
@@ -40,6 +41,7 @@ type Host struct {
 func NewHost(exe string, in io.Reader, out io.Writer) Host {
 	return Host{
 		Exe: exe, In: in, Out: out,
+		Sudo: Sudo(os.Geteuid(), os.Getenv("SUDO_USER")),
 		Run: func(name string, args ...string) ([]byte, error) {
 			cmd := exec.Command(name, args...)
 			cmd.Env = append(os.Environ(), "PATH="+sandbox.Path)
@@ -51,6 +53,14 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 		CheckBinary: func(p string) error { _, err := agent.FindCLI(p, "tripcoil"); return err },
 		Stat:        config.OSStat,
 	}
+}
+
+// Sudo is the prefix for a command in a hint: "sudo " unless the user is root without sudo.
+func Sudo(euid int, sudoUser string) string {
+	if euid == 0 && sudoUser == "" {
+		return ""
+	}
+	return "sudo "
 }
 
 func (h Host) path(p string) string { return filepath.Join(h.Root, p) }
@@ -128,7 +138,7 @@ func (h Host) Setup(o Options) error {
 	if !changed {
 		fmt.Fprintln(h.Out, "Nothing changed.")
 	}
-	fmt.Fprint(h.Out, nextSteps(name, envFile))
+	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo))
 	return nil
 }
 
@@ -142,7 +152,7 @@ func (h Host) checkBinary() error {
 		return fmt.Errorf("%q has characters the service files cannot hold; install Tripcoil to /usr/local/bin", exe)
 	}
 	if strings.HasPrefix(exe, "/home/") || exe == "/home" {
-		return fmt.Errorf("%s is under /home; install Tripcoil system-wide first (curl -fsSL https://tools.klar.ws/tripcoil/install.sh | sudo sh)", exe)
+		return fmt.Errorf("%s is under /home; install Tripcoil system-wide first (curl -fsSL https://tools.klar.ws/tripcoil/install.sh | %ssh)", exe, h.Sudo)
 	}
 	if err := h.CheckBinary(exe); err != nil {
 		return fmt.Errorf("the service would run %s as root, but %v", exe, err)
@@ -376,38 +386,42 @@ func hasService(out []byte) bool {
 
 // nextSteps says how to install the agent CLI system-wide and give it credentials in envFile
 // (spec 8.3), and how each agent is billed.
-func nextSteps(name, envFile string) string {
+func nextSteps(name, envFile, sudo string) string {
+	edit := "sudoedit"
+	if sudo == "" {
+		edit = "vi"
+	}
 	var install, token, line string
 	switch name {
 	case "claude":
-		install = "Claude Code system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @anthropic-ai/claude-code"
+		install = "Claude Code system-wide (root-owned, outside /home), for example:\n       " + sudo + "npm install -g @anthropic-ai/claude-code"
 		token = `Create a token with "claude setup-token" (as any user, on any machine). It uses your Claude
      subscription (Pro or Max), not API billing.`
 		line = "CLAUDE_CODE_OAUTH_TOKEN=<token>"
 	case "codex":
-		install = "Codex system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @openai/codex"
+		install = "Codex system-wide (root-owned, outside /home), for example:\n       " + sudo + "npm install -g @openai/codex"
 		token = `Create an OpenAI API key. Codex bills it per use through the OpenAI API (a ChatGPT login is
      not supported).`
 		line = "CODEX_API_KEY=<key>"
 	default:
-		return `
-review.agent is none, so reports are audit-only. Check the host: sudo tripcoil doctor
-`
+		return fmt.Sprintf(`
+review.agent is none, so reports are audit-only. Check the host: %stripcoil doctor
+`, sudo)
 	}
-	store := fmt.Sprintf("Add it to %s as the line %s:\n       sudoedit %s", envFile, line, envFile)
+	store := fmt.Sprintf("Add it to %s as the line %s:\n       %s %s", envFile, line, edit, envFile)
 	if envFile == "" {
 		store = fmt.Sprintf(`Store it root-only as the line %s, and set review.envFile in
      %s to that file:
-       sudo install -m 600 /dev/null %s
-       sudoedit %s`, line, config.DefaultPath, EnvFilePath, EnvFilePath)
+       %sinstall -m 600 /dev/null %s
+       %s %s`, line, config.DefaultPath, sudo, EnvFilePath, edit, EnvFilePath)
 	}
 	return fmt.Sprintf(`
 Next, give the review its credentials:
   1. Install %s
   2. %s
   3. %s
-Then check the host: sudo tripcoil doctor
-`, install, token, store)
+Then check the host: %stripcoil doctor
+`, install, token, store, sudo)
 }
 
 // Service is the tripcoil service's state.

@@ -46,6 +46,7 @@ const StateDir = "/var/lib/tripcoil"
 // deps holds everything the commands take from the outside world, so tests can replace it.
 type deps struct {
 	euid       func() int
+	sudo       string // the prefix for a command in a hint (see setup.Sudo)
 	now        func() time.Time
 	random     io.Reader
 	configPath string
@@ -74,6 +75,7 @@ type deps struct {
 func defaultDeps() deps {
 	return deps{
 		euid:          os.Geteuid,
+		sudo:          setup.Sudo(os.Geteuid(), os.Getenv("SUDO_USER")),
 		now:           time.Now,
 		random:        rand.Reader,
 		configPath:    config.DefaultPath,

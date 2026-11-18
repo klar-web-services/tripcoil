@@ -62,13 +62,13 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 	}
 	runs := filepath.Join(d.stateDir, "runs")
 	if *asJSON {
-		return printJSONReport(stdout, stderr, filepath.Join(runs, name), *id)
+		return printJSONReport(stdout, stderr, d.sudo, filepath.Join(runs, name), *id)
 	}
 	data, err := os.ReadFile(filepath.Join(runs, name, "report.md"))
 	switch {
 	case errors.Is(err, fs.ErrNotExist) && *id == "":
 		if _, lerr := os.Lstat(filepath.Join(runs, "latest")); lerr != nil {
-			fmt.Fprintln(stderr, "No run has finished yet. Start one with: sudo tripcoil run")
+			fmt.Fprintf(stderr, "No run has finished yet. Start one with: %stripcoil run\n", d.sudo)
 			return 2
 		}
 		target, _ := os.Readlink(filepath.Join(runs, "latest"))
@@ -88,12 +88,12 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 }
 
 // printJSONReport prints `tripcoil report --json` for a run folder.
-func printJSONReport(stdout, stderr io.Writer, dir, id string) int {
+func printJSONReport(stdout, stderr io.Writer, sudo, dir, id string) int {
 	rec, err := run.ReadRecord(dir)
 	if err != nil {
 		switch {
 		case errors.Is(err, fs.ErrNotExist) && id == "":
-			fmt.Fprintln(stderr, "No run has finished yet, or the latest run has no run.json. Start one with: sudo tripcoil run")
+			fmt.Fprintf(stderr, "No run has finished yet, or the latest run has no run.json. Start one with: %stripcoil run\n", sudo)
 		case errors.Is(err, fs.ErrNotExist):
 			fmt.Fprintf(stderr, "Run %s has no run.json.\n", id)
 		default:

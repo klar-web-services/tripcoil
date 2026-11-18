@@ -70,6 +70,7 @@ Every check passed.
 
 func TestDoctorFailures(t *testing.T) {
 	d := testDeps(t, nil, nil)
+	d.sudo = "sudo "
 	var checked string
 	healthy(t, &d, &checked)
 	os.WriteFile(d.configPath, []byte("version: 1\nreview:\n  agent: codex\n"), 0o644)

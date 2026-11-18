@@ -96,7 +96,7 @@ func runDaemon(args []string, stdout, stderr io.Writer, d deps) int {
 				fmt.Fprintln(stderr, err)
 				return
 			}
-			printRun(stdout, rec, dir, false)
+			printRun(stdout, d.sudo, rec, dir, false)
 		},
 		Hangup: d.hangups(),
 		Reload: func() {

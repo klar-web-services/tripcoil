@@ -173,7 +173,7 @@ func TestRunWritesEvidence(t *testing.T) {
 	if target, err := os.Readlink(filepath.Join(d.stateDir, "runs", "latest")); err != nil || target != runID {
 		t.Fatalf("latest -> %q %v", target, err)
 	}
-	if want := "Run " + runID + ": complete. 1 item, 1 origin, 1 finding, 0 coverage gaps.\nEvidence: " + dir + "\nRead the report with: sudo tripcoil report --run " + runID + "\n"; out.String() != want {
+	if want := "Run " + runID + ": complete. 1 item, 1 origin, 1 finding, 0 coverage gaps.\nEvidence: " + dir + "\nRead the report with: tripcoil report --run " + runID + "\n"; out.String() != want {
 		t.Fatalf("stdout %q, want %q", out.String(), want)
 	}
 	if !strings.Contains(errb.String(), "does not exist yet, so the defaults apply") {
@@ -438,6 +438,7 @@ func TestRunPrintsErrorsOnOneLine(t *testing.T) {
 
 func TestRunPointsAtThisRunsReport(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
+	d.sudo = "sudo "
 	var out, errb bytes.Buffer
 	dispatch([]string{"run"}, &out, &errb, d)
 	if !strings.Contains(out.String(), "sudo tripcoil report --run "+runID+"\n") {

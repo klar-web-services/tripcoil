@@ -135,11 +135,11 @@ func runDoctor(args []string, stdout, stderr io.Writer, d deps) int {
 	case err != nil:
 		failCheck(err.Error(), "")
 	case !svc.Installed:
-		failCheck("The tripcoil service is not installed.", "sudo tripcoil setup")
+		failCheck("The tripcoil service is not installed.", d.sudo+"tripcoil setup")
 	case !svc.Running && svc.Manager == setup.Systemd:
-		failCheck("The tripcoil service is installed but not running.", "sudo systemctl start tripcoil; its log: journalctl -u tripcoil")
+		failCheck("The tripcoil service is installed but not running.", d.sudo+"systemctl start tripcoil; its log: journalctl -u tripcoil")
 	case !svc.Running:
-		failCheck("The tripcoil service is installed but not running.", "sudo rc-service tripcoil start; its log: /var/log/tripcoil.log")
+		failCheck("The tripcoil service is installed but not running.", d.sudo+"rc-service tripcoil start; its log: /var/log/tripcoil.log")
 	default:
 		pass(fmt.Sprintf("The tripcoil service is running (%s).", svc.Manager))
 	}
@@ -180,13 +180,13 @@ func runDoctor(args []string, stdout, stderr io.Writer, d deps) int {
 	ready := true
 	if err := d.doctor.agentUser(); err != nil {
 		ready = false
-		failCheck(err.Error(), "sudo tripcoil setup")
+		failCheck(err.Error(), d.sudo+"tripcoil setup")
 	} else {
 		pass("The agent's user " + agent.UserName + " exists.")
 	}
 	if cli, err := d.doctor.findCLI(cfg.Review.Command, cfg.Review.Agent); err != nil {
 		ready = false
-		failCheck("The agent CLI: "+err.Error(), "install it system-wide, owned by root; sudo tripcoil setup prints how")
+		failCheck("The agent CLI: "+err.Error(), "install it system-wide, owned by root; "+d.sudo+"tripcoil setup prints how")
 	} else {
 		pass("The agent CLI " + cli + " is safely owned.")
 	}
@@ -215,7 +215,7 @@ func runDoctor(args []string, stdout, stderr io.Writer, d deps) int {
 	case errors.As(err, &f) && f.Code == problem.ReviewUnsupported:
 		fmt.Fprintf(stdout, "! %s: reports are audit-only.\n", f.Message)
 	case errors.As(err, &f) && f.Code == problem.AgentAuth:
-		failCheck(f.Code+": "+f.Message, "give the CLI credentials in review.envFile; sudo tripcoil setup prints how")
+		failCheck(f.Code+": "+f.Message, "give the CLI credentials in review.envFile; "+d.sudo+"tripcoil setup prints how")
 	case errors.As(err, &f):
 		failCheck(f.Code+": "+f.Message, "")
 	default:
