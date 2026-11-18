@@ -99,6 +99,9 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 		rec.Stages["review"] = run.StageSkipped
 		return nil, notInBuild
 	}
+	if err := run.WriteJSON(filepath.Join(r.dir, "groups.json"), review.GroupFindings(r.aud, r.inv), 0o640); err != nil {
+		rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write groups.json: %v", err))
+	}
 	out, err := agent.Review(ctx, r.dir)
 	rec.Add(out.Warnings...)
 	if ctx.Err() != nil {

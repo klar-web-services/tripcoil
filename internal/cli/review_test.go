@@ -29,12 +29,18 @@ type fakeAgent struct {
 	err   error
 	calls *int
 	dirs  *[]string
+	// groups gets groups.json as the agent finds it.
+	groups *review.Groups
 }
 
 func (a fakeAgent) Review(_ context.Context, dir string) (review.Output, error) {
 	*a.calls++
 	if a.dirs != nil {
 		*a.dirs = append(*a.dirs, dir)
+	}
+	if a.groups != nil {
+		data, _ := os.ReadFile(filepath.Join(dir, "groups.json"))
+		json.Unmarshal(data, a.groups)
 	}
 	return review.Output{Data: []byte(a.out), CLI: "claude 2.1.309"}, a.err
 }
@@ -72,8 +78,12 @@ func runOnce(t *testing.T, d *deps, args ...string) (int, *run.Record, string) {
 
 func TestRunWithReviewThenCarryForward(t *testing.T) {
 	calls := 0
-	d := reviewDeps(t, fakeAgent{out: validReview, calls: &calls})
+	var groups review.Groups
+	d := reviewDeps(t, fakeAgent{out: validReview, calls: &calls, groups: &groups})
 	code, rec, md := runOnce(t, d)
+	if len(groups.Groups) != 1 || groups.Groups[0].ID != "kernel:other" || len(groups.Groups[0].Findings) != 1 {
+		t.Errorf("groups.json: %+v", groups)
+	}
 	if code != 0 || !rec.Reviewed || rec.CarriedFrom != "" || rec.Stages["review"] != run.StageOK || rec.Stages["facts"] != run.StageOK || calls != 1 {
 		t.Fatalf("exit %d, run.json %+v", code, rec)
 	}
