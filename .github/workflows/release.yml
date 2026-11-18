@@ -1,10 +1,13 @@
 name: release
 # Tripcoil's releases (spec sections 14 and 15):
 #
-#   tag vX.Y.Z ─▶ build ─┬─▶ gate ──────┐
-#                        └─▶ behaviour ─┴─▶ publish ─▶ verify
+#   tag vX.Y.Z ─▶ build ─▶ gate ─┬─▶ publish ─▶ verify
+#               ci ───────────────┘
 #
-# Candidate code (the built binaries, go test) runs only in jobs with contents: read. publish (S3
+# ci waits for the ci workflow's run on the tagged commit (unit and integration tests) and fails
+# unless it succeeded, so the release does not test the same commit again.
+#
+# Candidate code (the built binaries) runs only in jobs with contents: read. publish (S3
 # secrets, contents: write) runs no candidate binary and no repository script: it only copies
 # files and runs gh and the tools.klar.ws publish action.
 #
@@ -20,19 +23,19 @@ name: release
 # `gh run rerun <id> --failed`. Re-runs reuse that run's artifacts, so both hosts receive the same
 # bytes, and publishing what is already published is a no-op.
 #
-# Blocked before publishing (gate or behaviour failed): never retry the same version, and never
+# Blocked before publishing (ci or gate failed): never retry the same version, and never
 # start a fresh run for its tag (a rebuild gives different bytes, which both hosts refuse). Delete
 # the tag (`git push origin :refs/tags/vX.Y.Z`), then either commit the fix and cut the next patch
 # release, or commit VERSION back to the last published version (`dev` if nothing was published).
 #
 # Dry run: `gh workflow run release.yml --ref main` builds 0.0.0-dryrun.<run number> and runs
-# build, gate and behaviour; publish and verify are skipped.
+# build, gate and ci; publish and verify are skipped.
 #
 # Rollback: the tools.klar.ws "Manage a tool" workflow, command set-latest (owner).
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
-  workflow_dispatch: # dry run: build, gate and behaviour only
+  workflow_dispatch: # dry run: build, gate and ci only
 permissions:
   contents: read
 concurrency:
@@ -87,10 +90,6 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Allow mounts in unprivileged user namespaces (Ubuntu's AppArmor), for the mount test
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Check
-        run: test -z "$(gofmt -l .)" && go vet ./... && go test ./...
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -105,6 +104,7 @@ jobs:
             tar -czf "dist/tripcoil-$triple.tar.gz" -C "build/$triple" tripcoil
           done
           (cd dist && sha256sum -- *.tar.gz > checksums.txt && cat checksums.txt)
+          test "$(build/x86_64-unknown-linux-gnu/tripcoil version | head -n1)" = "tripcoil $VERSION"
       - uses: actions/upload-artifact@v7
         with:
           name: candidate
@@ -149,41 +149,30 @@ jobs:
           path: ${{ runner.temp }}/gate-evidence
           if-no-files-found: warn
 
-  # The integration suite with the linux-amd64 candidate in place of a fresh build: the fixtures,
-  # the distribution matrix, the sandbox, the service and install.sh.
-  behaviour:
-    needs: build
+  ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      actions: read
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - uses: actions/download-artifact@v8
-        with:
-          name: candidate
-          path: ${{ runner.temp }}/dist
-      - name: Unpack the linux-amd64 candidate
-        run: |
-          (cd "$RUNNER_TEMP/dist" && sha256sum -c checksums.txt)
-          mkdir -p "$RUNNER_TEMP/candidate"
-          tar -xzf "$RUNNER_TEMP/dist/tripcoil-x86_64-unknown-linux-gnu.tar.gz" -C "$RUNNER_TEMP/candidate" tripcoil
-      - name: The candidate names its version
+      - name: The ci workflow passed on this commit
         env:
-          VERSION: ${{ needs.build.outputs.version }}
-        run: test "$("$RUNNER_TEMP/candidate/tripcoil" version | head -n1)" = "tripcoil $VERSION"
-      - name: Allow mounts in unprivileged user namespaces (Ubuntu's AppArmor), for bubblewrap and the mount test
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Integration tests on the candidate
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TRIPCOIL_CANDIDATE="$RUNNER_TEMP/candidate/tripcoil" go test -tags integration -count=1 -v -timeout 50m ./internal/integration/ | tee it.out
-          ! grep -q -e '--- SKIP' it.out
+          while :; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=1" \
+              --jq '.workflow_runs[0] // empty | "\(.status) \(.conclusion) \(.html_url)"')
+            case $run in
+              "completed success "*) echo "ci passed: ${run##* }"; exit 0 ;;
+              completed*) echo "::error::ci did not pass on $GITHUB_SHA: $run"; exit 1 ;;
+              "") echo "No ci run for $GITHUB_SHA yet." ;;
+              *) echo "ci is running: $run" ;;
+            esac
+            sleep 30
+          done
 
   publish:
-    needs: [build, gate, behaviour]
+    needs: [build, gate, ci]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
