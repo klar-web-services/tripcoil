@@ -108,7 +108,7 @@ func defaultDeps() deps {
 
 func holdSignals() func() {
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(c, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM, syscall.SIGPIPE) // SIGPIPE: a pipe into a tee that died
 	return func() { signal.Stop(c) }
 }
 
