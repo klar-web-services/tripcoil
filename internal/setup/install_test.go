@@ -206,15 +206,19 @@ module_hotfixes=1
 func TestClaudeCodeKeepsTheHostsNodeSource(t *testing.T) {
 	f := withoutClaude(t, "apt-get")
 	f.replies["apt-cache policy nodejs"] = "nodejs:\n  Candidate: (none)\n"
-	for _, p := range []string{NodeSourceSourcesPath, NodeSourcePinPath} {
+	own := map[string]string{
+		NodeSourceSourcesPath: "Types: deb\nURIs: https://deb.nodesource.com/node_24.x\n",
+		NodeSourcePinPath:     "host's own\n",
+	}
+	for p, data := range own {
 		os.MkdirAll(filepath.Dir(filepath.Join(f.Root, p)), 0o755)
-		os.WriteFile(filepath.Join(f.Root, p), []byte("host's own\n"), 0o644)
+		os.WriteFile(filepath.Join(f.Root, p), []byte(data), 0o644)
 	}
 	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil { // f.Fetch fails, so the key is not fetched
 		t.Fatal(err)
 	}
-	for _, p := range []string{NodeSourceSourcesPath, NodeSourcePinPath} {
-		if got := f.read(t, p); got != "host's own\n" {
+	for p, data := range own {
+		if got := f.read(t, p); got != data {
 			t.Errorf("%s was rewritten: %q", p, got)
 		}
 	}
@@ -226,7 +230,95 @@ func TestClaudeCodeKeepsTheHostsNodeSource(t *testing.T) {
 	}
 }
 
-func TestClaudeCodeErrors(t *testing.T) {
+func TestClaudeCodeKeepsAnExistingKey(t *testing.T) {
+	f := withoutClaude(t, "apt-get")
+	f.replies["apt-cache policy nodejs"] = "nodejs:\n  Candidate: (none)\n"
+	os.MkdirAll(filepath.Join(f.Root, "etc/apt/keyrings"), 0o755)
+	os.WriteFile(filepath.Join(f.Root, NodeSourceKeyPath), []byte("the host's key\n"), 0o644)
+	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil { // f.Fetch fails, so the key is not fetched
+		t.Fatal(err)
+	}
+	if got := f.read(t, NodeSourceKeyPath); got != "the host's key\n" {
+		t.Fatalf("key %q", got)
+	}
+	if !strings.HasPrefix(f.read(t, NodeSourceSourcesPath), AddedMarker+"\n") {
+		t.Fatal("the sources file was not written")
+	}
+}
+
+func TestClaudeCodeRefusesTheHostsOldNodeSource(t *testing.T) {
+	for _, tc := range []struct {
+		pm, query, reply, path, data, want string
+	}{
+		{"apt-get", "apt-cache policy nodejs", "  Candidate: 20.18.0-1nodesource1\n", NodeSourceSourcesPath,
+			"Types: deb\nURIs: https://deb.nodesource.com/node_20.x\nSuites: nodistro\n", "point it at node_22.x"},
+		{"dnf", `dnf -q repoquery --latest-limit 1 --qf %{version}\n nodejs`, "20.18.0\n", NodeSourceRepoPath,
+			"[nodesource-nodejs]\nbaseurl=https://rpm.nodesource.com/pub_20.x/nodistro/nodejs/x86_64\n", "point it at pub_22.x"},
+	} {
+		t.Run(tc.pm, func(t *testing.T) {
+			f := withoutClaude(t, tc.pm)
+			f.replies[tc.query] = tc.reply
+			os.MkdirAll(filepath.Dir(filepath.Join(f.Root, tc.path)), 0o755)
+			os.WriteFile(filepath.Join(f.Root, tc.path), []byte(tc.data), 0o644)
+			_, _, err := f.claudeCode(Options{Yes: true})
+			if err == nil || !strings.Contains(err.Error(), tc.path+" is the host's own NodeSource repository") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v", err)
+			}
+			if f.read(t, tc.path) != tc.data || slices.ContainsFunc(f.cmds, func(c string) bool { return strings.Contains(c, "install") }) {
+				t.Fatalf("changed something: %q", f.cmds)
+			}
+		})
+	}
+}
+
+func TestClaudeCodeBadKey(t *testing.T) {
+	for name, fetch := range map[string]func(string) ([]byte, error){
+		"fetch fails": func(string) ([]byte, error) { return nil, errors.New("connection refused") },
+		"not armored": func(string) ([]byte, error) { return []byte("<html>"), nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := withoutClaude(t, "apt-get")
+			f.replies["apt-cache policy nodejs"] = "  Candidate: (none)\n"
+			f.Fetch = fetch
+			_, _, err := f.claudeCode(Options{Yes: true})
+			if err == nil || !strings.Contains(err.Error(), "downloading NodeSource's key: connection refused") && !strings.Contains(err.Error(), "is not an ASCII-armored key") {
+				t.Fatalf("got %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(f.Root, "etc/apt/sources.list.d")); err == nil || slices.Contains(f.cmds, "apt-get install -y nodejs") {
+				t.Fatalf("installed something: %q", f.cmds)
+			}
+		})
+	}
+}
+
+func TestClaudeCodeDnfWarnings(t *testing.T) {
+	f := withoutClaude(t, "dnf")
+	f.replies[`dnf -q repoquery --latest-limit 1 --qf %{version}\n nodejs`] = "Updating Subscription Management repositories.\n22.11.0\n"
+	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.cmds, "dnf install -y nodejs npm") {
+		t.Fatalf("commands %q", f.cmds)
+	}
+}
+
+func TestClaudeCodeNoWhenNodeIsMissing(t *testing.T) {
+	f := withoutClaude(t, "apt-get")
+	f.replies["apt-cache policy nodejs"] = "  Candidate: 22.11.0+dfsg-1\n"
+	f.In = strings.NewReader("no\n")
+	did, installed, err := f.claudeCode(Options{})
+	if err != nil || did || installed {
+		t.Fatal(did, installed, err)
+	}
+	if !slices.Equal(f.cmds, []string{"apt-get update", "apt-cache policy nodejs"}) {
+		t.Fatalf("commands %q", f.cmds)
+	}
+	if !strings.Contains(f.out.String(), "Install Node.js 22 (apt-get) and Claude Code (npm)? yes or no [yes]: ! Skipped installing Claude Code.\n") {
+		t.Fatalf("output:\n%s", f.out.String())
+	}
+}
+
+func TestClaudeCodeCannotInstall(t *testing.T) {
 	for _, tc := range []struct {
 		name, pm, want string
 		prepare        func(*fakeHost)
@@ -234,26 +326,53 @@ func TestClaudeCodeErrors(t *testing.T) {
 		{"apk too old", "apk", "Alpine's nodejs is too old (20.15.1-r0): Claude Code needs Node.js 22 (Alpine 3.21 or later)", func(f *fakeHost) {
 			f.replies["apk search -x nodejs"] = "nodejs-20.15.1-r0\n"
 		}},
+		{"apk no package", "apk", "no nodejs package was found; run apk update first, then run setup again", func(*fakeHost) {}},
 		{"pacman too old", "pacman", "pacman's nodejs is too old (20.1.0-1)", func(f *fakeHost) {
 			f.replies["pacman -Si nodejs"] = "Name            : nodejs\nVersion         : 20.1.0-1\n"
 		}},
-		{"no package manager", "", "this host has none of apk, pacman, dnf or apt-get; install Node.js 22 or later and npm, then npm install -g @anthropic-ai/claude-code", func(*fakeHost) {}},
-		{"node held back", "apt-get", "Node.js is v20.0.0 after apt-get install -y nodejs npm", func(f *fakeHost) {
-			f.replies["apt-cache policy nodejs"] = "  Candidate: 22.11.0+dfsg-1\n"
-			f.replies["node --version"] = "v20.0.0\n"
+		{"pacman no package", "pacman", "no nodejs package was found; run pacman -Syu first, then run setup again", func(f *fakeHost) {
+			f.fail["pacman -Si"] = true
+			f.replies["pacman -Si nodejs"] = "error: package 'nodejs' was not found\n"
 		}},
+		{"apt-get update fails", "apt-get", "apt-get update: exit status 3:\nE: Could not resolve", func(f *fakeHost) {
+			f.fail["apt-get update"] = true
+			f.replies["apt-get update"] = "E: Could not resolve 'deb.debian.org'\n"
+		}},
+		{"no package manager", "", "this host has none of apk, pacman, dnf or apt-get; install Node.js 22 or later and npm, then npm install -g @anthropic-ai/claude-code", func(*fakeHost) {}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := withoutClaude(t, tc.pm)
 			tc.prepare(f)
-			did, installed, err := f.claudeCode(Options{Yes: true})
-			if err == nil || !strings.Contains(err.Error(), tc.want) || did || installed {
-				t.Fatalf("got %v %v %v", did, installed, err)
+			if _, err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
+				t.Fatal(err)
 			}
-			if slices.Contains(f.cmds, npmInstall) || tc.pm != "apt-get" && slices.ContainsFunc(f.cmds, func(c string) bool { return strings.Contains(c, "nodejs npm") }) {
+			out := f.out.String()
+			if !strings.Contains(out, "! Cannot install Claude Code: ") || !strings.Contains(out, tc.want) || !strings.Contains(out, "✓ Installed and started the tripcoil service.") ||
+				!strings.Contains(out, "  1. Install Claude Code system-wide") {
+				t.Fatalf("output:\n%s", out)
+			}
+			if slices.ContainsFunc(f.cmds, func(c string) bool { return strings.Contains(c, "nodejs npm") || strings.HasPrefix(c, "npm") }) {
 				t.Fatalf("commands %q", f.cmds)
 			}
 		})
+	}
+}
+
+func TestClaudeCodeInstallFails(t *testing.T) {
+	f := withoutClaude(t, "apt-get")
+	f.replies["apt-cache policy nodejs"] = "  Candidate: 22.11.0+dfsg-1\n"
+	f.replies["node --version"] = "v20.0.0\n"
+	if _, _, err := f.claudeCode(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "Node.js is v20.0.0 after apt-get install -y nodejs npm") {
+		t.Fatalf("node held back: %v", err)
+	}
+
+	f = withoutClaude(t, "pacman")
+	f.replies["pacman -Si nodejs"] = "Version         : 23.1.0-1\n"
+	f.fail["pacman -S "] = true
+	f.replies["pacman -S --noconfirm --needed nodejs npm"] = "error: failed to prepare transaction (could not satisfy dependencies)\n"
+	if _, _, err := f.claudeCode(Options{Yes: true}); err == nil ||
+		!strings.HasSuffix(err.Error(), "could not satisfy dependencies)\nBring the system up to date with pacman -Syu first, then run setup again.") {
+		t.Fatalf("pacman: %v", err)
 	}
 }
 
@@ -272,14 +391,18 @@ func TestClaudeCodeNpmFails(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 
-	f = withoutClaude(t, "")
-	f.tools["node"], f.tools["npm"] = true, true
-	f.replies["node --version"] = "v22.11.0\n"
-	f.replies["npm prefix -g"] = "/opt/npm\n"
-	f.FindCLI = func(string, string) (string, error) { return "", errors.New("claude is not installed") }
-	if _, _, err := f.claudeCode(Options{Yes: true}); err == nil ||
-		err.Error() != "npm installed Claude Code under /opt/npm/bin, but claude is not installed; set review.command to its path, then run setup again" {
-		t.Fatalf("got %v", err)
+	for _, tc := range []struct{ prefix, findErr, want string }{
+		{"/opt/npm\n", "claude is not executable", "npm installed Claude Code under /opt/npm/bin, but claude is not executable; set review.command to its path, then run setup again"},
+		{"", "claude is not installed on /usr/bin; install it system-wide, or set review.command", "npm installed Claude Code, but claude is not installed on /usr/bin; install it system-wide, or set review.command"},
+	} {
+		f = withoutClaude(t, "")
+		f.tools["node"], f.tools["npm"] = true, true
+		f.replies["node --version"] = "v22.11.0\n"
+		f.replies["npm prefix -g"] = tc.prefix
+		f.FindCLI = func(string, string) (string, error) { return "", errors.New(tc.findErr) }
+		if _, _, err := f.claudeCode(Options{Yes: true}); err == nil || err.Error() != tc.want {
+			t.Fatalf("got %v", err)
+		}
 	}
 }
 

@@ -2,11 +2,13 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,8 +27,9 @@ const (
 	NodeSourceRepoPath    = "/etc/yum.repos.d/nodesource-nodejs.repo"
 )
 
-// NodeSourceFiles are those files. The key cannot carry the marker; it belongs to the sources
-// file, and setup writes it only along with that.
+// NodeSourceFiles are those files. The key cannot carry the marker: setup writes it only along
+// with a marked sources file, and only when there is no key yet, so uninstall removes the key
+// only together with a marked sources file.
 var NodeSourceFiles = []string{NodeSourceKeyPath, NodeSourceSourcesPath, NodeSourcePinPath, NodeSourceRepoPath}
 
 const (
@@ -66,7 +69,8 @@ func (h Host) claudeCode(o Options) (bool, bool, error) {
 	what := "Claude Code (npm)"
 	if !nodeOK {
 		if plan, err = h.planNode(); err != nil {
-			return false, false, err
+			fmt.Fprintf(h.Out, "! Cannot install Claude Code: %v\n", err)
+			return false, false, nil
 		}
 		what = plan.what + " and Claude Code (npm)"
 	}
@@ -91,8 +95,15 @@ func (h Host) claudeCode(o Options) (bool, bool, error) {
 		return false, false, err
 	}
 	if p, err = h.FindCLI("", "claude"); err != nil {
-		prefix, _ := h.Run("npm", "prefix", "-g")
-		return false, false, fmt.Errorf("npm installed Claude Code under %s/bin, but %v; set review.command to its path, then run setup again", strings.TrimSpace(string(prefix)), err)
+		msg := "npm installed Claude Code"
+		if prefix, perr := h.Run("npm", "prefix", "-g"); perr == nil && strings.TrimSpace(string(prefix)) != "" {
+			msg += " under " + strings.TrimSpace(string(prefix)) + "/bin"
+		}
+		msg += ", but " + err.Error()
+		if !strings.Contains(err.Error(), "review.command") {
+			msg += "; set review.command to its path, then run setup again"
+		}
+		return false, false, errors.New(msg)
 	}
 	if nodeOK {
 		fmt.Fprintf(h.Out, "✓ Installed Claude Code (%s).\n", p)
@@ -134,17 +145,14 @@ func (h Host) planNode() (nodePlan, error) {
 			}
 		}
 		if nodeMajor(candidate) < 22 {
-			return p, h.tooOld("Alpine's nodejs", candidate, "Alpine 3.21 or later")
+			return p, h.tooOld("Alpine's nodejs", candidate, "Alpine 3.21 or later", "apk update")
 		}
 		p.cmds = [][]string{{"apk", "add", "nodejs", "npm"}}
 	case "pacman":
-		out, err := h.run("pacman", "-Si", "nodejs")
-		if err != nil {
-			return p, err
-		}
+		out, _ := h.Run("pacman", "-Si", "nodejs") // fails when the sync database lacks nodejs
 		candidate = field(out, "Version", ":")
 		if nodeMajor(candidate) < 22 {
-			return p, h.tooOld("pacman's nodejs", candidate, "an up-to-date system")
+			return p, h.tooOld("pacman's nodejs", candidate, "an up-to-date system", "pacman -Syu")
 		}
 		p.cmds = [][]string{{"pacman", "-S", "--noconfirm", "--needed", "nodejs", "npm"}}
 	case "apt-get":
@@ -171,7 +179,12 @@ func (h Host) planNode() (nodePlan, error) {
 		if err != nil {
 			return p, err
 		}
-		candidate, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
+		for _, l := range strings.Split(string(out), "\n") { // warnings may come first
+			if l = strings.TrimSpace(l); l != "" && l[0] >= '0' && l[0] <= '9' {
+				candidate = l
+				break
+			}
+		}
 		if nodeMajor(candidate) >= 22 {
 			p.cmds = [][]string{{"dnf", "install", "-y", "nodejs", "npm"}}
 		} else {
@@ -202,9 +215,11 @@ func (h Host) nodeSourceArch(amd, arm string) (string, error) {
 	return "", fmt.Errorf("NodeSource has no Node.js 22 for %s; install Node.js 22 or later and npm, then %snpm install -g %s", runtime.GOARCH, h.Sudo, claudePackage)
 }
 
-func (h Host) tooOld(what, version, needs string) error {
+// tooOld says the distribution's nodejs is too old, or that there is none, which an update
+// command may fix.
+func (h Host) tooOld(what, version, needs, update string) error {
 	if version == "" {
-		version = "missing"
+		return fmt.Errorf("no nodejs package was found; run %s%s first, then run setup again", h.Sudo, update)
 	}
 	return fmt.Errorf("%s is too old (%s): Claude Code needs Node.js 22 (%s); install Node.js 22 or later and npm, then %snpm install -g %s", what, version, needs, h.Sudo, claudePackage)
 }
@@ -220,6 +235,9 @@ func (h Host) installNode(p nodePlan) (string, error) {
 	fmt.Fprintf(h.Out, "… Installing Node.js 22 with %s (this takes a minute).\n", p.manager)
 	for _, c := range p.cmds {
 		if _, err := h.run(c...); err != nil {
+			if p.manager == "pacman" {
+				return "", fmt.Errorf("%v\nBring the system up to date with %spacman -Syu first, then run setup again.", err, h.Sudo)
+			}
 			return "", err
 		}
 	}
@@ -237,6 +255,9 @@ func (h Host) installNode(p nodePlan) (string, error) {
 // the marker is the host's own and stays as it is.
 func (h Host) addNodeSource(manager, arch string) error {
 	if manager == "dnf" {
+		if err := h.checkHostsNodeSource(NodeSourceRepoPath, `pub_(\d+)\.x`, "pub_22.x"); err != nil {
+			return err
+		}
 		return h.writeAdded(NodeSourceRepoPath, fmt.Sprintf(`[nodesource-nodejs]
 name=Node.js Packages for Linux RPM based distros - %s
 baseurl=https://rpm.nodesource.com/pub_22.x/nodistro/nodejs/%s
@@ -247,7 +268,10 @@ gpgkey=https://rpm.nodesource.com/gpgkey/ns-operations-public.key
 module_hotfixes=1
 `, arch, arch))
 	}
-	if !h.hostOwned(NodeSourceSourcesPath) {
+	if err := h.checkHostsNodeSource(NodeSourceSourcesPath, `node_(\d+)\.x`, "node_22.x"); err != nil {
+		return err
+	}
+	if !h.hostOwned(NodeSourceSourcesPath) && !h.exists(NodeSourceKeyPath) {
 		key, err := h.Fetch(nodeSourceKeyURL)
 		if err != nil {
 			return fmt.Errorf("downloading NodeSource's key: %v", err)
@@ -272,6 +296,22 @@ Signed-By: %s
 Pin: origin deb.nodesource.com
 Pin-Priority: 600
 `)
+}
+
+// checkHostsNodeSource checks that the host's own NodeSource file p, if there is one, points at
+// Node.js 22 or later: the first match of pattern holds the major.
+func (h Host) checkHostsNodeSource(p, pattern, want string) error {
+	if !h.hostOwned(p) {
+		return nil
+	}
+	data, err := os.ReadFile(h.path(p))
+	if err != nil {
+		return err
+	}
+	if m := regexp.MustCompile(pattern).FindSubmatch(data); m != nil && nodeMajor(string(m[1])) >= 22 {
+		return nil
+	}
+	return fmt.Errorf("%s is the host's own NodeSource repository, for an older Node.js; point it at %s (or remove it), then run setup again", p, want)
 }
 
 // hostOwned reports whether p exists without the marker.

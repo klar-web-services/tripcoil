@@ -53,7 +53,7 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 		Sudo: Sudo(os.Geteuid(), os.Getenv("SUDO_USER")),
 		Run: func(name string, args ...string) ([]byte, error) {
 			cmd := exec.Command(name, args...)
-			cmd.Env = append(os.Environ(), "PATH="+sandbox.Path)
+			cmd.Env = append(os.Environ(), "PATH="+sandbox.Path, "LC_ALL=C") // output setup parses stays untranslated
 			return cmd.CombinedOutput()
 		},
 		LookPath:    agent.LookPath,
