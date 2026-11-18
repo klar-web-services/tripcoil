@@ -17,6 +17,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/config"
 	"github.com/klar-web-services/tripcoil/internal/run"
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
+	"golang.org/x/sys/unix"
 )
 
 // Host is the machine setup works on. Root prefixes every path, so tests can use a folder.
@@ -36,8 +37,13 @@ type Host struct {
 	// folder above it (the service runs it as root).
 	CheckBinary func(path string) error
 	Stat        config.StatFunc // checks review.envFile
-	In          io.Reader       // answers to questions
-	Out         io.Writer
+	// Terminal reports whether In is a terminal; NoEcho stops it echoing until restore.
+	Terminal func() bool
+	NoEcho   func() (restore func(), err error)
+	// SetupToken runs cli setup-token on a pseudo-terminal and returns what it printed.
+	SetupToken func(cli string) ([]byte, error)
+	In         io.Reader // answers to questions
+	Out        io.Writer
 }
 
 // NewHost is this machine.
@@ -57,7 +63,38 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 		FindCLI:     agent.FindCLI,
 		Fetch:       fetch,
 		Stat:        config.OSStat,
+		Terminal:    func() bool { _, err := unix.IoctlGetTermios(0, unix.TCGETS); return err == nil },
+		NoEcho:      noEcho,
+		SetupToken: func(cli string) ([]byte, error) {
+			home, err := os.MkdirTemp("", "tripcoil-setup-token-")
+			if err != nil {
+				return nil, err
+			}
+			defer os.RemoveAll(home) // no Claude login state stays behind
+			cmd := exec.Command(cli, "setup-token")
+			cmd.Env = []string{"PATH=" + sandbox.Path, "HOME=" + home}
+			for _, k := range []string{"TERM", "LANG", "LC_ALL", "COLORTERM"} {
+				if v, ok := os.LookupEnv(k); ok {
+					cmd.Env = append(cmd.Env, k+"="+v)
+				}
+			}
+			return runInPTY(os.Stdin, out, cmd)
+		},
 	}
+}
+
+// noEcho turns off the terminal's echo on stdin.
+func noEcho() (func(), error) {
+	t, err := unix.IoctlGetTermios(0, unix.TCGETS)
+	if err != nil {
+		return nil, err
+	}
+	old := *t
+	t.Lflag &^= unix.ECHO
+	if err := unix.IoctlSetTermios(0, unix.TCSETS, t); err != nil {
+		return nil, err
+	}
+	return func() { unix.IoctlSetTermios(0, unix.TCSETS, &old) }, nil
 }
 
 // Sudo is the prefix for a command in a hint: "sudo " unless the user is root without sudo.
@@ -93,14 +130,15 @@ type Options struct {
 }
 
 // Setup sets the host up (spec section 9). Every step leaves what is already in place alone, so
-// a second run changes nothing (AC-15).
-func (h Host) Setup(o Options) error {
+// a second run changes nothing (AC-15). It reports whether the review is ready to check: no
+// agent, or the agent's CLI installed and its credentials in review.envFile.
+func (h Host) Setup(o Options) (bool, error) {
 	m, err := h.Manager()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := h.checkBinary(); err != nil {
-		return err
+		return false, err
 	}
 	changed := false
 	note := func(did bool, done, kept string) {
@@ -116,12 +154,12 @@ func (h Host) Setup(o Options) error {
 	}
 	did, err := h.agentUser()
 	if err != nil {
-		return err
+		return false, err
 	}
 	note(did, "Created the user and group "+agent.UserName+".", "The user "+agent.UserName+" exists.")
 	c, did, created, err := h.config(o)
 	if err != nil {
-		return err
+		return false, err
 	}
 	name, envFile := c.Review.Agent, c.Review.EnvFile
 	wrote := fmt.Sprintf("Wrote %s (review.agent: %s).", config.DefaultPath, name)
@@ -132,7 +170,7 @@ func (h Host) Setup(o Options) error {
 	if m == OpenRC && name != "none" {
 		did, err := h.bubblewrap(o)
 		if err != nil {
-			return err
+			return false, err
 		}
 		note(did, "Installed bubblewrap.", "bubblewrap is installed.")
 	}
@@ -140,20 +178,40 @@ func (h Host) Setup(o Options) error {
 	if name == "claude" && c.Review.Command == "" {
 		did, installed, err = h.claudeCode(o)
 		if err != nil {
-			return err
+			return false, err
 		}
 		changed = changed || did
 	}
+	key := map[string]string{"claude": claudeTokenKey, "codex": "CODEX_API_KEY"}[name]
+	if name != "none" {
+		cli, err := h.FindCLI(c.Review.Command, name)
+		installed = err == nil
+		if name == "claude" && installed && envFile != "" {
+			did, err := h.claudeToken(o, cli, envFile)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || did
+		}
+	}
 	did, err = h.service(m)
 	if err != nil {
-		return err
+		return false, err
 	}
 	note(did, "Installed and started the tripcoil service.", "The tripcoil service is installed and running.")
 	if !changed {
 		fmt.Fprintln(h.Out, "Nothing changed.")
 	}
-	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed))
-	return nil
+	if name == "none" {
+		fmt.Fprintln(h.Out, "review.agent is none, so reports are audit-only.")
+		return true, nil
+	}
+	hasToken := h.hasToken(envFile, key)
+	if installed && hasToken {
+		return true, nil
+	}
+	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed, hasToken))
+	return false, nil
 }
 
 // pathPattern is what the binary's path may hold: it goes unquoted into the service files, and
@@ -395,8 +453,8 @@ func hasService(out []byte) bool {
 }
 
 // nextSteps says how to install the agent CLI system-wide, unless it is installed, and give it
-// credentials in envFile (spec 8.3), and how each agent is billed.
-func nextSteps(name, envFile, sudo string, installed bool) string {
+// credentials in envFile (spec 8.3), unless it has them, and how each agent is billed.
+func nextSteps(name, envFile, sudo string, installed, hasToken bool) string {
 	edit := "sudoedit"
 	if sudo == "" {
 		edit = "vi"
@@ -408,15 +466,11 @@ func nextSteps(name, envFile, sudo string, installed bool) string {
 		token = `Create a token with "claude setup-token" (as any user, on any machine). It uses your Claude
      subscription (Pro or Max), not API billing.`
 		line = "CLAUDE_CODE_OAUTH_TOKEN=<token>"
-	case "codex":
+	default:
 		install = "Codex system-wide (root-owned, outside /home), for example:\n       " + sudo + "npm install -g @openai/codex"
 		token = `Create an OpenAI API key. Codex bills it per use through the OpenAI API (a ChatGPT login is
      not supported).`
 		line = "CODEX_API_KEY=<key>"
-	default:
-		return fmt.Sprintf(`
-review.agent is none, so reports are audit-only. Check the host: %stripcoil doctor
-`, sudo)
 	}
 	store := fmt.Sprintf("Add it to %s as the line %s:\n       %s %s", envFile, line, edit, envFile)
 	if envFile == "" {
@@ -426,10 +480,13 @@ review.agent is none, so reports are audit-only. Check the host: %stripcoil doct
        %s %s`, line, config.DefaultPath, sudo, EnvFilePath, edit, EnvFilePath)
 	}
 	steps := []string{"Install " + install, token, store}
-	if installed && name == "claude" {
+	s := "\nNext, give the review its credentials:\n"
+	if hasToken {
+		steps = steps[:1]
+		s = "\nNext, install the agent CLI:\n"
+	} else if installed && name == "claude" {
 		steps = steps[1:]
 	}
-	s := "\nNext, give the review its credentials:\n"
 	for i, step := range steps {
 		s += fmt.Sprintf("  %d. %s\n", i+1, step)
 	}

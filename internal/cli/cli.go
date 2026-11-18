@@ -63,8 +63,9 @@ type deps struct {
 	lowerPriority func() error
 	// interrupts returns a context that is cancelled by Ctrl-C or SIGTERM.
 	interrupts func() (context.Context, context.CancelFunc)
-	// setup sets the host up (tripcoil setup); service reports the tripcoil service's state.
-	setup   func(o setup.Options, stdout io.Writer) error
+	// setup sets the host up (tripcoil setup) and reports whether the review is ready; service
+	// reports the tripcoil service's state.
+	setup   func(o setup.Options, stdout io.Writer) (ready bool, err error)
 	service func() (setup.Service, error)
 	doctor  doctorHost
 	// hangups delivers each SIGHUP; after is time.After.

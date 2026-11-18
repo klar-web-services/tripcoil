@@ -48,21 +48,27 @@ func runSetup(args []string, stdout, stderr io.Writer, d deps) int {
 		fmt.Fprintln(stderr, "tripcoil setup must run as root (try: sudo tripcoil setup)")
 		return 2
 	}
-	if err := d.setup(setup.Options{Agent: *agentFlag, Yes: *yes}, stdout); err != nil {
+	ready, err := d.setup(setup.Options{Agent: *agentFlag, Yes: *yes}, stdout)
+	if err != nil {
 		fmt.Fprintf(stderr, "tripcoil setup: %v\n", err)
 		return 2
 	}
-	return 0
+	if !ready {
+		return 0
+	}
+	fmt.Fprintln(stdout, "\nChecking the host (tripcoil doctor):")
+	return runDoctor(nil, stdout, stderr, d)
 }
 
-// setupHost sets this machine up, for the binary that runs now.
-func setupHost(o setup.Options, stdout io.Writer) error {
+// setupHost sets this machine up, for the binary that runs now, and reports whether the review
+// is ready to check.
+func setupHost(o setup.Options, stdout io.Writer) (bool, error) {
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		return fmt.Errorf("cannot find Tripcoil's own binary: %v", err)
+		return false, fmt.Errorf("cannot find Tripcoil's own binary: %v", err)
 	}
 	return setup.NewHost(exe, os.Stdin, stdout).Setup(o)
 }

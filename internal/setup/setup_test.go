@@ -92,8 +92,11 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 			}
 			return "", errors.New(name + " is not installed")
 		},
-		Fetch: func(url string) ([]byte, error) { return nil, errors.New("no network in tests") },
-		Stat:  rootStat,
+		Fetch:      func(url string) ([]byte, error) { return nil, errors.New("no network in tests") },
+		Stat:       rootStat,
+		Terminal:   func() bool { return false },
+		NoEcho:     func() (func(), error) { return func() {}, nil },
+		SetupToken: func(string) ([]byte, error) { return nil, errors.New("no claude setup-token in tests") },
 	}
 	return f
 }
@@ -127,7 +130,7 @@ func (f *fakeHost) read(t *testing.T, p string) string {
 
 func TestSetupSystemdTwice(t *testing.T) {
 	f := newFake(t, Systemd)
-	if err := f.Setup(Options{Agent: "codex"}); err != nil {
+	if _, err := f.Setup(Options{Agent: "codex"}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -164,12 +167,12 @@ func TestSetupSystemdTwice(t *testing.T) {
 	f.started()
 	f.cmds, f.out = nil, bytes.Buffer{}
 	os.Remove(filepath.Join(f.Root, EnvFilePath))
-	if err := f.Setup(Options{Agent: "claude", Yes: true}); err == nil || !strings.Contains(err.Error(), "review.envFile /etc/tripcoil/agent.env cannot be read") {
+	if _, err := f.Setup(Options{Agent: "claude", Yes: true}); err == nil || !strings.Contains(err.Error(), "review.envFile /etc/tripcoil/agent.env cannot be read") {
 		t.Fatalf("an existing config is not rewritten, and does not create agent.env: %v", err)
 	}
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), nil, 0o600)
 	f.cmds, f.out = nil, bytes.Buffer{}
-	if err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
+	if _, err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(f.cmds, []string{"systemctl --version", "systemctl is-enabled --quiet tripcoil.service", "systemctl is-active --quiet tripcoil.service"}) {
@@ -189,7 +192,7 @@ func TestSetupRestartsAChangedService(t *testing.T) {
 	f.users["user"] = true
 	os.MkdirAll(filepath.Join(f.Root, "etc/systemd/system"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, UnitPath), []byte("old"), 0o644)
-	if err := f.Setup(Options{Yes: true}); err != nil {
+	if _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(f.cmds, "systemctl daemon-reload") || !slices.Contains(f.cmds, "systemctl restart tripcoil.service") {
@@ -200,7 +203,7 @@ func TestSetupRestartsAChangedService(t *testing.T) {
 func TestSetupOpenRC(t *testing.T) {
 	f := newFake(t, OpenRC)
 	f.In = strings.NewReader("maybe\n\nyes\n") // an invalid answer is asked again; empty is the default
-	if err := f.Setup(Options{}); err != nil {
+	if _, err := f.Setup(Options{}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"addgroup -S tripcoil-agent", "adduser -S -D -H -s /sbin/nologin -G tripcoil-agent tripcoil-agent",
@@ -230,12 +233,12 @@ func TestSetupOpenRC(t *testing.T) {
 func TestSetupOpenRCWithoutBubblewrap(t *testing.T) {
 	f := newFake(t, OpenRC)
 	f.In = strings.NewReader("no\n")
-	err := f.Setup(Options{Agent: "claude"})
+	_, err := f.Setup(Options{Agent: "claude"})
 	if err == nil || !strings.Contains(err.Error(), "reviews cannot run without it") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, OpenRC)
-	if err := f.Setup(Options{Agent: "none"}); err != nil || slices.Contains(f.cmds, "apk add bubblewrap") {
+	if _, err := f.Setup(Options{Agent: "none"}); err != nil || slices.Contains(f.cmds, "apk add bubblewrap") {
 		t.Fatalf("no review needs no bubblewrap: %v %q", err, f.cmds)
 	}
 }
@@ -243,34 +246,34 @@ func TestSetupOpenRCWithoutBubblewrap(t *testing.T) {
 func TestSetupRefusals(t *testing.T) {
 	f := newFake(t, Systemd)
 	f.Exe = "/home/fkws/bin/tripcoil"
-	if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "is under /home") {
+	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "is under /home") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	f.Exe = "/opt/my tools/tripcoil"
-	if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "has characters the service files cannot hold") {
+	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "has characters the service files cannot hold") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	f.CheckBinary = func(string) error { return errors.New("/usr/local/bin is not owned by root") }
-	if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "the service would run /usr/local/bin/tripcoil as root, but /usr/local/bin is not owned by root") {
+	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "the service would run /usr/local/bin/tripcoil as root, but /usr/local/bin is not owned by root") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	f.users["group"] = true
 	f.tools["useradd"] = false
 	f.GroupExists = func(string) bool { return true }
-	if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "only one of the user and the group") {
+	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "only one of the user and the group") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, "")
-	if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "neither systemd nor OpenRC") {
+	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "neither systemd nor OpenRC") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, config.DefaultPath), []byte("version: 2\n"), 0o644)
-	if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "version must be 1") {
+	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "version must be 1") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -284,7 +287,7 @@ func TestSetupWarnsAboutOldSystemd(t *testing.T) {
 		}
 		return run(name, args...)
 	}
-	if err := f.Setup(Options{Yes: true}); err != nil {
+	if _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(f.out.String(), "! systemd 245 is older than 247, which the review's sandbox needs: reports will be audit-only.") {
@@ -314,7 +317,7 @@ func TestService(t *testing.T) {
 		if s, err := f.Service(); err != nil || s != (Service{Manager: m}) {
 			t.Fatalf("%s before setup: %+v %v", m, s, err)
 		}
-		if err := f.Setup(Options{Agent: "none"}); err != nil {
+		if _, err := f.Setup(Options{Agent: "none"}); err != nil {
 			t.Fatal(err)
 		}
 		if s, _ := f.Service(); s != (Service{Manager: m, Installed: true}) {
@@ -331,7 +334,7 @@ func TestSetupKeepsAnExistingEnvFile(t *testing.T) {
 	f := newFake(t, Systemd)
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("CLAUDE_CODE_OAUTH_TOKEN=x\n"), 0o600)
-	if err := f.Setup(Options{Yes: true}); err != nil {
+	if _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.read(t, EnvFilePath); got != "CLAUDE_CODE_OAUTH_TOKEN=x\n" {
@@ -361,10 +364,10 @@ func TestSetupRefusesABadEnvFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake(t, Systemd)
 			f.Stat = tc.stat
-			if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("a new config: %v", err)
 			}
-			if err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("an existing config: %v", err)
 			}
 		})
@@ -384,25 +387,26 @@ func TestSudo(t *testing.T) {
 }
 
 func TestNextSteps(t *testing.T) {
-	claude := nextSteps("claude", "/etc/tripcoil/agent.env", "sudo ", false)
+	claude := nextSteps("claude", "/etc/tripcoil/agent.env", "sudo ", false, false)
 	for _, l := range []string{"sudo npm install -g @anthropic-ai/claude-code", `"claude setup-token"`, "subscription (Pro or Max), not API billing",
 		"  3. Add it to /etc/tripcoil/agent.env as the line CLAUDE_CODE_OAUTH_TOKEN=<token>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(claude, l) {
 			t.Errorf("claude lacks %q:\n%s", l, claude)
 		}
 	}
-	old := nextSteps("codex", "", "", true)
+	old := nextSteps("codex", "", "", true, false)
 	for _, l := range []string{"       npm install -g @openai/codex", "per use through the OpenAI API", "Store it root-only as the line CODEX_API_KEY=<key>",
 		"set review.envFile in\n     /etc/tripcoil/tripcoil.yaml", "       install -m 600 /dev/null /etc/tripcoil/agent.env\n       vi /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(old, l) {
 			t.Errorf("codex without envFile lacks %q:\n%s", l, old)
 		}
 	}
-	if !strings.Contains(nextSteps("none", "", "", true), "audit-only") {
-		t.Error("none")
-	}
-	installed := nextSteps("claude", "/etc/tripcoil/agent.env", "", true)
+	installed := nextSteps("claude", "/etc/tripcoil/agent.env", "", true, false)
 	if strings.Contains(installed, "npm install") || !strings.Contains(installed, "  1. Create a token") || !strings.Contains(installed, "  2. Add it to") {
 		t.Errorf("claude installed:\n%s", installed)
+	}
+	keyed := nextSteps("codex", "/etc/tripcoil/agent.env", "sudo ", false, true)
+	if keyed != "\nNext, install the agent CLI:\n  1. Install Codex system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @openai/codex\nThen check the host: sudo tripcoil doctor\n" {
+		t.Errorf("codex with a key:\n%s", keyed)
 	}
 }

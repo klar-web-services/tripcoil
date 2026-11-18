@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -13,14 +14,38 @@ import (
 func TestSetupCommand(t *testing.T) {
 	d := testDeps(t, nil, nil)
 	var got setup.Options
-	d.setup = func(o setup.Options, out io.Writer) error { got = o; return nil }
+	d.setup = func(o setup.Options, out io.Writer) (bool, error) { got = o; return false, nil }
+	d.doctor.packages = func(context.Context) error { t.Fatal("doctor must not run"); return nil }
 	var out, errb bytes.Buffer
-	if code := dispatch([]string{"setup", "--agent", "codex", "--yes"}, &out, &errb, d); code != 0 || got != (setup.Options{Agent: "codex", Yes: true}) {
-		t.Fatalf("exit %d, options %+v, stderr %q", code, got, errb.String())
+	if code := dispatch([]string{"setup", "--agent", "codex", "--yes"}, &out, &errb, d); code != 0 || got != (setup.Options{Agent: "codex", Yes: true}) ||
+		out.String() != "" {
+		t.Fatalf("exit %d, options %+v, stdout %q, stderr %q", code, got, out.String(), errb.String())
 	}
-	d.setup = func(setup.Options, io.Writer) error { return errors.New("this host runs neither systemd nor OpenRC") }
+	d.setup = func(setup.Options, io.Writer) (bool, error) {
+		return false, errors.New("this host runs neither systemd nor OpenRC")
+	}
 	if code := dispatch([]string{"setup"}, &out, &errb, d); code != 2 || !strings.Contains(errb.String(), "tripcoil setup: this host runs neither") {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+}
+
+func TestSetupRunsDoctor(t *testing.T) {
+	d := testDeps(t, nil, nil)
+	var checked string
+	healthy(t, &d, &checked)
+	d.setup = func(o setup.Options, out io.Writer) (bool, error) {
+		io.WriteString(out, "· The user tripcoil-agent exists.\n")
+		return true, nil
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"setup"}, &out, &errb, d); code != 0 ||
+		!strings.HasPrefix(out.String(), "· The user tripcoil-agent exists.\n\nChecking the host (tripcoil doctor):\n✓ ") || !strings.HasSuffix(out.String(), "Every check passed.\n") {
+		t.Fatalf("exit %d\n%s%s", code, out.String(), errb.String())
+	}
+	d.doctor.grype = func(context.Context) error { return errors.New("no route to host") }
+	out.Reset()
+	if code := dispatch([]string{"setup"}, &out, &errb, d); code != 1 || !strings.HasSuffix(out.String(), "Some checks failed.\n") {
+		t.Fatalf("exit %d\n%s", code, out.String())
 	}
 }
 
