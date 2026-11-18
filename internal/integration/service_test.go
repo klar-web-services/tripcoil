@@ -23,8 +23,8 @@ RUN apk add -q openrc >/dev/null && \
 CMD ["/sbin/init"]
 `
 
-// serviceScript installs Tripcoil with setup and the stub CLI as claude, lets the daemon make its
-// first run, and checks status, doctor, a second setup, a reload with a broken config, a manual
+// serviceScript installs Tripcoil with setup and the stub CLI as claude, with a token in place so
+// that setup runs doctor before the service starts, lets the daemon make its first run, and checks status, doctor, a second setup, a reload with a broken config, a manual
 // run's scope and stopping the service during a review. It prints "CHECK <name> <detail>" lines.
 const serviceScript = `set -u
 B=/opt/tripcoil
@@ -49,8 +49,12 @@ fi
 lastrun() { sed -n 's/.*"lastRun": "\([^"]*\)".*/\1/p' $S/state.json 2>/dev/null; }
 waitnew() { for i in $(seq 1 600); do l=$(lastrun); [ -n "$l" ] && [ "$l" != "$1" ] && return 0; sleep 1; done; return 1; }
 
+mkdir -p /etc/tripcoil
+install -m 600 /dev/null /etc/tripcoil/agent.env
+echo CLAUDE_CODE_OAUTH_TOKEN=stub >/etc/tripcoil/agent.env
 tripcoil setup --agent claude --yes >/tmp/setup.out 2>&1
-echo "CHECK setup $? $(grep -c '^✓' /tmp/setup.out) $(cat /etc/tripcoil/tripcoil.yaml | grep -c 'agent: claude')"
+echo "CHECK setup $? $(sed '/^Checking the host/q' /tmp/setup.out | grep -c '^✓') $(cat /etc/tripcoil/tripcoil.yaml | grep -c 'agent: claude')" \
+	"$(grep -c '^Waiting' /tmp/setup.out) $(grep -c '^· The tripcoil service is installed and starts after the checks.$' /tmp/setup.out) $(tail -1 /tmp/setup.out)"
 waitnew "" || log
 R=$S/runs/$(lastrun)
 echo "CHECK first $(grep -o '"trigger": "[a-z]*"' $R/run.json) $(grep -o '"reviewed": [a-z]*' $R/run.json) | $(head -1 $R/report.md)"
@@ -149,7 +153,7 @@ func TestService(t *testing.T) {
 				setupLines = "4 1" // and bubblewrap
 			}
 			for k, parts := range map[string][]string{
-				"setup":  {"0 " + setupLines},
+				"setup":  {"0 " + setupLines + " 0 1 ✓ Started the tripcoil service."},
 				"first":  {`"trigger": "schedule" "reviewed": true | `},
 				"status": {"Service:           running (" + tc.manager + ")|", "Agent CLI:         claude 2.1.309 (as of the last run)|", "Failures in a row: 0|"},
 				"doctor": {"0 0"},

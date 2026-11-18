@@ -15,8 +15,8 @@ const setupUsage = `Usage: tripcoil setup [--agent claude|codex|none] [--yes]
 
 Set this host up, as root: the agent's user, /etc/tripcoil/tripcoil.yaml and the tripcoil service
 (systemd or OpenRC), which it starts. For Claude Code it offers to install Node.js 22 and Claude
-Code, and to create the token with claude setup-token; then it runs tripcoil doctor. Running it
-again changes nothing that is already set up.
+Code, and to create the token with claude setup-token; then it runs tripcoil doctor, before the
+service starts. Running it again changes nothing that is already set up.
 
 Flags:
 `
@@ -50,7 +50,7 @@ func runSetup(args []string, stdout, stderr io.Writer, d deps) int {
 		fmt.Fprintln(stderr, "tripcoil setup must run as root (try: sudo tripcoil setup)")
 		return 2
 	}
-	ready, err := d.setup(setup.Options{Agent: *agentFlag, Yes: *yes}, stdout)
+	ready, start, err := d.setup(setup.Options{Agent: *agentFlag, Yes: *yes}, stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "tripcoil setup: %v\n", err)
 		return 2
@@ -59,18 +59,24 @@ func runSetup(args []string, stdout, stderr io.Writer, d deps) int {
 		return 0
 	}
 	fmt.Fprintln(stdout, "\nChecking the host (tripcoil doctor):")
-	return runDoctor(nil, stdout, stderr, d)
+	code := doctor(stdout, d, start != nil)
+	if start != nil {
+		if err := start(); err != nil {
+			fmt.Fprintf(stderr, "tripcoil setup: %v\n", err)
+			return 2
+		}
+	}
+	return code
 }
 
-// setupHost sets this machine up, for the binary that runs now, and reports whether the review
-// is ready to check.
-func setupHost(o setup.Options, stdout io.Writer) (bool, error) {
+// setupHost sets this machine up, for the binary that runs now (see setup.Host.Setup).
+func setupHost(o setup.Options, stdout io.Writer) (bool, func() error, error) {
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		return false, fmt.Errorf("cannot find Tripcoil's own binary: %v", err)
+		return false, nil, fmt.Errorf("cannot find Tripcoil's own binary: %v", err)
 	}
 	return setup.NewHost(exe, os.Stdin, stdout).Setup(o)
 }

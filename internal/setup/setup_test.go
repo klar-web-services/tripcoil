@@ -130,7 +130,7 @@ func (f *fakeHost) read(t *testing.T, p string) string {
 
 func TestSetupSystemdTwice(t *testing.T) {
 	f := newFake(t, Systemd)
-	if _, err := f.Setup(Options{Agent: "codex"}); err != nil {
+	if _, _, err := f.Setup(Options{Agent: "codex"}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -167,12 +167,12 @@ func TestSetupSystemdTwice(t *testing.T) {
 	f.started()
 	f.cmds, f.out = nil, bytes.Buffer{}
 	os.Remove(filepath.Join(f.Root, EnvFilePath))
-	if _, err := f.Setup(Options{Agent: "claude", Yes: true}); err == nil || !strings.Contains(err.Error(), "review.envFile /etc/tripcoil/agent.env cannot be read") {
+	if _, _, err := f.Setup(Options{Agent: "claude", Yes: true}); err == nil || !strings.Contains(err.Error(), "review.envFile /etc/tripcoil/agent.env cannot be read") {
 		t.Fatalf("an existing config is not rewritten, and does not create agent.env: %v", err)
 	}
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), nil, 0o600)
 	f.cmds, f.out = nil, bytes.Buffer{}
-	if _, err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
+	if _, _, err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(f.cmds, []string{"systemctl --version", "systemctl is-enabled --quiet tripcoil.service", "systemctl is-active --quiet tripcoil.service"}) {
@@ -192,7 +192,7 @@ func TestSetupRestartsAChangedService(t *testing.T) {
 	f.users["user"] = true
 	os.MkdirAll(filepath.Join(f.Root, "etc/systemd/system"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, UnitPath), []byte("old"), 0o644)
-	if _, err := f.Setup(Options{Yes: true}); err != nil {
+	if _, _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(f.cmds, "systemctl daemon-reload") || !slices.Contains(f.cmds, "systemctl restart tripcoil.service") {
@@ -203,7 +203,7 @@ func TestSetupRestartsAChangedService(t *testing.T) {
 func TestSetupOpenRC(t *testing.T) {
 	f := newFake(t, OpenRC)
 	f.In = strings.NewReader("maybe\n\nyes\n") // an invalid answer is asked again; empty is the default
-	if _, err := f.Setup(Options{}); err != nil {
+	if _, _, err := f.Setup(Options{}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"addgroup -S tripcoil-agent", "adduser -S -D -H -s /sbin/nologin -G tripcoil-agent tripcoil-agent",
@@ -233,12 +233,12 @@ func TestSetupOpenRC(t *testing.T) {
 func TestSetupOpenRCWithoutBubblewrap(t *testing.T) {
 	f := newFake(t, OpenRC)
 	f.In = strings.NewReader("no\n")
-	_, err := f.Setup(Options{Agent: "claude"})
+	_, _, err := f.Setup(Options{Agent: "claude"})
 	if err == nil || !strings.Contains(err.Error(), "reviews cannot run without it") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, OpenRC)
-	if _, err := f.Setup(Options{Agent: "none"}); err != nil || slices.Contains(f.cmds, "apk add bubblewrap") {
+	if _, _, err := f.Setup(Options{Agent: "none"}); err != nil || slices.Contains(f.cmds, "apk add bubblewrap") {
 		t.Fatalf("no review needs no bubblewrap: %v %q", err, f.cmds)
 	}
 }
@@ -246,34 +246,34 @@ func TestSetupOpenRCWithoutBubblewrap(t *testing.T) {
 func TestSetupRefusals(t *testing.T) {
 	f := newFake(t, Systemd)
 	f.Exe = "/home/fkws/bin/tripcoil"
-	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "is under /home") {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "is under /home") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	f.Exe = "/opt/my tools/tripcoil"
-	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "has characters the service files cannot hold") {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "has characters the service files cannot hold") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	f.CheckBinary = func(string) error { return errors.New("/usr/local/bin is not owned by root") }
-	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "the service would run /usr/local/bin/tripcoil as root, but /usr/local/bin is not owned by root") {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "the service would run /usr/local/bin/tripcoil as root, but /usr/local/bin is not owned by root") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	f.users["group"] = true
 	f.tools["useradd"] = false
 	f.GroupExists = func(string) bool { return true }
-	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "only one of the user and the group") {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "only one of the user and the group") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, "")
-	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "neither systemd nor OpenRC") {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "neither systemd nor OpenRC") {
 		t.Fatalf("got %v", err)
 	}
 	f = newFake(t, Systemd)
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, config.DefaultPath), []byte("version: 2\n"), 0o644)
-	if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "version must be 1") {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), "version must be 1") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -287,7 +287,7 @@ func TestSetupWarnsAboutOldSystemd(t *testing.T) {
 		}
 		return run(name, args...)
 	}
-	if _, err := f.Setup(Options{Yes: true}); err != nil {
+	if _, _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(f.out.String(), "! systemd 245 is older than 247, which the review's sandbox needs: reports will be audit-only.") {
@@ -317,7 +317,7 @@ func TestService(t *testing.T) {
 		if s, err := f.Service(); err != nil || s != (Service{Manager: m}) {
 			t.Fatalf("%s before setup: %+v %v", m, s, err)
 		}
-		if _, err := f.Setup(Options{Agent: "none"}); err != nil {
+		if _, _, err := f.Setup(Options{Agent: "none"}); err != nil {
 			t.Fatal(err)
 		}
 		if s, _ := f.Service(); s != (Service{Manager: m, Installed: true}) {
@@ -334,7 +334,7 @@ func TestSetupKeepsAnExistingEnvFile(t *testing.T) {
 	f := newFake(t, Systemd)
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("CLAUDE_CODE_OAUTH_TOKEN=x\n"), 0o600)
-	if _, err := f.Setup(Options{Yes: true}); err != nil {
+	if _, _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.read(t, EnvFilePath); got != "CLAUDE_CODE_OAUTH_TOKEN=x\n" {
@@ -364,10 +364,10 @@ func TestSetupRefusesABadEnvFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake(t, Systemd)
 			f.Stat = tc.stat
-			if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("a new config: %v", err)
 			}
-			if _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, _, err := f.Setup(Options{Yes: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("an existing config: %v", err)
 			}
 		})
@@ -414,5 +414,58 @@ func TestNextSteps(t *testing.T) {
 	keyed := nextSteps("codex", "/etc/tripcoil/agent.env", "sudo ", false, true)
 	if keyed != "\nNext, install the agent CLI:\n  1. Install Codex system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @openai/codex\nThen check the host: sudo tripcoil doctor\n" {
 		t.Errorf("codex with a key:\n%s", keyed)
+	}
+}
+
+func TestSetupDefersTheStartWhenReady(t *testing.T) {
+	for _, m := range []Manager{Systemd, OpenRC} {
+		f := newFake(t, m)
+		ready, start, err := f.Setup(Options{Agent: "none"})
+		if err != nil || !ready || start == nil {
+			t.Fatalf("%s: ready %v, start %v, %v", m, ready, start != nil, err)
+		}
+		startCmd, restartCmd, enable := "systemctl start tripcoil.service", "systemctl restart tripcoil.service", "systemctl enable --quiet tripcoil.service"
+		if m == OpenRC {
+			startCmd, restartCmd, enable = "rc-service tripcoil start", "rc-service tripcoil restart", "rc-update add tripcoil default"
+		}
+		if !slices.Contains(f.cmds, enable) || slices.Contains(f.cmds, startCmd) ||
+			!strings.Contains(f.out.String(), "✓ Installed the tripcoil service; it starts after the checks.\n") {
+			t.Fatalf("%s: commands %q\n%s", m, f.cmds, f.out.String())
+		}
+		f.cmds = nil
+		if err := start(); err != nil || !slices.Equal(f.cmds, []string{startCmd}) || !strings.HasSuffix(f.out.String(), "✓ Started the tripcoil service.\n") {
+			t.Fatalf("%s: start %v, commands %q\n%s", m, err, f.cmds, f.out.String())
+		}
+
+		f.started()
+		f.replies["rc-update show default"] = " tripcoil | default\n"
+		f.out.Reset()
+		if ready, start, err := f.Setup(Options{}); err != nil || !ready || start != nil || !strings.Contains(f.out.String(), "Nothing changed.\n") {
+			t.Fatalf("%s again: ready %v, start %v, %v\n%s", m, ready, start != nil, err, f.out.String())
+		}
+
+		os.WriteFile(filepath.Join(f.Root, ServiceFiles(m, f.Exe)[0].Path), []byte("old\n"), 0o644)
+		f.out.Reset()
+		f.cmds = nil
+		ready, start, err = f.Setup(Options{})
+		if err != nil || !ready || start == nil || slices.Contains(f.cmds, restartCmd) ||
+			!strings.Contains(f.out.String(), "✓ Updated the tripcoil service; it restarts after the checks.\n") {
+			t.Fatalf("%s changed: ready %v, %v, commands %q\n%s", m, ready, err, f.cmds, f.out.String())
+		}
+		f.fail[restartCmd] = true
+		if err := start(); err == nil || !strings.HasPrefix(err.Error(), restartCmd+": exit status 3") {
+			t.Fatalf("%s restart: %v", m, err)
+		}
+		delete(f.fail, restartCmd)
+		if err := start(); err != nil || !strings.HasSuffix(f.out.String(), "✓ Restarted the tripcoil service.\n") {
+			t.Fatalf("%s restart: %v\n%s", m, err, f.out.String())
+		}
+	}
+}
+
+func TestSetupStartsTheServiceWhenNotReady(t *testing.T) {
+	f := newFake(t, Systemd)
+	if ready, start, err := f.Setup(Options{Agent: "codex"}); err != nil || ready || start != nil || !slices.Contains(f.cmds, "systemctl start tripcoil.service") {
+		t.Fatalf("ready %v, start %v, %v, commands %q", ready, start != nil, err, f.cmds)
 	}
 }

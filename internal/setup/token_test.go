@@ -92,7 +92,7 @@ func (f *fakeHost) token(t *testing.T) string {
 
 func TestSetupCreatesTheToken(t *testing.T) {
 	f := tokenHost(t, "\n", setupTokenOutput(60), nil)
-	ready, err := f.Setup(Options{Agent: "claude"})
+	ready, _, err := f.Setup(Options{Agent: "claude"})
 	if err != nil || !ready {
 		t.Fatalf("ready %v, %v", ready, err)
 	}
@@ -113,7 +113,7 @@ func TestSetupCreatesTheToken(t *testing.T) {
 
 	f.out = bytes.Buffer{}
 	f.SetupToken = func(string) ([]byte, error) { t.Fatal("a token exists"); return nil, nil }
-	if ready, err := f.Setup(Options{}); err != nil || !ready || !strings.Contains(f.out.String(), "· /etc/tripcoil/agent.env has a token for Claude Code.\n") {
+	if ready, _, err := f.Setup(Options{}); err != nil || !ready || !strings.Contains(f.out.String(), "· /etc/tripcoil/agent.env has a token for Claude Code.\n") {
 		t.Fatalf("ready %v, %v:\n%s", ready, err, f.out.String())
 	}
 }
@@ -122,7 +122,7 @@ func TestSetupKeepsTheEnvFilesOtherLines(t *testing.T) {
 	f := tokenHost(t, "yes\n", setupTokenOutput(), nil)
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("# for Claude Code\nBASE=x\nexport CLAUDE_CODE_OAUTH_TOKEN=\nDEBUG=1"), 0o600)
-	if _, err := f.Setup(Options{Agent: "claude"}); err != nil {
+	if _, _, err := f.Setup(Options{Agent: "claude"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.token(t); got != "# for Claude Code\nBASE=x\nCLAUDE_CODE_OAUTH_TOKEN="+testToken+"\nDEBUG=1\n" {
@@ -148,7 +148,7 @@ func TestSetupSkipsTheToken(t *testing.T) {
 			f := tokenHost(t, c.input, "", nil)
 			f.Terminal = func() bool { return c.term }
 			f.SetupToken = func(string) ([]byte, error) { t.Fatal("setup-token must not run"); return nil, nil }
-			ready, err := f.Setup(c.o)
+			ready, _, err := f.Setup(c.o)
 			if err != nil || ready {
 				t.Fatalf("ready %v, %v", ready, err)
 			}
@@ -172,7 +172,7 @@ func TestSetupAsksForTheToken(t *testing.T) {
 			f := tokenHost(t, "\nsk-ant-short\n  "+testToken+"  \n", c.out, c.err)
 			hidden := 0
 			f.NoEcho = func() (func(), error) { hidden++; return func() { hidden-- }, nil }
-			ready, err := f.Setup(Options{Agent: "claude"})
+			ready, _, err := f.Setup(Options{Agent: "claude"})
 			if err != nil || !ready || hidden != 0 {
 				t.Fatalf("ready %v, %v, hidden %d", ready, err, hidden)
 			}
@@ -188,12 +188,12 @@ func TestSetupAsksForTheToken(t *testing.T) {
 	}
 
 	f := tokenHost(t, "\n\n", "nothing", nil)
-	if ready, err := f.Setup(Options{Agent: "claude"}); err != nil || ready || f.token(t) != "" {
+	if ready, _, err := f.Setup(Options{Agent: "claude"}); err != nil || ready || f.token(t) != "" {
 		t.Fatalf("an empty paste skips: %v %v", ready, err)
 	}
 
 	f = tokenHost(t, "\n\x1b[200~"+testToken+"\x1b[201~\n", "nothing", nil)
-	if ready, err := f.Setup(Options{Agent: "claude"}); err != nil || !ready || f.token(t) != "CLAUDE_CODE_OAUTH_TOKEN="+testToken+"\n" {
+	if ready, _, err := f.Setup(Options{Agent: "claude"}); err != nil || !ready || f.token(t) != "CLAUDE_CODE_OAUTH_TOKEN="+testToken+"\n" {
 		t.Fatalf("a bracketed paste: %v %v\n%s", ready, err, f.out.String())
 	}
 }
@@ -203,7 +203,7 @@ func TestSetupRefusesABrokenEnvFile(t *testing.T) {
 	f.SetupToken = func(string) ([]byte, error) { t.Fatal("setup-token must not run"); return nil, nil }
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("not a line\n"), 0o600)
-	if ready, err := f.Setup(Options{Agent: "claude"}); err != nil || ready || !strings.Contains(f.out.String(), "! /etc/tripcoil/agent.env: line 1 is not KEY=value\n") {
+	if ready, _, err := f.Setup(Options{Agent: "claude"}); err != nil || ready || !strings.Contains(f.out.String(), "! /etc/tripcoil/agent.env: line 1 is not KEY=value\n") {
 		t.Fatalf("ready %v, %v\n%s", ready, err, f.out.String())
 	}
 	if f.read(t, EnvFilePath) != "not a line\n" {
@@ -217,7 +217,7 @@ func TestSetupNamesARejectedCommand(t *testing.T) {
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("CLAUDE_CODE_OAUTH_TOKEN=x\n"), 0o600)
 	os.WriteFile(filepath.Join(f.Root, "etc/tripcoil/tripcoil.yaml"), []byte(strings.Replace(DefaultConfig("claude"), `command: ""`, "command: /opt/claude", 1)), 0o644)
-	ready, err := f.Setup(Options{})
+	ready, _, err := f.Setup(Options{})
 	out := f.out.String()
 	if err != nil || ready || !strings.Contains(out, "! review.command: /opt/claude is not owned by root; correct it in /etc/tripcoil/tripcoil.yaml.\n") ||
 		strings.Contains(out, "Install Claude Code") || !strings.HasSuffix(out, "\nThen check the host: tripcoil doctor\n") {
@@ -244,18 +244,18 @@ func TestWriteTokenFollowsALink(t *testing.T) {
 
 func TestSetupReadiness(t *testing.T) {
 	f := newFake(t, Systemd)
-	if ready, err := f.Setup(Options{Agent: "none"}); err != nil || !ready || !strings.Contains(f.out.String(), "review.agent is none, so reports are audit-only.\n") ||
+	if ready, _, err := f.Setup(Options{Agent: "none"}); err != nil || !ready || !strings.Contains(f.out.String(), "review.agent is none, so reports are audit-only.\n") ||
 		strings.Contains(f.out.String(), "doctor") {
 		t.Fatalf("none: %v %v\n%s", ready, err, f.out.String())
 	}
 	f = newFake(t, Systemd)
 	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("CODEX_API_KEY=k\n"), 0o600)
-	if ready, err := f.Setup(Options{Agent: "codex"}); err != nil || ready || !strings.Contains(f.out.String(), "Next, install the agent CLI:\n  1. Install Codex") {
+	if ready, _, err := f.Setup(Options{Agent: "codex"}); err != nil || ready || !strings.Contains(f.out.String(), "Next, install the agent CLI:\n  1. Install Codex") {
 		t.Fatalf("codex missing: %v %v\n%s", ready, err, f.out.String())
 	}
 	f.tools["codex"] = true
-	if ready, err := f.Setup(Options{}); err != nil || !ready {
+	if ready, _, err := f.Setup(Options{}); err != nil || !ready {
 		t.Fatalf("codex: %v %v", ready, err)
 	}
 }

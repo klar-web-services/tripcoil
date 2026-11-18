@@ -25,7 +25,7 @@ func withoutClaude(t *testing.T, pm string) *fakeHost {
 
 func TestClaudeCodeInstalled(t *testing.T) {
 	f := newFake(t, Systemd)
-	if _, err := f.Setup(Options{Yes: true}); err != nil {
+	if _, _, err := f.Setup(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if slices.ContainsFunc(f.cmds, func(c string) bool { return strings.HasPrefix(c, "node") || strings.HasPrefix(c, "npm") }) {
@@ -38,7 +38,7 @@ func TestClaudeCodeInstalled(t *testing.T) {
 
 	f = newFake(t, Systemd)
 	f.FindCLI = func(string, string) (string, error) { return "", errors.New("/usr/bin/claude is not owned by root") }
-	if _, err := f.Setup(Options{Yes: true}); err == nil || err.Error() != "/usr/bin/claude is not owned by root" {
+	if _, _, err := f.Setup(Options{Yes: true}); err == nil || err.Error() != "/usr/bin/claude is not owned by root" {
 		t.Fatalf("got %v", err)
 	}
 	if slices.ContainsFunc(f.cmds, func(c string) bool { return strings.HasPrefix(c, "npm") }) {
@@ -51,7 +51,7 @@ func TestClaudeCodeSkipped(t *testing.T) {
 	f.tools["node"], f.tools["npm"] = true, true
 	f.replies["node --version"] = "v22.1.0\n"
 	f.In = strings.NewReader("no\n")
-	if _, err := f.Setup(Options{Agent: "claude"}); err != nil {
+	if _, _, err := f.Setup(Options{Agent: "claude"}); err != nil {
 		t.Fatal(err)
 	}
 	if slices.Contains(f.cmds, npmInstall) || slices.Contains(f.cmds, "apt-get update") {
@@ -365,7 +365,7 @@ func TestClaudeCodeCannotInstall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := withoutClaude(t, tc.pm)
 			tc.prepare(f)
-			if _, err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
+			if _, _, err := f.Setup(Options{Agent: "claude", Yes: true}); err != nil {
 				t.Fatal(err)
 			}
 			out := f.out.String()

@@ -17,7 +17,7 @@ func installed(t *testing.T, m Manager) (*fakeHost, UninstallOptions) {
 	if f.tools["useradd"] {
 		f.tools["userdel"] = true
 	}
-	if _, err := f.Setup(Options{Agent: "none", Yes: true}); err != nil {
+	if _, _, err := f.Setup(Options{Agent: "none", Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	f.started()

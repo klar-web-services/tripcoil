@@ -102,6 +102,11 @@ func runDoctor(args []string, stdout, stderr io.Writer, d deps) int {
 		fmt.Fprintln(stderr, "tripcoil doctor must run as root (try: sudo tripcoil doctor)")
 		return 2
 	}
+	return doctor(stdout, d, false)
+}
+
+// doctor runs the checks. starting says that setup starts the service after them.
+func doctor(stdout io.Writer, d deps, starting bool) int {
 	failed := false
 	pass := func(msg string) { fmt.Fprintf(stdout, "✓ %s\n", msg) }
 	failCheck := func(msg, fix string) {
@@ -136,6 +141,8 @@ func runDoctor(args []string, stdout, stderr io.Writer, d deps) int {
 		failCheck(err.Error(), "")
 	case !svc.Installed:
 		failCheck("The tripcoil service is not installed.", d.sudo+"tripcoil setup")
+	case !svc.Running && starting:
+		fmt.Fprintln(stdout, "· The tripcoil service is installed and starts after the checks.")
 	case !svc.Running && svc.Manager == setup.Systemd:
 		failCheck("The tripcoil service is installed but not running.", d.sudo+"systemctl start tripcoil; its log: journalctl -u tripcoil")
 	case !svc.Running:

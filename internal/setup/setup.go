@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/agent"
@@ -131,14 +132,16 @@ type Options struct {
 
 // Setup sets the host up (spec section 9). Every step leaves what is already in place alone, so
 // a second run changes nothing (AC-15). It reports whether the review is ready to check: no
-// agent, or the agent's CLI installed and its credentials in review.envFile.
-func (h Host) Setup(o Options) (bool, error) {
+// agent, or the agent's CLI installed and its credentials in review.envFile. When it is ready,
+// the service's start (or restart) is left to start, which the caller runs after its checks so
+// that they do not wait for the first run; start is nil when there is nothing to start.
+func (h Host) Setup(o Options) (ready bool, start func() error, err error) {
 	m, err := h.Manager()
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if err := h.checkBinary(); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	changed := false
 	note := func(did bool, done, kept string) {
@@ -154,12 +157,12 @@ func (h Host) Setup(o Options) (bool, error) {
 	}
 	did, err := h.agentUser()
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	note(did, "Created the user and group "+agent.UserName+".", "The user "+agent.UserName+" exists.")
 	c, did, created, err := h.config(o)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	name, envFile := c.Review.Agent, c.Review.EnvFile
 	wrote := fmt.Sprintf("Wrote %s (review.agent: %s).", config.DefaultPath, name)
@@ -170,7 +173,7 @@ func (h Host) Setup(o Options) (bool, error) {
 	if m == OpenRC && name != "none" {
 		did, err := h.bubblewrap(o)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		note(did, "Installed bubblewrap.", "bubblewrap is installed.")
 	}
@@ -178,7 +181,7 @@ func (h Host) Setup(o Options) (bool, error) {
 	if name == "claude" && c.Review.Command == "" {
 		did, installed, err = h.claudeCode(o)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		changed = changed || did
 	}
@@ -200,29 +203,36 @@ func (h Host) Setup(o Options) (bool, error) {
 		default:
 			did, err := h.claudeToken(o, cli, envFile)
 			if err != nil {
-				return false, err
+				return false, nil, err
 			}
 			changed, hasToken = changed || did, did
 		}
 	}
-	did, err = h.service(m)
+	ready = name == "none" || installed && hasToken
+	did, step, err := h.service(m, ready)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	note(did, "Installed and started the tripcoil service.", "The tripcoil service is installed and running.")
+	switch {
+	case step == nil:
+		note(did, "Installed and started the tripcoil service.", "The tripcoil service is installed and running.")
+	case slices.Contains(step, "restart"):
+		note(true, "Updated the tripcoil service; it restarts after the checks.", "")
+		start = func() error { return h.startService(step, "Restarted") }
+	default:
+		note(true, "Installed the tripcoil service; it starts after the checks.", "")
+		start = func() error { return h.startService(step, "Started") }
+	}
 	if !changed {
 		fmt.Fprintln(h.Out, "Nothing changed.")
 	}
 	if name == "none" {
 		fmt.Fprintln(h.Out, "review.agent is none, so reports are audit-only.")
-		return true, nil
+	} else if !ready {
+		// A rejected review.command was named above; installing the CLI would not help.
+		fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed || c.Review.Command != "", hasToken))
 	}
-	if installed && hasToken {
-		return true, nil
-	}
-	// A rejected review.command was named above; installing the CLI would not help.
-	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed || c.Review.Command != "", hasToken))
-	return false, nil
+	return ready, start, nil
 }
 
 // pathPattern is what the binary's path may hold: it goes unquoted into the service files, and
@@ -399,8 +409,8 @@ func (h Host) bubblewrap(o Options) (bool, error) {
 }
 
 // service writes the service files that differ, then enables and starts the service, restarting
-// it when its files changed.
-func (h Host) service(m Manager) (bool, error) {
+// it when its files changed. With deferStart it returns that start or restart instead of running it.
+func (h Host) service(m Manager, deferStart bool) (bool, []string, error) {
 	wrote := false
 	for _, f := range ServiceFiles(m, h.Exe) {
 		p := h.path(f.Path)
@@ -408,17 +418,18 @@ func (h Host) service(m Manager) (bool, error) {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if err := os.WriteFile(p, []byte(f.Data), fs.FileMode(f.Mode)); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if err := os.Chmod(p, fs.FileMode(f.Mode)); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		wrote = true
 	}
 	var steps [][]string
+	var start []string
 	if m == Systemd {
 		if wrote {
 			steps = append(steps, []string{"systemctl", "daemon-reload"})
@@ -429,9 +440,9 @@ func (h Host) service(m Manager) (bool, error) {
 		_, err := h.Run("systemctl", "is-active", "--quiet", "tripcoil.service")
 		switch {
 		case err != nil:
-			steps = append(steps, []string{"systemctl", "start", "tripcoil.service"})
+			start = []string{"systemctl", "start", "tripcoil.service"}
 		case wrote:
-			steps = append(steps, []string{"systemctl", "restart", "tripcoil.service"})
+			start = []string{"systemctl", "restart", "tripcoil.service"}
 		}
 	} else {
 		if out, _ := h.Run("rc-update", "show", "default"); !hasService(out) {
@@ -440,17 +451,37 @@ func (h Host) service(m Manager) (bool, error) {
 		_, err := h.Run("rc-service", "tripcoil", "status")
 		switch {
 		case err != nil:
-			steps = append(steps, []string{"rc-service", "tripcoil", "start"})
+			start = []string{"rc-service", "tripcoil", "start"}
 		case wrote:
-			steps = append(steps, []string{"rc-service", "tripcoil", "restart"})
+			start = []string{"rc-service", "tripcoil", "restart"}
 		}
+	}
+	if start != nil && !deferStart {
+		steps = append(steps, start)
+		start = nil
 	}
 	for _, s := range steps {
-		if out, err := h.Run(s[0], s[1:]...); err != nil {
-			return false, fmt.Errorf("%s: %v: %s", strings.Join(s, " "), err, bytes.TrimSpace(out))
+		if err := h.step(s); err != nil {
+			return false, nil, err
 		}
 	}
-	return wrote || len(steps) > 0, nil
+	return wrote || len(steps) > 0 || start != nil, start, nil
+}
+
+func (h Host) step(s []string) error {
+	if out, err := h.Run(s[0], s[1:]...); err != nil {
+		return fmt.Errorf("%s: %v: %s", strings.Join(s, " "), err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
+// startService runs the start or restart that service deferred.
+func (h Host) startService(step []string, did string) error {
+	if err := h.step(step); err != nil {
+		return err
+	}
+	fmt.Fprintf(h.Out, "✓ %s the tripcoil service.\n", did)
+	return nil
 }
 
 // hasService reports whether rc-update show lists tripcoil.

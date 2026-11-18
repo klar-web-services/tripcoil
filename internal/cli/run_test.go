@@ -48,11 +48,14 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		enterScope:    func([]string) (int, bool, error) { return 0, false, nil },
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
-		setup:         func(setup.Options, io.Writer) (bool, error) { t.Fatal("setup must not run"); return false, nil },
-		service:       func() (setup.Service, error) { return setup.Service{Manager: setup.Systemd}, nil },
-		doctor:        doctorHost{},
-		hangups:       func() <-chan struct{} { return nil },
-		after:         func(time.Duration) <-chan time.Time { return nil },
+		setup: func(setup.Options, io.Writer) (bool, func() error, error) {
+			t.Fatal("setup must not run")
+			return false, nil, nil
+		},
+		service: func() (setup.Service, error) { return setup.Service{Manager: setup.Systemd}, nil },
+		doctor:  doctorHost{},
+		hangups: func() <-chan struct{} { return nil },
+		after:   func(time.Duration) <-chan time.Time { return nil },
 	}
 }
 
