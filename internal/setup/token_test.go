@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const testToken = "sk-ant-oat01-BrPERz" + "Ab3_-xCd4Ef5Gh6Ij7Kl8Mn9Op0Qr1St2Uv3Wx4Yz5ab6cd7ef8gh9ij0kl1mn2op3qr4st5uv6wx7yz8" + "AAA"
@@ -41,8 +44,17 @@ func TestExtractToken(t *testing.T) {
 			"\x1b[2K\x1b[1A\x1b[2K\x1b[1A\x1b[2K\x1b[G" + setupTokenOutput(50) + "\x1b[?25h", true},
 		{"no blank line after", "   " + testToken[:50] + "\n   " + testToken[50:] + "\n   Store this token securely.\n", true},
 		{"trailing spaces", "   " + testToken[:50] + "   \n   " + testToken[50:] + "  \n\n", true},
+		{"cursor moves with padding", "   " + testToken[:50] + "      \x1b[1B\x1b[4G" + testToken[50:] + "\x1b[12;4H   Store this token securely.", true},
+		{"cursor position wrap", "   " + testToken[:50] + "   \x1b[12;4H" + testToken[50:] + "\r\n\r\n", true},
+		{"carriage return wrap", "   " + testToken[:50] + "\r   " + testToken[50:] + "\r\n\r\n", true},
+		{"pseudo-terminal newlines", strings.ReplaceAll(setupTokenOutput(50), "\r\n", "\r\r\n"), true},
+		{"charset after", "   " + testToken + "\x1b(B\x1b[m\r\n", true},
+		{"DCS before", "\x1bPq#0;2;0;0;0\x1b\\   " + testToken + "\r\n", true},
+		{"rule after", "   " + testToken + "\n   ---------------------\n", true},
 		{"no token", "Error: sign-in was cancelled\r\n", false},
 		{"truncated", "   sk-ant-oat01-BrPERzAb3\r\n\r\n   Store this token securely.\r\n", false},
+		{"short fragment", "   " + testToken[:13+60] + "\r\n\r\n   Store this token securely.\r\n", false},
+		{"cut by a carriage return", "   " + testToken[:70] + "\r Store this token securely.\r\n", false},
 	} {
 		got, ok := extractToken([]byte(c.out))
 		if ok != c.ok || (ok && got != testToken) {
@@ -177,6 +189,55 @@ func TestSetupAsksForTheToken(t *testing.T) {
 	if ready, err := f.Setup(Options{Agent: "claude"}); err != nil || ready || f.token(t) != "" {
 		t.Fatalf("an empty paste skips: %v %v", ready, err)
 	}
+
+	f = tokenHost(t, "\n\x1b[200~"+testToken+"\x1b[201~\n", "nothing", nil)
+	if ready, err := f.Setup(Options{Agent: "claude"}); err != nil || !ready || f.token(t) != "CLAUDE_CODE_OAUTH_TOKEN="+testToken+"\n" {
+		t.Fatalf("a bracketed paste: %v %v\n%s", ready, err, f.out.String())
+	}
+}
+
+func TestSetupRefusesABrokenEnvFile(t *testing.T) {
+	f := tokenHost(t, "\n", "", nil)
+	f.SetupToken = func(string) ([]byte, error) { t.Fatal("setup-token must not run"); return nil, nil }
+	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
+	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("not a line\n"), 0o600)
+	if ready, err := f.Setup(Options{Agent: "claude"}); err != nil || ready || !strings.Contains(f.out.String(), "! /etc/tripcoil/agent.env: line 1 is not KEY=value\n") {
+		t.Fatalf("ready %v, %v\n%s", ready, err, f.out.String())
+	}
+	if f.read(t, EnvFilePath) != "not a line\n" {
+		t.Fatal("agent.env changed")
+	}
+}
+
+func TestSetupNamesARejectedCommand(t *testing.T) {
+	f := tokenHost(t, "", "", nil)
+	f.FindCLI = func(command, name string) (string, error) { return "", errors.New(command + " is not owned by root") }
+	os.MkdirAll(filepath.Join(f.Root, "etc/tripcoil"), 0o755)
+	os.WriteFile(filepath.Join(f.Root, EnvFilePath), []byte("CLAUDE_CODE_OAUTH_TOKEN=x\n"), 0o600)
+	os.WriteFile(filepath.Join(f.Root, "etc/tripcoil/tripcoil.yaml"), []byte(strings.Replace(DefaultConfig("claude"), `command: ""`, "command: /opt/claude", 1)), 0o644)
+	ready, err := f.Setup(Options{})
+	out := f.out.String()
+	if err != nil || ready || !strings.Contains(out, "! review.command: /opt/claude is not owned by root; correct it in /etc/tripcoil/tripcoil.yaml.\n") ||
+		strings.Contains(out, "Install Claude Code") || !strings.HasSuffix(out, "\nThen check the host: tripcoil doctor\n") {
+		t.Fatalf("ready %v, %v\n%s", ready, err, out)
+	}
+}
+
+func TestWriteTokenFollowsALink(t *testing.T) {
+	f := newFake(t, Systemd)
+	dir := filepath.Join(f.Root, "etc/tripcoil")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "real.env"), []byte("BASE=x\n"), 0o600)
+	os.Symlink("real.env", filepath.Join(dir, "agent.env"))
+	if err := f.writeToken(EnvFilePath, claudeTokenKey, testToken); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(filepath.Join(dir, "agent.env")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v %v", fi, err)
+	}
+	if got := f.read(t, "etc/tripcoil/real.env"); got != "BASE=x\nCLAUDE_CODE_OAUTH_TOKEN="+testToken+"\n" {
+		t.Fatalf("real.env %q", got)
+	}
 }
 
 func TestSetupReadiness(t *testing.T) {
@@ -197,15 +258,64 @@ func TestSetupReadiness(t *testing.T) {
 	}
 }
 
-// TestPTYChild is the child of TestRunInPTY.
+// TestPTYChild is the child of the runInPTY tests: it prints the token and the line it reads,
+// or its window size.
 func TestPTYChild(t *testing.T) {
-	if os.Getenv("TRIPCOIL_PTY_CHILD") != "1" {
-		t.Skip("the child of TestRunInPTY")
+	switch os.Getenv("TRIPCOIL_PTY_CHILD") {
+	case "read":
+		fmt.Print(setupTokenOutput(50))
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		fmt.Printf("got %s", line)
+	case "size":
+		ws, err := unix.IoctlGetWinsize(1, unix.TIOCGWINSZ)
+		fmt.Printf("size %dx%d %v\n", ws.Row, ws.Col, err)
+	default:
+		t.Skip("the child of the runInPTY tests")
 	}
-	fmt.Print(setupTokenOutput(50))
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	fmt.Printf("got %s", line)
 	os.Exit(0)
+}
+
+func ptyChild(mode string) *exec.Cmd {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestPTYChild$")
+	cmd.Env = append(os.Environ(), "TRIPCOIL_PTY_CHILD="+mode)
+	return cmd
+}
+
+func TestRunInPTYOnATerminal(t *testing.T) {
+	tm, _, ts, err := openPTY()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	defer ts.Close()
+	fd := int(ts.Fd())
+	unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Row: 33, Col: 111})
+	before, _ := unix.IoctlGetTermios(fd, unix.TCGETS)
+	var out bytes.Buffer
+	if _, err := runInPTY(ts, &out, ptyChild("size")); err != nil {
+		t.Fatalf("%v:\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "size 33x111 <nil>") || !strings.HasSuffix(out.String(), "\x1b[?2004l\x1b[?25h") {
+		t.Fatalf("printed %q", out.String())
+	}
+	if after, _ := unix.IoctlGetTermios(fd, unix.TCGETS); *after != *before || after.Lflag&unix.ICANON == 0 {
+		t.Fatal("the terminal was not restored")
+	}
+}
+
+func TestRunInPTYDoesNotWaitForWhatTheChildLeft(t *testing.T) {
+	cmd := exec.Command("sh", "-c", `(trap "" HUP; setsid sh -c "trap \"\" HUP; sleep 4; echo late") & echo hi`)
+	r, w, _ := os.Pipe()
+	defer r.Close()
+	defer w.Close()
+	var out bytes.Buffer
+	start := time.Now()
+	if _, err := runInPTY(r, &out, cmd); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 2500*time.Millisecond || !strings.Contains(out.String(), "hi") || strings.Contains(out.String(), "late") {
+		t.Fatalf("%v, printed %q", d, out.String())
+	}
 }
 
 func TestRunInPTY(t *testing.T) {
@@ -215,10 +325,8 @@ func TestRunInPTY(t *testing.T) {
 	}
 	defer r.Close()
 	go func() { fmt.Fprint(w, "hello\n"); w.Close() }()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestPTYChild$")
-	cmd.Env = append(os.Environ(), "TRIPCOIL_PTY_CHILD=1")
 	var out bytes.Buffer
-	captured, err := runInPTY(r, &out, cmd)
+	captured, err := runInPTY(r, &out, ptyChild("read"))
 	if err != nil {
 		t.Fatalf("%v:\n%s", err, out.String())
 	}

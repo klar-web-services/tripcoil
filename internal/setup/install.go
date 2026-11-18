@@ -22,15 +22,16 @@ const AddedMarker = "# Added by tripcoil setup; tripcoil uninstall removes it."
 // Files setup may add for NodeSource's Node.js 22 repository.
 const (
 	NodeSourceKeyPath     = "/etc/apt/keyrings/nodesource.asc"
+	NodeSourceKeyMarkPath = "/etc/apt/keyrings/nodesource.asc.tripcoil"
 	NodeSourceSourcesPath = "/etc/apt/sources.list.d/nodesource.sources"
 	NodeSourcePinPath     = "/etc/apt/preferences.d/nodejs"
 	NodeSourceRepoPath    = "/etc/yum.repos.d/nodesource-nodejs.repo"
 )
 
-// NodeSourceFiles are those files. The key cannot carry the marker: setup writes it only along
-// with a marked sources file, and only when there is no key yet, so uninstall removes the key
-// only together with a marked sources file.
-var NodeSourceFiles = []string{NodeSourceKeyPath, NodeSourceSourcesPath, NodeSourcePinPath, NodeSourceRepoPath}
+// NodeSourceFiles are those files. The key cannot carry the marker: setup writes it only when
+// there is no key yet, and then writes the marked file NodeSourceKeyMarkPath beside it, so
+// uninstall removes the key only together with that file.
+var NodeSourceFiles = []string{NodeSourceKeyPath, NodeSourceSourcesPath, NodeSourceKeyMarkPath, NodeSourcePinPath, NodeSourceRepoPath}
 
 const (
 	nodeSourceKeyURL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
@@ -171,6 +172,9 @@ func (h Host) planNode() (nodePlan, error) {
 			if p.nodeSource, err = h.nodeSourceArch("amd64", "arm64"); err != nil {
 				return p, err
 			}
+			if err := h.checkHostsNodeSource(NodeSourceSourcesPath, `node_(\d+)\.x`, "node_22.x"); err != nil {
+				return p, err
+			}
 			p.cmds = [][]string{{"apt-get", "update"}, {"apt-get", "install", "-y", "nodejs"}}
 		}
 	case "dnf":
@@ -189,6 +193,9 @@ func (h Host) planNode() (nodePlan, error) {
 			p.cmds = [][]string{{"dnf", "install", "-y", "nodejs", "npm"}}
 		} else {
 			if p.nodeSource, err = h.nodeSourceArch("x86_64", "aarch64"); err != nil {
+				return p, err
+			}
+			if err := h.checkHostsNodeSource(NodeSourceRepoPath, `pub_(\d+)\.x`, "pub_22.x"); err != nil {
 				return p, err
 			}
 			p.cmds = [][]string{{"dnf", "install", "-y", "nodejs"}}
@@ -255,9 +262,6 @@ func (h Host) installNode(p nodePlan) (string, error) {
 // the marker is the host's own and stays as it is.
 func (h Host) addNodeSource(manager, arch string) error {
 	if manager == "dnf" {
-		if err := h.checkHostsNodeSource(NodeSourceRepoPath, `pub_(\d+)\.x`, "pub_22.x"); err != nil {
-			return err
-		}
 		return h.writeAdded(NodeSourceRepoPath, fmt.Sprintf(`[nodesource-nodejs]
 name=Node.js Packages for Linux RPM based distros - %s
 baseurl=https://rpm.nodesource.com/pub_22.x/nodistro/nodejs/%s
@@ -268,9 +272,6 @@ gpgkey=https://rpm.nodesource.com/gpgkey/ns-operations-public.key
 module_hotfixes=1
 `, arch, arch))
 	}
-	if err := h.checkHostsNodeSource(NodeSourceSourcesPath, `node_(\d+)\.x`, "node_22.x"); err != nil {
-		return err
-	}
 	if !h.hostOwned(NodeSourceSourcesPath) && !h.exists(NodeSourceKeyPath) {
 		key, err := h.Fetch(nodeSourceKeyURL)
 		if err != nil {
@@ -278,6 +279,9 @@ module_hotfixes=1
 		}
 		if !bytes.HasPrefix(bytes.TrimSpace(key), []byte(armoredKey)) {
 			return fmt.Errorf("%s is not an ASCII-armored key", nodeSourceKeyURL)
+		}
+		if err := h.writeFile(NodeSourceKeyMarkPath, []byte(AddedMarker+"\n")); err != nil {
+			return err
 		}
 		if err := h.writeFile(NodeSourceKeyPath, key); err != nil {
 			return err

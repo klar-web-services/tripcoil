@@ -3,9 +3,11 @@ package setup
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
@@ -16,18 +18,13 @@ const (
 )
 
 var (
-	tokenPattern = regexp.MustCompile(`^sk-ant-oat01-[A-Za-z0-9_-]{40,300}$`)
+	tokenPattern = regexp.MustCompile(`^sk-ant-oat01-[A-Za-z0-9_-]{80,300}$`)
 	pastePattern = regexp.MustCompile(`^sk-ant-[A-Za-z0-9_-]{33,}$`)
 )
 
-// claudeToken creates a token with claude setup-token and saves it to envFile, unless envFile
-// has one, after confirmation; when setup-token prints none, it asks for it. It returns whether
-// it saved one.
+// claudeToken creates a token with claude setup-token and saves it to envFile, after
+// confirmation; when setup-token prints none, it asks for it. It returns whether it saved one.
 func (h Host) claudeToken(o Options, cli, envFile string) (bool, error) {
-	if h.hasToken(envFile, claudeTokenKey) {
-		fmt.Fprintf(h.Out, "· %s has a token for Claude Code.\n", envFile)
-		return false, nil
-	}
 	if o.Yes || !h.Terminal() {
 		return false, nil
 	}
@@ -61,14 +58,9 @@ func (h Host) claudeToken(o Options, cli, envFile string) (bool, error) {
 func (h Host) pasteToken() (string, error) {
 	for {
 		fmt.Fprint(h.Out, "Paste the token claude setup-token printed (input hidden, Enter skips): ")
-		restore, err := h.NoEcho()
-		if err != nil {
-			return "", err
-		}
-		line, err := readLine(h.In)
-		restore()
+		line, err := h.readHidden()
 		fmt.Fprintln(h.Out)
-		t := strings.TrimSpace(line)
+		t := strings.TrimSpace(strings.NewReplacer("\x1b[200~", "", "\x1b[201~", "").Replace(line)) // bracketed paste
 		if err != nil || t == "" {
 			return "", nil
 		}
@@ -79,18 +71,43 @@ func (h Host) pasteToken() (string, error) {
 	}
 }
 
+// readHidden reads a line with echo off. Ctrl-C or SIGTERM meanwhile turns echo back on before
+// Tripcoil exits.
+func (h Host) readHidden() (string, error) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	restore, err := h.NoEcho()
+	if err != nil {
+		return "", err
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case s := <-sig:
+			restore()
+			fmt.Fprintln(h.Out)
+			os.Exit(128 + int(s.(syscall.Signal)))
+		case <-done:
+		}
+	}()
+	defer restore()
+	return readLine(h.In)
+}
+
 // hasToken reports whether envFile sets key to a value.
-func (h Host) hasToken(envFile, key string) bool {
+func (h Host) hasToken(envFile, key string) (bool, error) {
 	if envFile == "" {
-		return false
+		return false, nil
 	}
 	data, err := os.ReadFile(h.path(envFile))
 	if err != nil {
-		return false
+		return false, err
 	}
 	env, err := sandbox.ParseEnvFile(data)
 	if err != nil {
-		return false
+		return false, err
 	}
 	v := ""
 	for _, e := range env {
@@ -98,13 +115,16 @@ func (h Host) hasToken(envFile, key string) bool {
 			v = val
 		}
 	}
-	return v != ""
+	return v != "", nil
 }
 
 // writeToken sets key to token in envFile, keeping its other lines, and replaces the file at
 // once, root-only.
 func (h Host) writeToken(envFile, key, token string) error {
-	p := h.path(envFile)
+	p, err := filepath.EvalSymlinks(h.path(envFile))
+	if err != nil {
+		return err
+	}
 	data, err := os.ReadFile(p)
 	if err != nil {
 		return err
@@ -134,6 +154,10 @@ func (h Host) writeToken(envFile, key, token string) error {
 		return err
 	}
 	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
 		f.Close()
 		return err
 	}
@@ -167,7 +191,7 @@ func isTokenChar(c byte) bool {
 }
 
 // scanToken reads token characters from the start of s, continuing on each next line that,
-// apart from spaces around it, holds only token characters.
+// apart from spaces around it, holds only token characters, and not only dashes (a rule).
 func scanToken(s string) string {
 	var b strings.Builder
 	i := 0
@@ -185,19 +209,28 @@ func scanToken(s string) string {
 		line, _, _ := strings.Cut(s[i+1:], "\n")
 		word := strings.TrimLeft(line, " ")
 		rest := strings.TrimRight(word, " ")
-		if rest == "" || strings.IndexFunc(rest, func(r rune) bool { return r > 0x7f || !isTokenChar(byte(r)) }) >= 0 {
+		if strings.Trim(rest, "-") == "" || strings.IndexFunc(rest, func(r rune) bool { return r > 0x7f || !isTokenChar(byte(r)) }) >= 0 {
 			return b.String()
 		}
 		i += 1 + len(line) - len(word)
 	}
 }
 
-// stripEscapes drops terminal escape sequences (CSI, OSC and two-byte ones) and carriage returns.
+// stripEscapes drops terminal escape sequences. Cursor moves to another line and carriage
+// returns without a newline become newlines, so text drawn on separate lines stays apart.
 func stripEscapes(b []byte) []byte {
 	out := make([]byte, 0, len(b))
 	for i := 0; i < len(b); i++ {
 		switch {
-		case b[i] == '\r':
+		case b[i] == '\r': // a pseudo-terminal turns "\r\n" into "\r\r\n"
+			j := i
+			for j < len(b) && b[j] == '\r' {
+				j++
+			}
+			if j >= len(b) || b[j] != '\n' {
+				out = append(out, '\n')
+			}
+			i = j - 1
 		case b[i] != 0x1b:
 			out = append(out, b[i])
 		case i+1 >= len(b):
@@ -206,7 +239,12 @@ func stripEscapes(b []byte) []byte {
 			for i < len(b) && b[i] >= 0x20 && b[i] <= 0x3f { // parameters and intermediates
 				i++
 			}
-		case b[i+1] == ']':
+			if i < len(b) && strings.IndexByte("BEHf", b[i]) >= 0 {
+				out = append(out, '\n')
+			}
+		case b[i+1] == '(' || b[i+1] == ')' || b[i+1] == '#':
+			i += 2
+		case b[i+1] == ']' || b[i+1] == 'P': // OSC and DCS
 			i += 2
 			for i < len(b) && b[i] != 0x07 && !(b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\') {
 				i++

@@ -394,7 +394,7 @@ func TestNextSteps(t *testing.T) {
 			t.Errorf("claude lacks %q:\n%s", l, claude)
 		}
 	}
-	old := nextSteps("codex", "", "", true, false)
+	old := nextSteps("codex", "", "", false, false)
 	for _, l := range []string{"       npm install -g @openai/codex", "per use through the OpenAI API", "Store it root-only as the line CODEX_API_KEY=<key>",
 		"set review.envFile in\n     /etc/tripcoil/tripcoil.yaml", "       install -m 600 /dev/null /etc/tripcoil/agent.env\n       vi /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(old, l) {
@@ -404,6 +404,12 @@ func TestNextSteps(t *testing.T) {
 	installed := nextSteps("claude", "/etc/tripcoil/agent.env", "", true, false)
 	if strings.Contains(installed, "npm install") || !strings.Contains(installed, "  1. Create a token") || !strings.Contains(installed, "  2. Add it to") {
 		t.Errorf("claude installed:\n%s", installed)
+	}
+	if s := nextSteps("codex", "/etc/tripcoil/agent.env", "", true, false); strings.Contains(s, "Install Codex") || !strings.Contains(s, "  1. Create an OpenAI API key") {
+		t.Errorf("codex installed:\n%s", s)
+	}
+	if s := nextSteps("claude", "/etc/tripcoil/agent.env", "", true, true); s != "\nThen check the host: tripcoil doctor\n" {
+		t.Errorf("nothing left:\n%s", s)
 	}
 	keyed := nextSteps("codex", "/etc/tripcoil/agent.env", "sudo ", false, true)
 	if keyed != "\nNext, install the agent CLI:\n  1. Install Codex system-wide (root-owned, outside /home), for example:\n       sudo npm install -g @openai/codex\nThen check the host: sudo tripcoil doctor\n" {

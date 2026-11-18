@@ -134,6 +134,7 @@ func TestUninstallNodeSource(t *testing.T) {
 		os.WriteFile(filepath.Join(f.Root, p), []byte(data), 0o644)
 	}
 	write(NodeSourceKeyPath, armoredKey+"\n")
+	write(NodeSourceKeyMarkPath, AddedMarker+"\n")
 	write(NodeSourceSourcesPath, AddedMarker+"\nTypes: deb\n")
 	write(NodeSourcePinPath, AddedMarker+"\nPackage: nodejs\n")
 	write(NodeSourceRepoPath, "[nodesource-nodejs]\n")
@@ -142,13 +143,13 @@ func TestUninstallNodeSource(t *testing.T) {
 	if err := f.Uninstall(o); err != nil {
 		t.Fatalf("%v\n%s", err, f.out.String())
 	}
-	f.gone(t, NodeSourceKeyPath, NodeSourceSourcesPath, NodeSourcePinPath)
+	f.gone(t, NodeSourceKeyPath, NodeSourceKeyMarkPath, NodeSourceSourcesPath, NodeSourcePinPath)
 	if f.read(t, NodeSourceRepoPath) != "[nodesource-nodejs]\n" {
 		t.Error("the host's own repository file changed")
 	}
 	out := f.out.String()
 	for _, s := range []string{"the user tripcoil-agent, NodeSource's repository and /usr/local/bin/tripcoil? yes or no [no]: ",
-		"✓ Removed NodeSource's repository: " + NodeSourceSourcesPath + ", " + NodeSourceKeyPath + ", " + NodeSourcePinPath + ".\n",
+		"✓ Removed NodeSource's repository: " + NodeSourceSourcesPath + ", " + NodeSourceKeyMarkPath + ", " + NodeSourceKeyPath + ", " + NodeSourcePinPath + ".\n",
 		"· " + NodeSourceRepoPath + " is the host's own; it stays.\n"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("output lacks %q:\n%s", s, out)
@@ -169,6 +170,16 @@ func TestUninstallNodeSource(t *testing.T) {
 	f.gone(t, NodeSourcePinPath)
 	f.read(t, NodeSourceKeyPath)
 	f.read(t, NodeSourceSourcesPath)
+
+	// A key that was there before setup wrote its sources file has no mark, and stays.
+	f, o = installed(t, Systemd)
+	write(NodeSourceKeyPath, armoredKey+"\n")
+	write(NodeSourceSourcesPath, AddedMarker+"\nTypes: deb\n")
+	if err := f.Uninstall(o); err != nil {
+		t.Fatal(err)
+	}
+	f.gone(t, NodeSourceSourcesPath)
+	f.read(t, NodeSourceKeyPath)
 }
 
 func TestUninstallAnsweredNo(t *testing.T) {

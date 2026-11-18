@@ -146,8 +146,8 @@ func (h Host) markedNodeSource() []string {
 	return marked
 }
 
-// removeNodeSource removes the marked NodeSource files, and the key along with a marked sources
-// file. The host's own files stay.
+// removeNodeSource removes the marked NodeSource files, and the key along with the file that
+// marks it as setup's. The host's own files stay.
 func (h Host) removeNodeSource() ([]string, error) {
 	var removed []string
 	for _, p := range h.markedNodeSource() {
@@ -155,7 +155,7 @@ func (h Host) removeNodeSource() ([]string, error) {
 			return removed, err
 		}
 		removed = append(removed, p)
-		if p == NodeSourceSourcesPath && h.exists(NodeSourceKeyPath) {
+		if p == NodeSourceKeyMarkPath && h.exists(NodeSourceKeyPath) {
 			if err := os.Remove(h.path(NodeSourceKeyPath)); err != nil {
 				return removed, err
 			}

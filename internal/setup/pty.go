@@ -19,28 +19,18 @@ const maxCapture = 1 << 20
 // in is a terminal, it takes its window size and is in raw mode meanwhile. It returns what cmd
 // printed (the last MiB) and cmd's exit error.
 func runInPTY(in *os.File, out io.Writer, cmd *exec.Cmd) ([]byte, error) {
-	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	master, mfd, slave, err := openPTY()
 	if err != nil {
 		return nil, err
 	}
 	defer master.Close()
-	mfd := int(master.Fd())
-	if err := unix.IoctlSetPointerInt(mfd, unix.TIOCSPTLCK, 0); err != nil {
-		return nil, fmt.Errorf("unlocking the pseudo-terminal: %v", err)
-	}
-	n, err := unix.IoctlGetInt(mfd, unix.TIOCGPTN)
-	if err != nil {
-		return nil, fmt.Errorf("numbering the pseudo-terminal: %v", err)
-	}
-	slave, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
-	}
 	defer slave.Close()
 
 	fd := int(in.Fd())
 	done := make(chan struct{})
-	if old, err := unix.IoctlGetTermios(fd, unix.TCGETS); err == nil {
+	old, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	terminal := err == nil
+	if terminal {
 		resize := func() {
 			if ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ); err == nil {
 				unix.IoctlSetWinsize(mfd, unix.TIOCSWINSZ, ws)
@@ -135,7 +125,37 @@ func runInPTY(in *os.File, out io.Writer, cmd *exec.Cmd) ([]byte, error) {
 	close(done)
 	<-copiedIn
 	// Something cmd started may still hold the pseudo-terminal; what cmd printed is there by now.
-	master.SetReadDeadline(time.Now().Add(time.Second))
+	if master.SetReadDeadline(time.Now().Add(time.Second)) != nil {
+		master.Close()
+	}
 	<-copiedOut
+	if terminal {
+		io.WriteString(out, "\x1b[?2004l\x1b[?25h") // bracketed paste off, cursor on, whatever cmd left
+	}
 	return capture, err
+}
+
+// openPTY opens a pseudo-terminal. The master is non-blocking and never handed out by Fd, so
+// Go's poller reads it and read deadlines work; mfd is its descriptor for ioctls.
+func openPTY() (master *os.File, mfd int, slave *os.File, err error) {
+	mfd, err = unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("opening a pseudo-terminal: %v", err)
+	}
+	master = os.NewFile(uintptr(mfd), "/dev/ptmx")
+	if err := unix.IoctlSetPointerInt(mfd, unix.TIOCSPTLCK, 0); err != nil {
+		master.Close()
+		return nil, 0, nil, fmt.Errorf("unlocking the pseudo-terminal: %v", err)
+	}
+	n, err := unix.IoctlGetInt(mfd, unix.TIOCGPTN)
+	if err != nil {
+		master.Close()
+		return nil, 0, nil, fmt.Errorf("numbering the pseudo-terminal: %v", err)
+	}
+	slave, err = os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		master.Close()
+		return nil, 0, nil, err
+	}
+	return master, mfd, slave, nil
 }

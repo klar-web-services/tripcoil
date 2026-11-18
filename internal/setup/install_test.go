@@ -169,6 +169,9 @@ Pin-Priority: 600
 			t.Errorf("%s mode %v", p, fi.Mode())
 		}
 	}
+	if f.read(t, NodeSourceKeyMarkPath) != AddedMarker+"\n" {
+		t.Error("the key's mark was not written")
+	}
 	if fi, _ := os.Stat(filepath.Join(f.Root, "etc/apt/keyrings")); fi.Mode().Perm() != 0o755 {
 		t.Errorf("keyrings mode %v", fi.Mode())
 	}
@@ -241,6 +244,9 @@ func TestClaudeCodeKeepsAnExistingKey(t *testing.T) {
 	if got := f.read(t, NodeSourceKeyPath); got != "the host's key\n" {
 		t.Fatalf("key %q", got)
 	}
+	if _, err := os.Stat(filepath.Join(f.Root, NodeSourceKeyMarkPath)); err == nil {
+		t.Fatal("the host's key was marked as setup's")
+	}
 	if !strings.HasPrefix(f.read(t, NodeSourceSourcesPath), AddedMarker+"\n") {
 		t.Fatal("the sources file was not written")
 	}
@@ -260,9 +266,11 @@ func TestClaudeCodeRefusesTheHostsOldNodeSource(t *testing.T) {
 			f.replies[tc.query] = tc.reply
 			os.MkdirAll(filepath.Dir(filepath.Join(f.Root, tc.path)), 0o755)
 			os.WriteFile(filepath.Join(f.Root, tc.path), []byte(tc.data), 0o644)
-			_, _, err := f.claudeCode(Options{Yes: true})
-			if err == nil || !strings.Contains(err.Error(), tc.path+" is the host's own NodeSource repository") || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("got %v", err)
+			if did, ok, err := f.claudeCode(Options{Yes: true}); did || ok || err != nil {
+				t.Fatalf("got %v %v %v", did, ok, err)
+			}
+			if out := f.out.String(); !strings.Contains(out, "! Cannot install Claude Code: "+tc.path+" is the host's own NodeSource repository") || !strings.Contains(out, tc.want) {
+				t.Fatalf("output:\n%s", out)
 			}
 			if f.read(t, tc.path) != tc.data || slices.ContainsFunc(f.cmds, func(c string) bool { return strings.Contains(c, "install") }) {
 				t.Fatalf("changed something: %q", f.cmds)

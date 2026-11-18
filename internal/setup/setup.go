@@ -183,15 +183,26 @@ func (h Host) Setup(o Options) (bool, error) {
 		changed = changed || did
 	}
 	key := map[string]string{"claude": claudeTokenKey, "codex": "CODEX_API_KEY"}[name]
+	hasToken := false
 	if name != "none" {
 		cli, err := h.FindCLI(c.Review.Command, name)
 		installed = err == nil
-		if name == "claude" && installed && envFile != "" {
+		if err != nil && c.Review.Command != "" {
+			fmt.Fprintf(h.Out, "! review.command: %v; correct it in %s.\n", err, config.DefaultPath)
+		}
+		hasToken, err = h.hasToken(envFile, key)
+		switch {
+		case err != nil:
+			fmt.Fprintf(h.Out, "! %s: %v\n", envFile, err)
+		case name != "claude" || !installed || envFile == "":
+		case hasToken:
+			fmt.Fprintf(h.Out, "· %s has a token for Claude Code.\n", envFile)
+		default:
 			did, err := h.claudeToken(o, cli, envFile)
 			if err != nil {
 				return false, err
 			}
-			changed = changed || did
+			changed, hasToken = changed || did, did
 		}
 	}
 	did, err = h.service(m)
@@ -206,11 +217,11 @@ func (h Host) Setup(o Options) (bool, error) {
 		fmt.Fprintln(h.Out, "review.agent is none, so reports are audit-only.")
 		return true, nil
 	}
-	hasToken := h.hasToken(envFile, key)
 	if installed && hasToken {
 		return true, nil
 	}
-	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed, hasToken))
+	// A rejected review.command was named above; installing the CLI would not help.
+	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed || c.Review.Command != "", hasToken))
 	return false, nil
 }
 
@@ -484,8 +495,12 @@ func nextSteps(name, envFile, sudo string, installed, hasToken bool) string {
 	if hasToken {
 		steps = steps[:1]
 		s = "\nNext, install the agent CLI:\n"
-	} else if installed && name == "claude" {
+	}
+	if installed {
 		steps = steps[1:]
+	}
+	if len(steps) == 0 {
+		s = "\n"
 	}
 	for i, step := range steps {
 		s += fmt.Sprintf("  %d. %s\n", i+1, step)
