@@ -77,7 +77,12 @@ func GroupFindings(aud *audit.Audit, inv *inventory.Inventory) Groups {
 		}
 		a.findings = append(a.findings, f)
 	}
-	tier := func(f *audit.Finding) int { return slices.Index(audit.Tiers, f.Risk) }
+	tier := func(f *audit.Finding) int { // an unknown tier sorts after low, where it is counted
+		if i := slices.Index(audit.Tiers, f.Risk); i >= 0 {
+			return i
+		}
+		return len(audit.Tiers)
+	}
 	out := Groups{SchemaVersion: "1", Groups: []Group{}}
 	for _, a := range byID {
 		g := &a.g

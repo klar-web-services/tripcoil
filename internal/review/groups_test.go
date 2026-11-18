@@ -23,6 +23,7 @@ func TestGroupFindings(t *testing.T) {
 		kernel("f:k1", "low", "\n\ndrm/amd/display: fix a leak\n\nMore text.", "6.8.13"),
 		kernel("f:k2", "medium", "\n\nDRM: check a pointer", "6.9.1"),
 		kernel("f:k3", "low", "  tls: fix handling of zero-length records", "6.8.13"),
+		kernel("f:k0", "", "  tls: an unknown risk tier sorts after low"),
 		kernel("f:k4", "low", "\n\nA flaw was found in something without a subsystem."),
 		kernel("f:k5", "high", "\n\nnet/mlx5e: fix a race", "6.8.13"),
 		// a distribution kernel package matched by Grype counts as the kernel too
@@ -53,8 +54,8 @@ func TestGroupFindings(t *testing.T) {
 		{ssl, "openssl 3.0.13 in nginx, sshd", RiskCounts{Critical: 1, Medium: 1}, 0, []string{}, []string{"proc:nginx", "proc:sshd"}, []string{"f:p2", "f:p1"}},
 		{"kernel:net", "Linux kernel net subsystem", RiskCounts{High: 1, Low: 1}, 1, []string{"6.8.13"}, []string{"kernel"}, []string{"f:k5", "f:k6"}},
 		{"kernel:drm", "Linux kernel drm subsystem", RiskCounts{Medium: 1, Low: 1}, 0, []string{"6.8.13", "6.9.1"}, []string{"kernel"}, []string{"f:k2", "f:k1"}},
+		{"kernel:tls", "Linux kernel tls subsystem", RiskCounts{Low: 2}, 0, []string{"6.8.13"}, []string{"kernel"}, []string{"f:k3", "f:k0"}},
 		{"kernel:other", "Linux kernel, subsystem not named in the description", RiskCounts{Low: 1}, 0, []string{}, []string{"kernel"}, []string{"f:k4"}},
-		{"kernel:tls", "Linux kernel tls subsystem", RiskCounts{Low: 1}, 0, []string{"6.8.13"}, []string{"kernel"}, []string{"f:k3"}},
 		{img, "openssl 3.0.13 in web", RiskCounts{Low: 1}, 0, []string{}, []string{"ctr:web"}, []string{"f:p3"}},
 	}
 	if !reflect.DeepEqual(s, want) {

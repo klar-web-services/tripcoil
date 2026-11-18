@@ -247,6 +247,18 @@ func TestReviewReadsTheEntriesFile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.runDir, "agent", "entries.jsonl")); err == nil {
 		t.Error("a linked file was kept")
 	}
+
+	e = newEnv(t, "claude", func(_ context.Context, s sandbox.Spec) (sandbox.Result, error) {
+		os.WriteFile(filepath.Join(s.Home(), "entries.jsonl"), []byte("{}\n"), 0o600)
+		s.Stdout.Write(final)
+		return sandbox.Result{}, nil
+	})
+	os.MkdirAll(filepath.Join(e.runDir, "agent", "entries.jsonl"), 0o700) // in the copy's way
+	out, err = e.h.Review(context.Background(), e.runDir)
+	if err != nil || string(out.Entries) != "{}\n" || len(out.Warnings) != 1 || out.Warnings[0].Code != problem.RunFolderUnwritable ||
+		out.Warnings[0].Kind != problem.Warning || !strings.Contains(out.Warnings[0].Message, "cannot keep a copy of the agent's entries.jsonl") {
+		t.Fatalf("%v entries %q warnings %v", err, out.Entries, out.Warnings)
+	}
 }
 
 func TestReviewFailures(t *testing.T) {

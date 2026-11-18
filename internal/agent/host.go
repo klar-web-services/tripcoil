@@ -231,7 +231,10 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 				"the agent's %s was ignored: %v", review.EntriesFile, rerr))
 		}
 		if data != nil {
-			os.WriteFile(filepath.Join(agentDir, review.EntriesFile), data, 0o600)
+			if err := os.WriteFile(filepath.Join(agentDir, review.EntriesFile), data, 0o600); err != nil {
+				entryWarns = append(entryWarns, problem.New(problem.Warning, problem.RunFolderUnwritable, "review",
+					"cannot keep a copy of the agent's %s: %v", review.EntriesFile, err))
+			}
 		}
 		out.Entries = data
 	}

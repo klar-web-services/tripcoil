@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
@@ -277,5 +280,31 @@ func TestValidateEntriesOnlyInTheFile(t *testing.T) {
 		if _, _, err := Validate(output(), file, aud, inv); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "addresses none") {
 			t.Errorf("%s: got %v, want ErrInvalid", name, err)
 		}
+	}
+}
+
+func TestValidateJunkEntriesFileIsCheap(t *testing.T) {
+	aud, inv := fixtureAudit()
+	junk := bytes.Repeat([]byte("x\n"), MaxEntriesFile/2)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	r, warns, err := Validate(output(entry(nil)), junk, aud, inv)
+	took := time.Since(start)
+	runtime.ReadMemStats(&after)
+	if err != nil || len(r.Findings) != 1 || len(warns) != 1 {
+		t.Fatalf("%v %v", err, warns)
+	}
+	if !strings.HasPrefix(warns[0].Message, "10000 review entries were dropped") || !strings.Contains(warns[0].Message, "and 9990 more, and the rest of entries.jsonl was ignored") || len(warns[0].Message) > 2000 {
+		t.Errorf("warning: %.500s", warns[0].Message)
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 50<<20 || took > 5*time.Second {
+		t.Errorf("a junk file cost %d MiB and %v", alloc>>20, took)
+	}
+}
+
+func TestPromptNamesTheEntriesLimit(t *testing.T) {
+	if !strings.Contains(Prompt, fmt.Sprintf("under %d MiB", MaxEntriesFile>>20)) {
+		t.Error("the prompt does not name MaxEntriesFile")
 	}
 }

@@ -44,6 +44,10 @@ var (
 // MaxEntriesFile is the largest entries file Tripcoil reads.
 const MaxEntriesFile = 64 << 20
 
+// maxBadLines is how many lines of the entries file that are not entries Tripcoil reads before it
+// ignores the rest.
+const maxBadLines = 10000
+
 // EntriesFile is the file in the agent's home where it may write review entries, one JSON object
 // per line, besides those in its final output.
 const EntriesFile = "entries.jsonl"
@@ -86,15 +90,28 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 		}
 		all = append(all, e)
 	}
+	// Only the first messages are kept: the agent controls the file, and each line could cost one.
 	var dropped []string
-	for i, line := range bytes.Split(entries, []byte("\n")) {
-		if len(bytes.TrimSpace(line)) == 0 {
+	ndropped, bad, rest := 0, 0, ""
+	drop := func(msg string) {
+		if ndropped++; len(dropped) < 10 {
+			dropped = append(dropped, msg)
+		}
+	}
+	n := 0
+	for line := range bytes.Lines(entries) {
+		if n++; len(bytes.TrimSpace(line)) == 0 {
 			continue
+		}
+		if bad == maxBadLines {
+			rest = fmt.Sprintf(", and the rest of %s was ignored after %d lines that are not entries", EntriesFile, maxBadLines)
+			break
 		}
 		e, err := decodeEntry(line)
 		if err != nil {
+			bad++
 			why := strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
-			dropped = append(dropped, fmt.Sprintf("%s line %d (%s)", EntriesFile, i+1, shorten(why)))
+			drop(fmt.Sprintf("%s line %d (%s)", EntriesFile, n, shorten(why)))
 			continue
 		}
 		all = append(all, e)
@@ -116,7 +133,7 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 			why = e.broken()
 		}
 		if why != "" {
-			dropped = append(dropped, fmt.Sprintf("%s (%s)", shorten(e.FindingID), why))
+			drop(fmt.Sprintf("%s (%s)", shorten(e.FindingID), why))
 			continue
 		}
 		seen[e.FindingID] = true
@@ -124,17 +141,16 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	}
 	out.NotReviewed = notReviewed(aud, out.Findings)
 	if len(ids) > 0 && len(out.NotReviewed) == len(ids) {
-		return nil, nil, fmt.Errorf("%w: it addresses none of the %d findings in audit.json (%d entries dropped%s)", ErrInvalid, len(ids), len(dropped), firstReasons(dropped))
+		return nil, nil, fmt.Errorf("%w: it addresses none of the %d findings in audit.json (%d entries dropped%s%s)", ErrInvalid, len(ids), ndropped, firstReasons(dropped), rest)
 	}
 	var warns []problem.Problem
-	if len(dropped) > 0 {
-		shown := dropped[:min(len(dropped), 10)]
+	if ndropped > 0 {
 		more := ""
-		if len(dropped) > 10 {
-			more = fmt.Sprintf(" and %d more", len(dropped)-10)
+		if ndropped > len(dropped) {
+			more = fmt.Sprintf(" and %d more", ndropped-len(dropped))
 		}
 		warns = append(warns, problem.New(problem.Warning, problem.ReviewEntriesDropped, "review",
-			"%d review entries were dropped: %s%s", len(dropped), strings.Join(shown, "; "), more))
+			"%d review entries were dropped: %s%s%s", ndropped, strings.Join(dropped, "; "), more, rest))
 	}
 	return out, warns, nil
 }

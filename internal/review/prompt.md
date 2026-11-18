@@ -17,7 +17,8 @@ Address every finding in `audit.json` with one entry:
 
 - Review critical and high findings one by one.
 - For the rest, work through `groups.json`. Judge each group once (for example, a kernel subsystem whose modules are not loaded and cannot be autoloaded by unprivileged users here, or a package whose vulnerable function is not used), then write one entry per finding of the group with the group's reasoning and evidence. A script is the efficient way. Give a finding of a group its own entry when it needs its own judgment.
-- Write entries to `$HOME/entries.jsonl` as you go, one JSON object per line, with exactly the keys of an entry in the final result. Entries there count like those in your final result, and work written there is not lost on a long run. Your final `findings` may hold the rest, or be empty when every entry is in the file. An entry in both counts once, from the final result.
+- Write entries to `$HOME/entries.jsonl` as you go, one JSON object per line, with exactly the keys of an entry in the final result, and keep the file under 64 MiB. Entries there count like those in your final result, and writing them as you go keeps your final message small. Your final `findings` may hold the rest, or be empty when every entry is in the file. An entry in both counts once, from the final result.
+- Write each finding once. To change entries, rewrite the file: a later line for a finding already in it is ignored.
 - Spend your effort on the findings with the highest risk tier first. If you cannot address all of them, address the most important ones well rather than all of them badly: findings without an entry are reported as not reviewed.
 
 You may research on the web: advisories, distribution security trackers, changelogs.
