@@ -27,13 +27,17 @@ const logPath = "/var/log/tripcoil.log"
 // Every step finds out what is there, so a second run succeeds; a step that fails does not stop
 // the others, and Uninstall then returns an error.
 func (h Host) Uninstall(o UninstallOptions) error {
+	underHome := strings.HasPrefix(h.Exe, "/home/") || h.Exe == "/home"
 	if !o.Yes {
-		what := fmt.Sprintf("the service, %s (config and token), %s (runs and cache), the user %s",
-			filepath.Dir(config.DefaultPath), o.StateDir, agent.UserName)
+		what := []string{"the service", filepath.Dir(config.DefaultPath) + " (config and token)", o.StateDir + " (runs and cache)", "the user " + agent.UserName}
 		if len(h.markedNodeSource()) > 0 {
-			what += ", NodeSource's repository"
+			what = append(what, "NodeSource's repository")
 		}
-		a, err := h.ask(fmt.Sprintf("Remove Tripcoil from this host: %s and %s? yes or no", what, h.Exe), "no", "yes", "no")
+		if !underHome {
+			what = append(what, h.Exe)
+		}
+		last := len(what) - 1
+		a, err := h.ask(fmt.Sprintf("Remove Tripcoil from this host: %s and %s? yes or no", strings.Join(what[:last], ", "), what[last]), "no", "yes", "no")
 		if err != nil {
 			return errors.New("no answer; run tripcoil uninstall with --yes to remove without asking")
 		}
@@ -67,15 +71,27 @@ func (h Host) Uninstall(o UninstallOptions) error {
 		step(removed, err, "Deleted the nftables table inet tripcoil.", "The nftables table inet tripcoil was not there.")
 	}
 	removed, err := h.removeNodeSource()
-	step(len(removed) > 0, err, "Removed NodeSource's repository: "+strings.Join(removed, ", ")+".", "Setup added no NodeSource repository.")
+	if len(removed) > 0 {
+		step(true, nil, "Removed NodeSource's repository: "+strings.Join(removed, ", ")+".", "")
+	}
+	if err != nil || len(removed) == 0 {
+		step(false, err, "", "Setup added no NodeSource repository.")
+	}
 	for _, dir := range []string{filepath.Dir(config.DefaultPath), o.StateDir} {
 		removed, err := h.removeDir(dir)
 		step(removed, err, "Removed "+dir+".", dir+" was not there.")
 	}
 	removedUser, err := h.removeAgentUser()
 	step(removedUser, err, "Removed the user and group "+agent.UserName+".", "The user "+agent.UserName+" was not there.")
-	removedExe, err := h.remove(h.Exe)
-	step(removedExe, err, "Removed "+h.Exe+".", h.Exe+" was not there.")
+	switch {
+	case underHome:
+		fmt.Fprintf(h.Out, "· %s is under /home; it stays.\n", h.Exe)
+	case failed: // the binary stays so that a rerun can finish the job
+		fmt.Fprintf(h.Out, "! Kept %s so tripcoil uninstall can run again once the above is fixed.\n", h.Exe)
+	default:
+		removedExe, err := h.remove(h.Exe)
+		step(removedExe, err, "Removed "+h.Exe+".", h.Exe+" was not there.")
+	}
 	fmt.Fprintf(h.Out, "Node.js, npm, Claude Code and bubblewrap stay installed; remove Claude Code with: %snpm uninstall -g %s\n", h.Sudo, claudePackage)
 	if failed {
 		return errors.New("some steps failed; fix what they name, then run tripcoil uninstall again")
@@ -91,6 +107,7 @@ func (h Host) removeService(m Manager) (bool, error) {
 			return false, fmt.Errorf("systemctl disable --now tripcoil.service: %v: %s", err, bytes.TrimSpace(out))
 		}
 		h.Run("systemctl", "stop", sandbox.UnitPrefix+"*") // reviews still running
+		h.Run("systemctl", "stop", "tripcoil-run-*")       // manual runs' scopes
 		removed, err := h.remove(UnitPath)
 		if err != nil || !removed {
 			return false, err
@@ -101,7 +118,7 @@ func (h Host) removeService(m Manager) (bool, error) {
 		return true, nil
 	}
 	var steps [][]string
-	if h.exists(InitScriptPath) {
+	if _, err := h.Run("rc-service", "tripcoil", "status"); err == nil {
 		steps = append(steps, []string{"rc-service", "tripcoil", "stop"})
 	}
 	if out, _ := h.Run("rc-update", "show", "default"); hasService(out) {
@@ -123,14 +140,14 @@ func (h Host) removeService(m Manager) (bool, error) {
 	return removed, nil
 }
 
-// deleteTable deletes the agent's nftables table.
+// deleteTable deletes the agent's nftables table, if it is there.
 func (h Host) deleteTable() (bool, error) {
+	if _, err := h.Run("nft", "list", "table", "inet", "tripcoil"); err != nil {
+		return false, nil
+	}
 	out, err := h.Run("nft", "delete", "table", "inet", "tripcoil")
 	if err == nil {
 		return true, nil
-	}
-	if bytes.Contains(out, []byte("No such file or directory")) {
-		return false, nil
 	}
 	return false, fmt.Errorf("nft delete table inet tripcoil: %v: %s", err, bytes.TrimSpace(out))
 }
@@ -196,10 +213,13 @@ func (h Host) removeAgentUser() (bool, error) {
 		removed = true
 	}
 	if h.GroupExists(run.AgentGroup) {
-		if out, err := h.Run(delGroup, run.AgentGroup); err != nil {
+		out, err := h.Run(delGroup, run.AgentGroup)
+		switch {
+		case err == nil:
+			removed = true
+		case !bytes.Contains(out, []byte("does not exist")): // otherwise it went with the user
 			return removed, fmt.Errorf("%s %s: %v: %s", delGroup, run.AgentGroup, err, bytes.TrimSpace(out))
 		}
-		removed = true
 	}
 	return removed, nil
 }

@@ -9,6 +9,7 @@ import (
 )
 
 // installed is a fake host that setup has set up, with userdel and nft, and a state folder.
+// Removing the user, the group, the service or the table makes it absent.
 func installed(t *testing.T, m Manager) (*fakeHost, UninstallOptions) {
 	t.Helper()
 	f := newFake(t, m)
@@ -33,6 +34,14 @@ func installed(t *testing.T, m Manager) (*fakeHost, UninstallOptions) {
 			case "rc-update":
 				if len(args) > 0 && args[0] == "del" {
 					f.replies["rc-update show default"] = ""
+				}
+			case "rc-service":
+				if len(args) > 1 && args[1] == "stop" {
+					f.fail["rc-service tripcoil status"] = true
+				}
+			case "nft":
+				if len(args) > 0 && args[0] == "delete" {
+					f.fail["nft list"] = true
 				}
 			}
 		}
@@ -62,8 +71,8 @@ func TestUninstallSystemdTwice(t *testing.T) {
 	if err := f.Uninstall(o); err != nil {
 		t.Fatalf("%v\n%s", err, f.out.String())
 	}
-	want := []string{"systemctl disable --now tripcoil.service", "systemctl stop tripcoil-review-*", "systemctl daemon-reload",
-		"nft delete table inet tripcoil", "userdel tripcoil-agent"}
+	want := []string{"systemctl disable --now tripcoil.service", "systemctl stop tripcoil-review-*", "systemctl stop tripcoil-run-*", "systemctl daemon-reload",
+		"nft list table inet tripcoil", "nft delete table inet tripcoil", "userdel tripcoil-agent"}
 	if !slices.Equal(f.cmds, want) {
 		t.Errorf("commands %q, want %q", f.cmds, want)
 	}
@@ -80,10 +89,12 @@ func TestUninstallSystemdTwice(t *testing.T) {
 	f.cmds = nil
 	f.out.Reset()
 	f.replies["systemctl disable --now tripcoil.service"] = "Failed to disable unit: Unit tripcoil.service does not exist\n"
-	f.replies["nft delete table inet tripcoil"] = "Error: Could not process rule: No such file or directory\n"
-	f.fail["systemctl disable"], f.fail["systemctl stop"], f.fail["nft delete"] = true, true, true
+	f.fail["systemctl disable"], f.fail["systemctl stop"] = true, true
 	if err := f.Uninstall(o); err != nil {
 		t.Fatalf("second run: %v\n%s", err, f.out.String())
+	}
+	if slices.Contains(f.cmds, "nft delete table inet tripcoil") {
+		t.Errorf("second run deleted a missing table: %q", f.cmds)
 	}
 	if out := f.out.String(); strings.Contains(out, "✓") || strings.Contains(out, "!") || strings.Count(out, "· ") != 7 {
 		t.Errorf("second run:\n%s", out)
@@ -97,8 +108,8 @@ func TestUninstallOpenRC(t *testing.T) {
 	if err := f.Uninstall(o); err != nil {
 		t.Fatalf("%v\n%s", err, f.out.String())
 	}
-	want := []string{"rc-update show default", "rc-service tripcoil stop", "rc-update del tripcoil default",
-		"nft delete table inet tripcoil", "deluser tripcoil-agent", "delgroup tripcoil-agent"}
+	want := []string{"rc-service tripcoil status", "rc-update show default", "rc-service tripcoil stop", "rc-update del tripcoil default",
+		"nft list table inet tripcoil", "nft delete table inet tripcoil", "deluser tripcoil-agent", "delgroup tripcoil-agent"}
 	if !slices.Equal(f.cmds, want) {
 		t.Errorf("commands %q, want %q", f.cmds, want)
 	}
@@ -110,9 +121,7 @@ func TestUninstallOpenRC(t *testing.T) {
 
 	f.cmds = nil
 	f.out.Reset()
-	f.replies["nft delete table inet tripcoil"] = "Error: Could not process rule: No such file or directory\n"
-	f.fail["nft delete"] = true
-	if err := f.Uninstall(o); err != nil || !slices.Equal(f.cmds, []string{"rc-update show default", "nft delete table inet tripcoil"}) ||
+	if err := f.Uninstall(o); err != nil || !slices.Equal(f.cmds, []string{"rc-service tripcoil status", "rc-update show default", "nft list table inet tripcoil"}) ||
 		strings.Contains(f.out.String(), "✓") {
 		t.Errorf("second run: %v, commands %q\n%s", err, f.cmds, f.out.String())
 	}
@@ -209,12 +218,72 @@ func TestUninstallKeepsGoingAfterAFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "some steps failed") {
 		t.Fatalf("err %v", err)
 	}
-	if !strings.Contains(f.out.String(), "! systemctl disable --now tripcoil.service: exit status 3: Failed to connect to bus\n") {
-		t.Errorf("output:\n%s", f.out.String())
+	if out := f.out.String(); !strings.Contains(out, "! systemctl disable --now tripcoil.service: exit status 3: Failed to connect to bus\n") ||
+		!strings.Contains(out, "! Kept /usr/local/bin/tripcoil so tripcoil uninstall can run again once the above is fixed.\n") {
+		t.Errorf("output:\n%s", out)
 	}
 	f.read(t, UnitPath)
-	f.gone(t, "/etc/tripcoil", "/var/lib/tripcoil", "/usr/local/bin/tripcoil")
+	f.read(t, "/usr/local/bin/tripcoil")
+	f.gone(t, "/etc/tripcoil", "/var/lib/tripcoil")
 	if !slices.Contains(f.cmds, "userdel tripcoil-agent") {
 		t.Errorf("commands %q", f.cmds)
+	}
+}
+
+func TestUninstallKeepsABinaryUnderHome(t *testing.T) {
+	f, o := installed(t, Systemd)
+	f.Exe = "/home/owner/bin/tripcoil"
+	os.MkdirAll(filepath.Join(f.Root, "home/owner/bin"), 0o755)
+	os.WriteFile(filepath.Join(f.Root, f.Exe), nil, 0o755)
+	o.Yes = false
+	f.In = strings.NewReader("yes\n")
+	if err := f.Uninstall(o); err != nil {
+		t.Fatalf("%v\n%s", err, f.out.String())
+	}
+	f.read(t, f.Exe)
+	if out := f.out.String(); !strings.Contains(out, "(runs and cache) and the user tripcoil-agent? yes or no [no]: ") ||
+		!strings.Contains(out, "· /home/owner/bin/tripcoil is under /home; it stays.\n") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestUninstallGroupdel(t *testing.T) {
+	// The group outlives userdel.
+	f, o := installed(t, Systemd)
+	f.users["group"] = true
+	if err := f.Uninstall(o); err != nil || !slices.Contains(f.cmds, "groupdel tripcoil-agent") {
+		t.Errorf("%v, commands %q\n%s", err, f.cmds, f.out.String())
+	}
+
+	// The group was gone by the time groupdel ran.
+	f, o = installed(t, Systemd)
+	f.users["group"] = true
+	f.replies["groupdel tripcoil-agent"] = "groupdel: group 'tripcoil-agent' does not exist\n"
+	f.fail["groupdel"] = true
+	if err := f.Uninstall(o); err != nil || !strings.Contains(f.out.String(), "✓ Removed the user and group tripcoil-agent.\n") {
+		t.Errorf("%v\n%s", err, f.out.String())
+	}
+	f.gone(t, "/usr/local/bin/tripcoil")
+}
+
+func TestUninstallReportsNodeSourceFilesBeforeAFailure(t *testing.T) {
+	f, o := installed(t, Systemd)
+	write := func(p, data string) {
+		os.MkdirAll(filepath.Dir(filepath.Join(f.Root, p)), 0o755)
+		os.WriteFile(filepath.Join(f.Root, p), []byte(data), 0o644)
+	}
+	write(NodeSourceSourcesPath, AddedMarker+"\nTypes: deb\n")
+	write(NodeSourcePinPath, AddedMarker+"\nPackage: nodejs\n")
+	if os.Geteuid() == 0 {
+		t.Skip("root removes files from a read-only folder")
+	}
+	pins := filepath.Dir(filepath.Join(f.Root, NodeSourcePinPath))
+	os.Chmod(pins, 0o555) // the pin cannot be removed
+	t.Cleanup(func() { os.Chmod(pins, 0o755) })
+	if err := f.Uninstall(o); err == nil {
+		t.Fatal("no error")
+	}
+	if out := f.out.String(); !strings.Contains(out, "✓ Removed NodeSource's repository: "+NodeSourceSourcesPath+".\n! remove ") {
+		t.Errorf("output:\n%s", out)
 	}
 }
