@@ -153,7 +153,7 @@ func (h Host) planNode() (nodePlan, error) {
 			}
 		}
 		if nodeMajor(candidate) < 22 {
-			return p, h.tooOld("Alpine's nodejs", candidate, "Alpine 3.21 or later", "apk update")
+			return p, h.tooOld("Alpine's nodejs", candidate, "Alpine 3.21 or later", "")
 		}
 		p.cmds = [][]string{{"apk", "add", "nodejs", "npm"}}
 	case "pacman":
@@ -232,7 +232,10 @@ func (h Host) nodeSourceArch(amd, arm string) (string, error) {
 // tooOld says the distribution's nodejs is too old, or that there is none, which an update
 // command may fix.
 func (h Host) tooOld(what, version, needs, update string) error {
-	if version == "" {
+	switch {
+	case version == "" && update == "":
+		return errors.New("no nodejs package was found; check the repositories in /etc/apk/repositories, then run setup again")
+	case version == "":
 		return fmt.Errorf("no nodejs package was found; run %s%s first, then run setup again", h.Sudo, update)
 	}
 	return fmt.Errorf("%s is too old (%s): Claude Code needs Node.js 22 (%s); install Node.js 22 or later and npm, then %s%s", what, version, needs, h.Sudo, claudeInstall)

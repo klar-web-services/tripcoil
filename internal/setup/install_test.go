@@ -348,7 +348,7 @@ func TestClaudeCodeCannotInstall(t *testing.T) {
 		{"apk too old", "apk", "Alpine's nodejs is too old (20.15.1-r0): Claude Code needs Node.js 22 (Alpine 3.21 or later)", func(f *fakeHost) {
 			f.replies["apk search -x nodejs"] = "nodejs-20.15.1-r0\n"
 		}},
-		{"apk no package", "apk", "no nodejs package was found; run apk update first, then run setup again", func(*fakeHost) {}},
+		{"apk no package", "apk", "no nodejs package was found; check the repositories in /etc/apk/repositories", func(*fakeHost) {}},
 		{"pacman too old", "pacman", "pacman's nodejs is too old (20.1.0-1)", func(f *fakeHost) {
 			f.replies["pacman -Si nodejs"] = "Name            : nodejs\nVersion         : 20.1.0-1\n"
 		}},

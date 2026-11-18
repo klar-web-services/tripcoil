@@ -24,10 +24,10 @@ sudo tripcoil doctor    # checks the setup, the agent CLI and its sandbox
 sudo tripcoil run       # one run now; the service runs every 6 hours
 sudo tripcoil report    # the latest report
 sudo tripcoil status    # the service, the last and next run
-sudo tripcoil uninstall # removes what setup and the installer added
+sudo tripcoil uninstall # removes Tripcoil; Node.js and Claude Code stay
 ```
 
-Without sudo, as root, drop the `sudo`. `setup` asks which agent CLI reviews the runs (Claude
+As root, run the commands without `sudo`. `setup` asks which agent CLI reviews the runs (Claude
 Code, Codex, or none). For Claude Code it offers to install Node.js 22 and Claude Code (with apt,
 dnf, pacman or apk; on older Debian, Ubuntu and RHEL from NodeSource's repository), then runs
 `claude setup-token`, saves the token it prints to `/etc/tripcoil/agent.env` and checks the host.

@@ -51,6 +51,7 @@ func TestExtractToken(t *testing.T) {
 		{"charset after", "   " + testToken + "\x1b(B\x1b[m\r\n", true},
 		{"DCS before", "\x1bPq#0;2;0;0;0\x1b\\   " + testToken + "\r\n", true},
 		{"rule after", "   " + testToken + "\n   ---------------------\n", true},
+		{"cursor up before the next frame", "   " + testToken + "\x1b[2K\x1b[1A\x1b[2K\x1b[GStore this token\r\n", true},
 		{"cursor forward between words", "   " + testToken + "\n   Store\x1b[1Cthis\x1b[1Ctoken\n", true},
 		{"no token", "Error: sign-in was cancelled\r\n", false},
 		{"truncated", "   sk-ant-oat01-BrPERzAb3\r\n\r\n   Store this token securely.\r\n", false},

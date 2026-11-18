@@ -239,7 +239,7 @@ func stripEscapes(b []byte) []byte {
 			for i < len(b) && b[i] >= 0x20 && b[i] <= 0x3f { // parameters and intermediates
 				i++
 			}
-			if i < len(b) && strings.IndexByte("BEHf", b[i]) >= 0 {
+			if i < len(b) && strings.IndexByte("ABEHf", b[i]) >= 0 {
 				out = append(out, '\n')
 			} else if i < len(b) && b[i] == 'C' { // cursor forward stands for spaces
 				out = append(out, ' ')
