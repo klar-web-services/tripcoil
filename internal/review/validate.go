@@ -48,6 +48,13 @@ const MaxEntriesFile = 64 << 20
 // ignores the rest.
 const maxBadLines = 10000
 
+// Limits of one entry, so that an entry cannot make Tripcoil, or review.json, huge.
+const (
+	maxEntryLine = 64 << 10 // a line of the entries file
+	maxListItems = 100      // evidence, fix, sources, corrections
+	maxReasoning = 16 << 10
+)
+
 // EntriesFile is the file in the agent's home where it may write review entries, one JSON object
 // per line, besides those in its final output.
 const EntriesFile = "entries.jsonl"
@@ -107,7 +114,13 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 			rest = fmt.Sprintf(", and the rest of %s was ignored after %d lines that are not entries", EntriesFile, maxBadLines)
 			break
 		}
-		e, err := decodeEntry(line)
+		var e Entry
+		var err error
+		if len(line) > maxEntryLine {
+			err = fmt.Errorf("it is longer than %d KiB", maxEntryLine>>10)
+		} else {
+			e, err = decodeEntry(line)
+		}
 		if err != nil {
 			bad++
 			why := strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
@@ -229,6 +242,10 @@ func (e Entry) broken() string {
 	switch {
 	case strings.TrimSpace(e.Reasoning) == "":
 		return "it has no reasoning"
+	case len(e.Reasoning) > maxReasoning:
+		return fmt.Sprintf("its reasoning is longer than %d KiB", maxReasoning>>10)
+	case max(len(e.Evidence), len(e.Fix), len(e.Sources), len(e.Corrections)) > maxListItems:
+		return fmt.Sprintf("its evidence, fix, sources or corrections have more than %d items", maxListItems)
 	case e.Verdict != FalsePositive && (e.Exploitability == "" || e.Priority == "" || len(e.Fix) == 0):
 		return "it needs exploitability, priority and fix steps"
 	case e.Verdict == Corrected && len(e.Corrections) == 0:

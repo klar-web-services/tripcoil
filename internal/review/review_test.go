@@ -308,3 +308,70 @@ func TestPromptNamesTheEntriesLimit(t *testing.T) {
 		t.Error("the prompt does not name MaxEntriesFile")
 	}
 }
+
+func TestValidateEntryLimits(t *testing.T) {
+	aud, inv := fixtureAudit()
+	many := make([]string, 101)
+	for i := range many {
+		many[i] = "x"
+	}
+	corrections := make([]any, 101)
+	for i := range corrections {
+		corrections[i] = map[string]any{"field": "a", "old": "b", "new": "c", "why": "d"}
+	}
+	hundred := many[:100]
+	data := output(
+		entry(nil),
+		entry(map[string]any{"findingId": "f:0000000000000002", "evidence": hundred, "fix": hundred, "sources": hundred, "reasoning": strings.Repeat("r", 16<<10)}), // at the limits
+		entry(map[string]any{"findingId": "f:0000000000000003", "reasoning": strings.Repeat("r", 16<<10+1)}),
+	)
+	r, warns, err := Validate(data, nil, aud, inv)
+	if err != nil || len(r.Findings) != 2 || len(warns) != 1 || !strings.Contains(warns[0].Message, "f:0000000000000003 (its reasoning is longer than 16 KiB)") {
+		t.Fatalf("%v %v %+v", err, warns, r)
+	}
+	for name, over := range map[string]map[string]any{
+		"evidence":    {"evidence": many},
+		"fix":         {"fix": many},
+		"sources":     {"sources": many},
+		"corrections": {"verdict": "corrected", "corrections": corrections},
+	} {
+		over["findingId"] = "f:0000000000000002"
+		for _, where := range []string{"output", "file"} {
+			out, file := output(entry(nil), entry(over)), []byte(nil)
+			if where == "file" {
+				out, file = output(entry(nil)), lines(entry(over))
+			}
+			r, warns, err := Validate(out, file, aud, inv)
+			if err != nil || len(r.Findings) != 1 || len(warns) != 1 || !strings.Contains(warns[0].Message, "more than 100 items") {
+				t.Errorf("%s in the %s: %v %v", name, where, err, warns)
+			}
+		}
+	}
+	long := lines(entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": strings.Repeat("r", 64<<10)}))
+	r, warns, err = Validate(output(entry(nil)), long, aud, inv)
+	if err != nil || len(r.Findings) != 1 || len(warns) != 1 || !strings.Contains(warns[0].Message, "entries.jsonl line 1 (it is longer than 64 KiB)") {
+		t.Errorf("a long line: %v %v", err, warns)
+	}
+}
+
+func TestValidateHugeEntryIsCheap(t *testing.T) {
+	aud, inv := fixtureAudit()
+	huge := []byte(`{"findingId":"f:0000000000000002","verdict":"confirmed","exploitability":"unknown","priority":"none","reasoning":"r","evidence":[` +
+		strings.TrimSuffix(strings.Repeat(`"",`, (MaxEntriesFile-300)/3), ",") + `],"fix":["x"],"sources":[],"corrections":[],"item":null,"vulnerability":null}` + "\n")
+	small := []byte(`{"findingId":"f:0000000000000003","verdict":"confirmed","exploitability":"unknown","priority":"none","reasoning":"r","evidence":[` +
+		strings.TrimSuffix(strings.Repeat(`"",`, 20000), ",") + `],"fix":["x"],"sources":[],"corrections":[],"item":null,"vulnerability":null}` + "\n")
+	file := append(huge, small...)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	r, warns, err := Validate(output(entry(nil)), file, aud, inv)
+	took := time.Since(start)
+	runtime.ReadMemStats(&after)
+	if err != nil || len(r.Findings) != 1 || len(warns) != 1 || !strings.Contains(warns[0].Message, "line 1 (it is longer than 64 KiB)") ||
+		!strings.Contains(warns[0].Message, "f:0000000000000003 (its evidence, fix, sources or corrections have more than 100 items)") {
+		t.Fatalf("%v %v", err, warns)
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 50<<20 || took > 5*time.Second {
+		t.Errorf("a huge entry cost %d MiB and %v", alloc>>20, took)
+	}
+}
