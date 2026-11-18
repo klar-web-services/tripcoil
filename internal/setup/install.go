@@ -272,6 +272,12 @@ gpgkey=https://rpm.nodesource.com/gpgkey/ns-operations-public.key
 module_hotfixes=1
 `, arch, arch))
 	}
+	if certs, _ := os.ReadDir(h.path("/etc/ssl/certs")); len(certs) == 0 { // apt and the key's download need them for https
+		fmt.Fprintln(h.Out, "… Installing ca-certificates for NodeSource's https repository.")
+		if _, err := h.run("apt-get", "install", "-y", "ca-certificates"); err != nil {
+			return err
+		}
+	}
 	if !h.hostOwned(NodeSourceSourcesPath) && !h.exists(NodeSourceKeyPath) {
 		key, err := h.Fetch(nodeSourceKeyURL)
 		if err != nil {

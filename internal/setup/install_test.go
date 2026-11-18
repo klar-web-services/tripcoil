@@ -136,7 +136,7 @@ func TestClaudeCodeNodeSourceApt(t *testing.T) {
 	if _, _, err := f.claudeCode(Options{}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"apt-get update", "apt-cache policy nodejs", "apt-get update", "apt-get install -y nodejs", "node --version", npmInstall}
+	want := []string{"apt-get update", "apt-cache policy nodejs", "apt-get install -y ca-certificates", "apt-get update", "apt-get install -y nodejs", "node --version", npmInstall}
 	if !slices.Equal(f.cmds, want) {
 		t.Fatalf("commands\n%q\nwant\n%q", f.cmds, want)
 	}
@@ -174,6 +174,20 @@ Pin-Priority: 600
 	}
 	if fi, _ := os.Stat(filepath.Join(f.Root, "etc/apt/keyrings")); fi.Mode().Perm() != 0o755 {
 		t.Errorf("keyrings mode %v", fi.Mode())
+	}
+}
+
+func TestClaudeCodeNodeSourceAptWithCerts(t *testing.T) {
+	f := withoutClaude(t, "apt-get")
+	f.replies["apt-cache policy nodejs"] = "nodejs:\n  Candidate: 18.19.0+dfsg-6\n"
+	os.MkdirAll(filepath.Join(f.Root, "etc/ssl/certs"), 0o755)
+	os.WriteFile(filepath.Join(f.Root, "etc/ssl/certs/ca-certificates.crt"), []byte("certs\n"), 0o644)
+	f.Fetch = func(string) ([]byte, error) { return []byte(armoredKey + "\n"), nil }
+	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(f.cmds, "apt-get install -y ca-certificates") || !slices.Contains(f.cmds, "apt-get install -y nodejs") {
+		t.Fatalf("commands %q", f.cmds)
 	}
 }
 
