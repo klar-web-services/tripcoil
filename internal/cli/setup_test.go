@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/setup"
 )
@@ -53,16 +56,20 @@ func TestSetupStartsTheServiceAfterDoctor(t *testing.T) {
 	d := testDeps(t, nil, nil)
 	var checked string
 	healthy(t, &d, &checked)
-	running := false
+	running, held := false, false
 	d.service = func() (setup.Service, error) {
+		if !held {
+			t.Error("doctor ran without the signals held")
+		}
 		return setup.Service{Manager: setup.Systemd, Installed: true, Running: running}, nil
 	}
+	d.holdSignals = func() func() { held = true; return func() { held = false } }
 	var out, errb bytes.Buffer
 	d.setup = func(o setup.Options, w io.Writer) (bool, func() error, error) {
 		io.WriteString(w, "✓ Installed the tripcoil service; it starts after the checks.\n")
 		return true, func() error {
-			if checked == "" {
-				t.Error("the service started before doctor's checks")
+			if checked == "" || !held {
+				t.Errorf("the service started before doctor's checks (%q), or without the signals held", checked)
 			}
 			running = true
 			io.WriteString(w, "✓ Started the tripcoil service.\n")
@@ -74,6 +81,26 @@ func TestSetupStartsTheServiceAfterDoctor(t *testing.T) {
 		!strings.HasSuffix(out.String(), "Every check passed.\n✓ Started the tripcoil service.\n") {
 		t.Fatalf("exit %d\n%s%s", code, out.String(), errb.String())
 	}
+	if held {
+		t.Error("setup kept the signals held")
+	}
+
+	// Ctrl-C during the checks stops them, and setup still starts the service.
+	running = false
+	d.interrupts = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, cancel
+	}
+	d.doctor.grype = func(ctx context.Context) error { return ctx.Err() }
+	d.setup = func(o setup.Options, w io.Writer) (bool, func() error, error) {
+		return true, func() error { running = true; return nil }, nil
+	}
+	out.Reset()
+	if code := dispatch([]string{"setup"}, &out, &errb, d); code != 1 || !running || !strings.Contains(out.String(), "✗ Grype: context canceled") {
+		t.Fatalf("Ctrl-C: exit %d, started %v\n%s", code, running, out.String())
+	}
+	d.interrupts = func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) }
 
 	running = false
 	d.doctor.grype = func(context.Context) error { return errors.New("no route to host") }
@@ -92,6 +119,17 @@ func TestSetupStartsTheServiceAfterDoctor(t *testing.T) {
 	if code := dispatch([]string{"setup"}, &out, &errb, d); code != 2 || errb.String() != "tripcoil setup: systemctl start tripcoil.service: exit status 1: failed\n" {
 		t.Fatalf("a failed start: exit %d, stderr %q", code, errb.String())
 	}
+}
+
+func TestHoldSignals(t *testing.T) {
+	release := holdSignals()
+	defer release()
+	for _, s := range []syscall.Signal{syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM} {
+		if err := syscall.Kill(os.Getpid(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(100 * time.Millisecond) // the process is still here to finish
 }
 
 func TestSetupRefusals(t *testing.T) {

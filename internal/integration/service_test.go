@@ -24,8 +24,9 @@ CMD ["/sbin/init"]
 `
 
 // serviceScript installs Tripcoil with setup and the stub CLI as claude, with a token in place so
-// that setup runs doctor before the service starts, lets the daemon make its first run, and checks status, doctor, a second setup, a reload with a broken config, a manual
-// run's scope and stopping the service during a review. It prints "CHECK <name> <detail>" lines.
+// that setup runs doctor before the service starts, lets the daemon make its first run, and
+// checks status, doctor, a second setup, a reload with a broken config, a manual run's scope and
+// stopping the service during a review. It prints "CHECK <name> <detail>" lines.
 const serviceScript = `set -u
 B=/opt/tripcoil
 S=/var/lib/tripcoil

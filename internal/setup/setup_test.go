@@ -444,6 +444,20 @@ func TestSetupDefersTheStartWhenReady(t *testing.T) {
 			t.Fatalf("%s again: ready %v, start %v, %v\n%s", m, ready, start != nil, err, f.out.String())
 		}
 
+		status := "systemctl is-active"
+		if m == OpenRC {
+			status = "rc-service tripcoil status"
+		}
+		f.fail[status] = true
+		f.out.Reset()
+		f.cmds = nil
+		ready, start, err = f.Setup(Options{})
+		if err != nil || !ready || start == nil || slices.Contains(f.cmds, startCmd) ||
+			!strings.Contains(f.out.String(), "✓ The tripcoil service starts after the checks.\n") || strings.Contains(f.out.String(), "Nothing changed.") {
+			t.Fatalf("%s stopped: ready %v, %v, commands %q\n%s", m, ready, err, f.cmds, f.out.String())
+		}
+		delete(f.fail, status)
+
 		os.WriteFile(filepath.Join(f.Root, ServiceFiles(m, f.Exe)[0].Path), []byte("old\n"), 0o644)
 		f.out.Reset()
 		f.cmds = nil

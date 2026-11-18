@@ -58,6 +58,11 @@ func runSetup(args []string, stdout, stderr io.Writer, d deps) int {
 	if !ready {
 		return 0
 	}
+	if start != nil {
+		// A dropped SSH session or Ctrl-C during the checks must not leave the service stopped;
+		// Ctrl-C still stops the checks.
+		defer d.holdSignals()()
+	}
 	fmt.Fprintln(stdout, "\nChecking the host (tripcoil doctor):")
 	code := doctor(stdout, d, start != nil)
 	if start != nil {

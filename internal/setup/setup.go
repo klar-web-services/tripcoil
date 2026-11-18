@@ -209,7 +209,7 @@ func (h Host) Setup(o Options) (ready bool, start func() error, err error) {
 		}
 	}
 	ready = name == "none" || installed && hasToken
-	did, step, err := h.service(m, ready)
+	did, wroteService, step, err := h.service(m, ready)
 	if err != nil {
 		return false, nil, err
 	}
@@ -219,8 +219,11 @@ func (h Host) Setup(o Options) (ready bool, start func() error, err error) {
 	case slices.Contains(step, "restart"):
 		note(true, "Updated the tripcoil service; it restarts after the checks.", "")
 		start = func() error { return h.startService(step, "Restarted") }
-	default:
+	case wroteService:
 		note(true, "Installed the tripcoil service; it starts after the checks.", "")
+		start = func() error { return h.startService(step, "Started") }
+	default:
+		note(true, "The tripcoil service starts after the checks.", "")
 		start = func() error { return h.startService(step, "Started") }
 	}
 	if !changed {
@@ -409,8 +412,9 @@ func (h Host) bubblewrap(o Options) (bool, error) {
 }
 
 // service writes the service files that differ, then enables and starts the service, restarting
-// it when its files changed. With deferStart it returns that start or restart instead of running it.
-func (h Host) service(m Manager, deferStart bool) (bool, []string, error) {
+// it when its files changed. It reports whether it did anything and whether it wrote the files.
+// With deferStart it returns that start or restart instead of running it.
+func (h Host) service(m Manager, deferStart bool) (bool, bool, []string, error) {
 	wrote := false
 	for _, f := range ServiceFiles(m, h.Exe) {
 		p := h.path(f.Path)
@@ -418,13 +422,13 @@ func (h Host) service(m Manager, deferStart bool) (bool, []string, error) {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return false, nil, err
+			return false, false, nil, err
 		}
 		if err := os.WriteFile(p, []byte(f.Data), fs.FileMode(f.Mode)); err != nil {
-			return false, nil, err
+			return false, false, nil, err
 		}
 		if err := os.Chmod(p, fs.FileMode(f.Mode)); err != nil {
-			return false, nil, err
+			return false, false, nil, err
 		}
 		wrote = true
 	}
@@ -462,10 +466,10 @@ func (h Host) service(m Manager, deferStart bool) (bool, []string, error) {
 	}
 	for _, s := range steps {
 		if err := h.step(s); err != nil {
-			return false, nil, err
+			return false, false, nil, err
 		}
 	}
-	return wrote || len(steps) > 0 || start != nil, start, nil
+	return wrote || len(steps) > 0 || start != nil, wrote, start, nil
 }
 
 func (h Host) step(s []string) error {

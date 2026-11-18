@@ -64,11 +64,14 @@ type deps struct {
 	lowerPriority func() error
 	// interrupts returns a context that is cancelled by Ctrl-C or SIGTERM.
 	interrupts func() (context.Context, context.CancelFunc)
-	// setup sets the host up (tripcoil setup) and reports whether the review is ready, leaving
-	// the service's start then to start (see setup.Host.Setup); service reports its state.
-	setup   func(o setup.Options, stdout io.Writer) (ready bool, start func() error, err error)
-	service func() (setup.Service, error)
-	doctor  doctorHost
+	// setup sets the host up (tripcoil setup) and reports whether the review is ready; when it
+	// is, start starts the service after the checks (see setup.Host.Setup). service reports the
+	// service's state. holdSignals keeps SIGHUP, SIGINT and SIGTERM from ending the process
+	// until release.
+	setup       func(o setup.Options, stdout io.Writer) (ready bool, start func() error, err error)
+	service     func() (setup.Service, error)
+	holdSignals func() (release func())
+	doctor      doctorHost
 	// uninstall removes what setup and the installer added (tripcoil uninstall).
 	uninstall func(o setup.UninstallOptions, stdout io.Writer) error
 	// hangups delivers each SIGHUP; after is time.After.
@@ -93,13 +96,20 @@ func defaultDeps() deps {
 		interrupts: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
-		setup:     setupHost,
-		service:   serviceHost,
-		doctor:    hostDoctor(StateDir),
-		uninstall: uninstallHost,
-		hangups:   hangups,
-		after:     time.After,
+		setup:       setupHost,
+		service:     serviceHost,
+		holdSignals: holdSignals,
+		doctor:      hostDoctor(StateDir),
+		uninstall:   uninstallHost,
+		hangups:     hangups,
+		after:       time.After,
 	}
+}
+
+func holdSignals() func() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
+	return func() { signal.Stop(c) }
 }
 
 // hangups turns SIGHUP into a channel that holds at most one pending reload.

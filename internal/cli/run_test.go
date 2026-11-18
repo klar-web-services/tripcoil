@@ -48,6 +48,7 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		enterScope:    func([]string) (int, bool, error) { return 0, false, nil },
 		lowerPriority: func() error { return nil },
 		interrupts:    func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
+		holdSignals:   func() func() { return func() {} },
 		setup: func(setup.Options, io.Writer) (bool, func() error, error) {
 			t.Fatal("setup must not run")
 			return false, nil, nil
