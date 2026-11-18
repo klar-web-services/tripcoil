@@ -1,41 +1,16 @@
 name: release
-# Tripcoil's releases (spec sections 14 and 15):
-#
-#   tag vX.Y.Z ─▶ build ─▶ gate ─┬─▶ publish ─▶ verify
-#               ci ───────────────┘
-#
-# ci waits for the ci workflow's run on the tagged commit (unit and integration tests) and fails
-# unless it succeeded, so the release does not test the same commit again.
-#
 # Candidate code (the built binaries) runs only in jobs with contents: read. publish (S3
 # secrets, contents: write) runs no candidate binary and no repository script: it only copies
 # files and runs gh and the tools.klar.ws publish action.
-#
-# Release procedure (from main only; every version must be higher than every published one):
-#
-#   printf '1.2.3\n' > VERSION && git commit -m "release: v1.2.3" VERSION
-#   git tag -a v1.2.3 -m "Tripcoil v1.2.3" && git push --atomic origin main v1.2.3
-#
-# The tag must point at a commit on main (build checks it). Push one release tag at a time and
-# wait for its run to finish.
-#
-# A job failed (a missing secret, a flaky network step): re-run the failed jobs of the same run,
-# `gh run rerun <id> --failed`. Re-runs reuse that run's artifacts, so both hosts receive the same
-# bytes, and publishing what is already published is a no-op.
 #
 # Blocked before publishing (ci or gate failed): never retry the same version, and never
 # start a fresh run for its tag (a rebuild gives different bytes, which both hosts refuse). Delete
 # the tag (`git push origin :refs/tags/vX.Y.Z`), then either commit the fix and cut the next patch
 # release, or commit VERSION back to the last published version (`dev` if nothing was published).
-#
-# Dry run: `gh workflow run release.yml --ref main` builds 0.0.0-dryrun.<run number> and runs
-# build, gate and ci; publish and verify are skipped.
-#
-# Rollback: the tools.klar.ws "Manage a tool" workflow, command set-latest (owner).
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
-  workflow_dispatch: # dry run: build, gate and ci only
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -235,11 +210,9 @@ jobs:
             gh release create "$tag" dist/*.tar.gz dist/checksums.txt \
               --verify-tag --title "Tripcoil $tag" --generate-notes "${pre[@]}"
           fi
-      # scripts: publishes our own install.sh (root, /usr/local/bin) and the landing page.
       - name: Stage the install script and landing page
         run: mkdir site && cp install.sh .github/tools-klar-ws/index.html site/
       - name: Publish to tools.klar.ws
-        # v1: the commit behind its annotated tag (tag object 90aa915b13610cab9cbe2e37c23e883f91659c6a).
         uses: klar-web-services/tools.klar.ws/publish@6d0c0851802c426f7307013acf9ed6cf992c64e4 # v1
         with:
           tool: tripcoil

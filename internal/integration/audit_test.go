@@ -29,18 +29,12 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// The tests share one Tripcoil cache with the pinned Grype, today's database and the kernel CNA
-// data, prepared on first use and removed when the tests end. It holds about 3.5 GB, under
-// $TRIPCOIL_TEST_CACHE_PARENT when that is set, else under the temporary directory, which may be
-// a tmpfs; TMPDIR=/var/tmp works too.
 var (
 	cacheOnce sync.Once
 	cacheDir  string
 	cacheErr  error
 )
 
-// interrupt ends when the tests are interrupted, so that the containers they run are removed and
-// the cache is too. A second interrupt ends them at once.
 var interrupt context.Context
 
 func TestMain(m *testing.M) {
@@ -88,7 +82,6 @@ func sha256File(t *testing.T, path string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// writeJar writes a jar that holds only the Maven metadata of log4j-core 2.14.1.
 func writeJar(t *testing.T, path string) {
 	t.Helper()
 	var buf bytes.Buffer
@@ -111,11 +104,6 @@ func writeJar(t *testing.T, path string) {
 	}
 }
 
-// TestAuditFixtures audits the deliberately vulnerable fixtures with the real Grype and the real
-// kernel CNA data: a Go binary that calls golang.org/x/text v0.3.5's vulnerable parsers, a Node
-// app directory with lodash 4.17.20, a jar of log4j-core 2.14.1, a redis-server of Redis 2.8.23, a
-// package of this machine, and Linux 6.1.1. Syft catalogs the jar and redis-server only under
-// their file names.
 func TestAuditFixtures(t *testing.T) {
 	cache := preparedCache(t)
 	ctx := interrupt
@@ -208,7 +196,6 @@ func TestAuditFixtures(t *testing.T) {
 	if redisFindings == 0 {
 		t.Error("no finding on Redis 2.8.23")
 	}
-	// CVE-2024-53104 (uvcvideo) is on the CISA KEV list and was fixed in 6.1.117.
 	if f := found["CVE-2024-53104 linux"]; f.Risk != audit.RiskCritical || len(f.Fix.Versions) != 1 || f.Fix.Versions[0] != "6.1.117" {
 		t.Errorf("CVE-2024-53104 %+v", f)
 	}
@@ -238,9 +225,6 @@ func TestAuditFixtures(t *testing.T) {
 		}
 	}
 
-	// The second run matches the cached SBOM, which marks it used, and finds the same. The jar's
-	// cached SBOM is replaced by one that Grype cannot decode: the second run drops it and catalogs
-	// the jar again.
 	used := time.Now().Add(-24 * time.Hour)
 	if err := os.Chtimes(appSBOMs[0], used, used); err != nil {
 		t.Fatal(err)
@@ -296,7 +280,6 @@ func TestAuditFixtures(t *testing.T) {
 	}
 }
 
-// TestAuditImage scans a small, old image by its ID from the local Docker daemon.
 func TestAuditImage(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not installed")

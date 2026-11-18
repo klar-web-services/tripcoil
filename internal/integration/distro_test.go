@@ -1,6 +1,5 @@
 //go:build integration
 
-// Package integration runs Tripcoil against real distributions and the real host.
 package integration
 
 import (
@@ -29,8 +28,6 @@ const (
 	splitFacts = "@@@43@@@"
 )
 
-// buildBinary builds Tripcoil, or copies the binary TRIPCOIL_CANDIDATE names, such as a release
-// candidate, so the tests run that instead.
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "tripcoil")
@@ -70,15 +67,12 @@ func TestDistros(t *testing.T) {
 	}
 	bin := buildBinary(t)
 	cache := preparedCache(t)
-	// The old point releases hold a libc with a long-known vulnerability, cve, fixed in version
-	// fix: the Audit matches the distribution's packages with the distribution's data.
 	cases := []struct{ image, family, pkgType, sleepExe, sleepPkg, libc, cve, fix string }{
 		{"debian:12", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6", "", ""},
 		{"debian:12.0", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6", "CVE-2023-4911", "2.36-9+deb12u3"},
 		{"debian:13", "debian", "deb", "/usr/bin/sleep", "coreutils", "libc6", "", ""},
 		{"ubuntu:24.04", "ubuntu", "deb", "/usr/bin/sleep", "coreutils", "libc6", "", ""},
 		{"ubuntu:jammy-20230126", "ubuntu", "deb", "/usr/bin/sleep", "coreutils", "libc6", "CVE-2023-4911", "2.35-0ubuntu3.4"},
-		// Rocky's coreutils-single is one multicall binary: sleep runs as /usr/bin/coreutils.
 		{"rockylinux/rockylinux:9", "rhel", "rpm", "/usr/bin/coreutils", "coreutils", "glibc", "", ""},
 		{"rockylinux/rockylinux:9.0", "rhel", "rpm", "/usr/bin/coreutils", "coreutils", "glibc", "CVE-2023-4911", "0:2.34-60.el9_2.7"},
 		{"alpine:3.21", "alpine", "apk", "/bin/busybox", "busybox", "musl", "", ""},
@@ -89,9 +83,6 @@ func TestDistros(t *testing.T) {
 	}
 	for i, tc := range cases {
 		t.Run(tc.image, func(t *testing.T) {
-			// The cache is shared with the host (the pinned Grype, its database and the kernel CNA
-			// data). The container is removed however the test ends, before what the run added to
-			// the cache is given to the cache's owner.
 			name := fmt.Sprintf("tripcoil-it-%d-%d", os.Getpid(), i)
 			var cmd *exec.Cmd
 			t.Cleanup(func() {
@@ -99,7 +90,7 @@ func TestDistros(t *testing.T) {
 					t.Errorf("docker rm: %v\n%s", err, out)
 				}
 				if cmd.Process == nil {
-					return // docker run never started
+					return
 				}
 				chown := `chown -R "$(stat -c %u:%g /var/lib/tripcoil/cache)" /var/lib/tripcoil/cache`
 				if out, err := exec.Command("docker", "run", "--rm", "--pull=never", "-v", cache+":/var/lib/tripcoil/cache", tc.image,
@@ -118,7 +109,6 @@ func TestDistros(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			cmd = exec.CommandContext(ctx, "docker", "run", "--rm", "--name", name, "-v", bin+":/usr/local/bin/tripcoil:ro",
 				"-v", cache+":/var/lib/tripcoil/cache", tc.image, "sh", "-c", script)
-			// Killing the docker client would leave the container running.
 			cmd.Cancel = func() error { return exec.Command("docker", "rm", "-f", name).Run() }
 			cmd.WaitDelay = time.Minute
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -173,8 +163,6 @@ func TestDistros(t *testing.T) {
 			if !sleepPkg || libc == "" {
 				t.Fatalf("sleep's origins miss %s or %s: %v", tc.sleepPkg, tc.libc, sleep.Origins)
 			}
-			// The Audit read this distribution's package database: each of sleep's packages is
-			// one package of the staged database.
 			results := map[string]audit.OriginResult{}
 			for _, r := range aud.Origins {
 				results[r.ID] = r
@@ -211,7 +199,7 @@ func TestDistros(t *testing.T) {
 					if it.Exe == "/usr/local/bin/tripcoil" && origins[id].Kind == inventory.OriginBinary {
 						self = true
 						if r := results[id]; r.Status != audit.Scanned || r.Packages == 0 {
-							t.Errorf("tripcoil's own binary: %+v", r) // Grype reads a Go binary's modules
+							t.Errorf("tripcoil's own binary: %+v", r)
 						}
 					}
 				}

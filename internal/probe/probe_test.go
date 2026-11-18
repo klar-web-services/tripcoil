@@ -20,7 +20,6 @@ func setup(t *testing.T) (*Setup, string) {
 			t.Fatal(err)
 		}
 	}
-	// Leftovers of a probe a killed Tripcoil did not clean up.
 	for _, p := range []string{"etc-tripcoil/.probe-0123456789ab", "cache/.probe-0123456789ab", ".probe-0123456789ab-w/file", "runs/.probe-0123456789ab/run.json"} {
 		os.MkdirAll(filepath.Join(state, filepath.Dir(p)), 0o755)
 		os.WriteFile(filepath.Join(state, p), nil, 0o644)
@@ -35,8 +34,6 @@ func setup(t *testing.T) (*Setup, string) {
 	return s, state
 }
 
-// Outside the sandbox the probe reaches everything root prepared: each check it makes inside the
-// sandbox is only blocked there (spec section 14).
 func TestRunOutsideSandbox(t *testing.T) {
 	s, state := setup(t)
 	a := s.Args
@@ -55,7 +52,6 @@ func TestRunOutsideSandbox(t *testing.T) {
 		l.Close()
 		wantTCP = []string{"127.0.0.1:" + port, "[::1]:" + port, "127.0.0.53:" + port, "169.254.169.254:80"}
 	}
-	// The resolver on the LAN gets UDP only: it would refuse a TCP connect by itself.
 	wantUDP := append(slices.Clone(wantTCP[:len(wantTCP)-1]), "10.53.0.1:"+port, "169.254.169.254:80")
 	if !slices.Equal(a.TCP, wantTCP) || !slices.Equal(a.UDP, wantUDP) {
 		t.Fatalf("tcp %v udp %v, want %v %v", a.TCP, a.UDP, wantTCP, wantUDP)
@@ -63,8 +59,8 @@ func TestRunOutsideSandbox(t *testing.T) {
 	if !a.ClearKeyrings {
 		t.Error("the agent's keyrings are not cleared")
 	}
-	a.ClearKeyrings = false      // they are this user's here
-	a.TCP = a.TCP[:len(a.TCP)-1] // 169.254.169.254 and the LAN resolver may not answer here
+	a.ClearKeyrings = false
+	a.TCP = a.TCP[:len(a.TCP)-1]
 	a.UDP = a.UDP[:len(a.UDP)-2]
 	checks := Run(a)
 	n := 3 + 1 + len(a.Private) + 1 + 1 + len(a.TCP) + len(a.UDP)
@@ -80,8 +76,6 @@ func TestRunOutsideSandbox(t *testing.T) {
 	if f := Failures(a, data); len(f) != n-len(a.Private) || !strings.HasPrefix(f[0], "read "+state) || !strings.Contains(f[4], "sees .probe-") {
 		t.Errorf("failures %q", f)
 	}
-	// What it wrote into /tmp shows on the host. A file of another user there does not count:
-	// the names are on the probe's command line.
 	if l := s.Leaked(); !slices.Contains(l, "write "+a.Private[0]+": it outlived the sandbox") {
 		t.Errorf("leaked %q", l)
 	}
@@ -101,7 +95,7 @@ func TestChecksBlocked(t *testing.T) {
 	dir := t.TempDir()
 	closed, _ := net.Listen("tcp4", "127.0.0.1:0")
 	addr := closed.Addr().String()
-	closed.Close() // nothing listens: refused at once, as the table's reset is
+	closed.Close()
 	a := Args{Reads: []string{filepath.Join(dir, "missing")}, Writes: []string{filepath.Join(dir, "no/such/dir")},
 		Runs: dir, RunID: "", RootPID: 0, TCP: []string{addr}}
 	os.Mkdir(filepath.Join(dir, "own"), 0o755)

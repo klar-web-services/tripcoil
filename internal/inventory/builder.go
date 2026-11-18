@@ -5,7 +5,6 @@ import (
 	"sort"
 )
 
-// itemBuilder merges processes into items and origins into one deduplicated set.
 type itemBuilder struct {
 	items   map[string]*draft
 	origins map[string]*Origin
@@ -23,9 +22,6 @@ func newBuilder() *itemBuilder {
 	return &itemBuilder{items: map[string]*draft{}, origins: map[string]*Origin{}}
 }
 
-// process returns the draft of the host process item keyed by key and appDir, creating it on
-// first use. key is the executable, or for a process whose origin is unresolved "unresolved:<exe>",
-// or "unresolved:command:<name>" when its executable cannot be read.
 func (b *itemBuilder) process(key, exe, appDir, name string) *draft {
 	id := ProcessItemID(key, appDir)
 	d, ok := b.items[id]
@@ -50,7 +46,6 @@ func (d *draft) restartNeeded(path string) { d.restart[path] = true }
 
 func (d *draft) note(code string) { d.notes[code] = true }
 
-// link attaches an origin to the item, merging it into an origin with the same ID.
 func (b *itemBuilder) link(d *draft, o Origin) {
 	if have, ok := b.origins[o.ID]; ok {
 		have.RunningOlderCopy = have.RunningOlderCopy || o.RunningOlderCopy
@@ -70,7 +65,6 @@ func (b *itemBuilder) link(d *draft, o Origin) {
 	d.origins[o.ID] = true
 }
 
-// result returns the items sorted by name, then ID, and the origins sorted by ID.
 func (b *itemBuilder) result() ([]Item, []Origin) {
 	items := make([]Item, 0, len(b.items))
 	for _, d := range b.items {

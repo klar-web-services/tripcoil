@@ -1,5 +1,3 @@
-// Package fingerprint computes the change check's fingerprint (spec section 8.6): what decides
-// whether a run needs a new review, or can carry the last one forward.
 package fingerprint
 
 import (
@@ -8,7 +6,7 @@ import (
 )
 
 // NormalizeFirewall turns facts/firewall.txt into the part of the ruleset that says what is
-// exposed, leaving out what changes on its own (spec section 8.6):
+// exposed, leaving out what changes on its own:
 //   - fail2ban's and CrowdSec's tables and chains (names starting with f2b- or crowdsec), whose bans
 //     change constantly;
 //   - the elements of sets with the dynamic or timeout flag;
@@ -53,9 +51,7 @@ func NormalizeFirewall(text string) string {
 }
 
 var (
-	// churnName is a table or chain whose contents change on their own.
-	churnName = regexp.MustCompile(`^(f2b-|crowdsec)`)
-	// dockerBridge names a Docker bridge interface: docker0, or br- and 12 hex digits of a network ID.
+	churnName    = regexp.MustCompile(`^(f2b-|crowdsec)`)
 	dockerBridge = regexp.MustCompile(`\b(docker0|br-[0-9a-f]{12})\b`)
 	nftCounter   = regexp.MustCompile(`\s*\bcounter( packets \d+ bytes \d+)?`)
 	iptCounters  = regexp.MustCompile(`\[\d+:\d+\]`)
@@ -63,10 +59,8 @@ var (
 
 func dockerChain(name string) bool { return strings.HasPrefix(name, "DOCKER") && name != "DOCKER-USER" }
 
-// dockerTable is a table into whose built-in chains Docker writes rules for its bridges.
 func dockerTable(name string) bool { return name == "raw" || name == "nat" }
 
-// braces counts a line's opening and closing braces outside quoted strings.
 func braces(line string) int {
 	n, quoted := 0, false
 	for _, r := range line {
@@ -83,8 +77,6 @@ func braces(line string) int {
 	return n
 }
 
-// normalizeNft normalizes `nft -s list ruleset` output: tables at the start of a line, holding
-// sets, maps, chains and other blocks, each closed by its own "}" line.
 func normalizeNft(lines []string) []string {
 	var out []string
 	var table string
@@ -97,18 +89,18 @@ func normalizeNft(lines []string) []string {
 		before := depth
 		depth += braces(line)
 		switch {
-		case before == 0: // a table header (or a stray line)
+		case before == 0:
 			f := strings.Fields(line)
 			table = ""
 			if len(f) >= 3 && f[0] == "table" {
-				table = f[len(f)-2] // table <family> <name> {
+				table = f[len(f)-2]
 			}
 			if !churnName.MatchString(table) {
 				out = append(out, line)
 			}
-		case before == 1 && depth >= 2: // a block in the table opens
+		case before == 1 && depth >= 2:
 			block = []string{line}
-		case before >= 2: // inside a block
+		case before >= 2:
 			block = append(block, line)
 			if depth == 1 {
 				if !churnName.MatchString(table) {
@@ -116,7 +108,7 @@ func normalizeNft(lines []string) []string {
 				}
 				block = nil
 			}
-		default: // a one-line statement in the table, or the table's closing brace
+		default:
 			if !churnName.MatchString(table) {
 				out = append(out, line)
 			}
@@ -125,7 +117,6 @@ func normalizeNft(lines []string) []string {
 	return out
 }
 
-// normalizeBlock normalizes one set, map or chain of an nft table.
 func normalizeBlock(table string, block []string) []string {
 	f := strings.Fields(block[0])
 	if len(f) < 2 {
@@ -173,7 +164,6 @@ func normalizeBlock(table string, block []string) []string {
 	return block
 }
 
-// normalizeIptables normalizes iptables-save output.
 func normalizeIptables(lines []string) []string {
 	var out []string
 	table := ""

@@ -45,10 +45,6 @@ func link(t *testing.T, root, name, target string) {
 
 const tcpHeader = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
 
-// fixture builds a host root: nginx (PID 812, 813) listens on 0.0.0.0:443 and [::]:443, sshd (900)
-// on 0.0.0.0:22, a resolver (950) has 127.0.0.53:53/udp, and a client (960) a connected UDP
-// socket. An nginx started after the Inventory (970) listens on 127.0.0.1:5000, and nc (971), which
-// no item runs, on 127.0.0.1:6000.
 func fixture(t *testing.T) (string, *inventory.Inventory) {
 	root := t.TempDir()
 	write(t, root, "proc/net/tcp", tcpHeader+
@@ -72,13 +68,13 @@ func fixture(t *testing.T) (string, *inventory.Inventory) {
 	link(t, root, "proc/900/fd/3", "socket:[1002]")
 	link(t, root, "proc/950/fd/7", "socket:[1006]")
 	link(t, root, "proc/960/fd/9", "socket:[1007]")
-	link(t, root, "proc/970/fd/3", "socket:[1003]") // an nginx started after the Inventory
+	link(t, root, "proc/970/fd/3", "socket:[1003]")
 	link(t, root, "proc/970/exe", "/usr/sbin/nginx")
-	link(t, root, "proc/971/fd/3", "socket:[1008]") // a process of an executable no item runs
+	link(t, root, "proc/971/fd/3", "socket:[1008]")
 	link(t, root, "proc/971/exe", "/usr/bin/nc")
-	link(t, root, "proc/972/fd/3", "socket:[1009]") // an nginx in a container's mount namespace
+	link(t, root, "proc/972/fd/3", "socket:[1009]")
 	link(t, root, "proc/972/exe", "/usr/sbin/nginx")
-	link(t, root, "proc/973/fd/3", "socket:[1010]") // another app of the python the shop runs
+	link(t, root, "proc/973/fd/3", "socket:[1010]")
 	link(t, root, "proc/973/exe", "/usr/bin/python3.11")
 	for pid, ns := range map[int]string{1: "mnt:[4026531841]", 970: "mnt:[4026531841]", 971: "mnt:[4026531841]", 972: "mnt:[4026532999]", 973: "mnt:[4026531841]"} {
 		link(t, root, fmt.Sprintf("proc/%d/ns/mnt", pid), ns)
@@ -109,10 +105,10 @@ func fixture(t *testing.T) (string, *inventory.Inventory) {
 	if err := os.MkdirAll(filepath.Join(root, "home/bob/.ssh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Mkfifo(filepath.Join(root, "home/bob/.ssh/authorized_keys"), 0o644); err != nil { // must never block
+	if err := syscall.Mkfifo(filepath.Join(root, "home/bob/.ssh/authorized_keys"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	link(t, root, "home/dave/.ssh", filepath.Join(root, "root/.ssh")) // a link in an earlier component: never followed
+	link(t, root, "home/dave/.ssh", filepath.Join(root, "root/.ssh"))
 	inv := &inventory.Inventory{Host: inventory.Host{Init: "systemd"}, Items: []inventory.Item{
 		{ID: "kernel", Kind: inventory.KindKernel, Modules: []string{"nf_tables", "overlay"}},
 		{ID: "proc:nginx", Kind: inventory.KindProcess, Name: "nginx", Exe: "/usr/sbin/nginx", Units: []string{"nginx.service"}, Processes: []inventory.Process{{PID: 812}, {PID: 813}}},
@@ -136,14 +132,12 @@ func (f fakeDocker) Inspect(_ context.Context, id string) (dockerapi.Detail, err
 	return d, nil
 }
 
-// brokenDocker is a daemon that fails every request.
 type brokenDocker struct{ err error }
 
 func (b brokenDocker) Inspect(context.Context, string) (dockerapi.Detail, error) {
 	return dockerapi.Detail{}, b.err
 }
 
-// fakeRun answers commands from a table; a missing command is not installed.
 func fakeRun(t *testing.T, answers map[string]string, calls *[]string) Runner {
 	return func(_ context.Context, name string, args ...string) ([]byte, error) {
 		cmd := strings.Join(append([]string{name}, args...), " ")
@@ -425,7 +419,7 @@ func TestParseAddr(t *testing.T) {
 	for in, want := range map[string]string{
 		"0100007F:0050": "127.0.0.1:80", "00000000:01BB": "0.0.0.0:443",
 		"00000000000000000000000001000000:0016": "::1:22",
-		"0000000000000000FFFF00000100007F:1F90": "127.0.0.1:8080", // v4-mapped
+		"0000000000000000FFFF00000100007F:1F90": "127.0.0.1:8080",
 		"B80D0120000000000000000001000000:0035": "2001:db8::1:53",
 	} {
 		a, p, err := parseAddr(in)
@@ -438,8 +432,6 @@ func TestParseAddr(t *testing.T) {
 	}
 }
 
-// TestKeysOnRemoteOrUnknownMounts marks the test's own file system as a user's FUSE mount, and then
-// leaves it out of the mount table: no key file is read, and each user says why.
 func TestKeysOnRemoteOrUnknownMounts(t *testing.T) {
 	root, inv := fixture(t)
 	dir, err := os.Open(root)

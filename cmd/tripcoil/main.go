@@ -1,4 +1,3 @@
-// Command tripcoil watches a running Linux server for vulnerable software.
 package main
 
 import (

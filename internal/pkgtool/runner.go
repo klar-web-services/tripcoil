@@ -8,18 +8,13 @@ import (
 	"os/exec"
 )
 
-// Result is what a finished command printed and how it exited.
 type Result struct {
 	Stdout, Stderr []byte
 	ExitCode       int
 }
 
-// Runner runs a command. The error is only for a command that could not run at all or was stopped
-// because ctx ended (wrapping ctx.Err()); a non-zero exit is reported in Result.ExitCode.
 type Runner func(ctx context.Context, name string, args ...string) (Result, error)
 
-// Exec runs the command with a fixed environment, so messages are untranslated and PATH is the
-// system's.
 func Exec(ctx context.Context, name string, args ...string) (Result, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = []string{"LC_ALL=C", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}

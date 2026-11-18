@@ -44,9 +44,6 @@ CMD ["/lib/systemd/systemd"]
 `,
 }
 
-// sandboxScript sets up the agent's user, a stub CLI, a local DNS forwarder on 127.0.0.1 and a
-// listener on 0.0.0.0:7777 (127.0.0.2 is in review.allowAddresses), then runs Tripcoil and prints
-// "CHECK <name> <exit code> <detail>" lines. $FULL=0 makes only the first run.
 const sandboxScript = `set -u
 B=/opt/tripcoil
 R=/var/lib/tripcoil/runs/latest
@@ -101,10 +98,6 @@ echo "CHECK codex $(run --force-review) $(summary) | $(grep -o '"agentCli": "[^"
 echo "CHECK codex-entries $(entries)"
 `
 
-// TestSandbox runs reviews with a stub agent CLI through the real sandbox: transient units on
-// systemd 247, 249, 252 and 257, bubblewrap with cgroup v2 on Alpine, and the agent's nftables
-// table on each (spec section 14, AC-8, AC-11, AC-13). The containers are privileged, with their
-// own network namespace, so the table and the units stay inside them.
 func TestSandbox(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not installed")
@@ -123,7 +116,7 @@ func TestSandbox(t *testing.T) {
 	cases := []struct {
 		name, image string
 		full        bool
-		first       string // in the first run's CHECK line
+		first       string
 	}{
 		{"systemd-247", "debian11", true, done},
 		{"systemd-249", "ubuntu2204", true, done},
@@ -187,7 +180,7 @@ func TestSandbox(t *testing.T) {
 			if tc.full {
 				for k, v := range map[string][]string{
 					"probe":     {" blocked, 0 not"},
-					"again":     {"0 " + done}, // the marker the first review wrote is gone (AC-13)
+					"again":     {"0 " + done},
 					"timeout":   {"1 ⚠️ Audit only (AI review failed: AGENT_TIMEOUT)", "leftovers 0"},
 					"auth":      {"1 ⚠️ Audit only (AI review failed: AGENT_AUTH)"},
 					"interrupt": {"2 leftovers 0, home 0"},
@@ -208,8 +201,6 @@ func TestSandbox(t *testing.T) {
 					}
 				}
 			}
-			// The stub puts one entry in its final output and the rest, with a broken line and a
-			// duplicate, in its entries file: review.json holds both.
 			for _, k := range []string{"entries", "codex-entries"} {
 				if !tc.full {
 					break

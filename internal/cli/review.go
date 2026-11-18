@@ -18,10 +18,8 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// notInBuild says why a report is audit-only when there is no agent to run, as in tests.
 const notInBuild = "the AI review is not part of this build"
 
-// reviewRun is the change check and the AI Review of one run (spec sections 8 and 8.6).
 type reviewRun struct {
 	d        deps
 	cfg      config.Config
@@ -32,11 +30,9 @@ type reviewRun struct {
 	idx      *facts.Index
 	noReview bool
 	force    bool
-	cli      string // the agent CLI that reviewed this run
+	cli      string
 }
 
-// run computes the fingerprint and then carries the last review forward, runs a new one, or skips
-// it. It returns the review the report shows, or nil and why the report is audit-only.
 func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	rec := r.rec
 	r.rec.Versions["prompt"] = review.PromptVersion
@@ -86,7 +82,7 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 		rec.CarriedFrom, rec.ReviewedAt = prev.RunID, prev.Record.ReviewedAt
 		rec.Stages["review"] = run.StageOK
 		r.cli = prev.Record.Versions["agentCli"]
-		for _, k := range []string{"agentCli", "model"} { // the review's, which the fingerprint ties to this config
+		for _, k := range []string{"agentCli", "model"} {
 			if v := prev.Record.Versions[k]; v != "" {
 				rec.Versions[k] = v
 			}
@@ -150,8 +146,6 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	return rev, ""
 }
 
-// countReview counts the reviewed findings by exploitability for run.json. reviewConditionalLowerPriority
-// is the part of reviewConditional without priority now or soon, which the report's verdict leaves out.
 func countReview(rec *run.Record, rev *review.Review) {
 	for _, k := range []string{"reviewExploitable", "reviewConditional", "reviewConditionalLowerPriority", "reviewNotExploitable", "reviewUnknown", "reviewFalsePositive", "reviewAdded"} {
 		rec.Counts[k] = 0
@@ -179,7 +173,6 @@ func countReview(rec *run.Record, rev *review.Review) {
 	rec.Counts["notReviewed"] = len(rev.NotReviewed)
 }
 
-// agentName names the agent CLI and model for the report's host line.
 func (r *reviewRun) agentName() string {
 	if r.cli == "" {
 		return ""
@@ -202,7 +195,6 @@ func (r *reviewRun) collected(name string) bool {
 	return false
 }
 
-// fact reads a collected JSON fact into v.
 func (r *reviewRun) fact(name string, v any) bool {
 	if !r.collected(name) {
 		return false
@@ -211,7 +203,6 @@ func (r *reviewRun) fact(name string, v any) bool {
 	return err == nil && json.Unmarshal(data, v) == nil
 }
 
-// text reads a collected text fact, or is nil.
 func (r *reviewRun) text(name string) *string {
 	if !r.collected(name) {
 		return nil

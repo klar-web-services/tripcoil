@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// dpkgFormat is passed to dpkg-query -W; dpkg-query itself expands \t and \n.
 const dpkgFormat = `${db:Status-Abbrev}\t${binary:Package}\t${Package}\t${Architecture}\t${Version}\n`
 
 type dpkg struct{ run Runner }
@@ -25,9 +24,7 @@ func (d dpkg) Check(ctx context.Context) error {
 }
 
 func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, error) {
-	owners := map[string][]string{} // path -> listed binary package names, such as libc6:amd64
-	// path -> the package that diverted it, "" for a local diversion: the file there is that
-	// package's own copy (if it is a listed owner), or the admin's.
+	owners := map[string][]string{}
 	divertedBy := map[string]string{}
 	for _, chunk := range chunks(paths, 200) {
 		res, err := d.run(ctx, "dpkg-query", append([]string{"-S"}, chunk...)...)
@@ -106,7 +103,6 @@ func (d dpkg) Owners(ctx context.Context, paths []string) (map[string]Package, e
 	return out, nil
 }
 
-// query returns the installed packages by binary package name.
 func (d dpkg) query(ctx context.Context, names []string) (map[string]Package, error) {
 	entries, err := d.list(ctx, names...)
 	if err != nil {
@@ -124,9 +120,6 @@ type dpkgEntry struct {
 	pkg    Package
 }
 
-// list runs dpkg-query -W and keeps the packages whose files are on disk: status (the second
-// letter of db:Status-Abbrev) installed, triggers awaited or pending, unpacked or half-configured.
-// The first letter is the wanted action, so a held package ("hi") is kept.
 func (d dpkg) list(ctx context.Context, patterns ...string) ([]dpkgEntry, error) {
 	res, err := d.run(ctx, "dpkg-query", append([]string{"-W", "-f", dpkgFormat}, patterns...)...)
 	if err != nil {

@@ -15,11 +15,8 @@ import (
 	"time"
 )
 
-// AddedMarker is the first line of every repository file setup adds; tripcoil uninstall removes
-// the files that carry it.
 const AddedMarker = "# Added by tripcoil setup; tripcoil uninstall removes it."
 
-// Files setup may add for NodeSource's Node.js 22 repository.
 const (
 	NodeSourceKeyPath     = "/etc/apt/keyrings/nodesource.asc"
 	NodeSourceKeyMarkPath = "/etc/apt/keyrings/nodesource.asc.tripcoil"
@@ -42,7 +39,6 @@ const (
 	claudeInstall = "npm install -g --allow-scripts=" + claudePackage + " " + claudePackage
 )
 
-// fetch downloads url.
 func fetch(url string) ([]byte, error) {
 	c := http.Client{Timeout: 30 * time.Second}
 	resp, err := c.Get(url)
@@ -56,8 +52,6 @@ func fetch(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
-// claudeCode makes sure Claude Code is installed system-wide, installing Node.js 22 and the npm
-// package after confirmation. It returns whether it installed it and whether it is installed.
 func (h Host) claudeCode(o Options) (bool, bool, error) {
 	p, err := h.FindCLI("", "claude")
 	if err == nil {
@@ -65,7 +59,7 @@ func (h Host) claudeCode(o Options) (bool, bool, error) {
 		return false, true, nil
 	}
 	if _, lerr := h.LookPath("claude"); lerr == nil {
-		return false, false, err // there, but not root-owned: installing over it would not help
+		return false, false, err
 	}
 	_, npmErr := h.LookPath("npm")
 	nodeOK := nodeMajor(h.nodeVersion()) >= 22 && npmErr == nil
@@ -117,15 +111,13 @@ func (h Host) claudeCode(o Options) (bool, bool, error) {
 	return true, true, nil
 }
 
-// nodePlan is how to install Node.js 22.
 type nodePlan struct {
-	what       string // for the question
+	what       string
 	manager    string
-	nodeSource string // the architecture for NodeSource's repository, or "" when the distribution's nodejs will do
+	nodeSource string
 	cmds       [][]string
 }
 
-// planNode finds the package manager and whether its nodejs is new enough.
 func (h Host) planNode() (nodePlan, error) {
 	manager := ""
 	for _, m := range []string{"apk", "pacman", "dnf", "apt-get"} {
@@ -157,7 +149,7 @@ func (h Host) planNode() (nodePlan, error) {
 		}
 		p.cmds = [][]string{{"apk", "add", "nodejs", "npm"}}
 	case "pacman":
-		out, _ := h.Run("pacman", "-Si", "nodejs") // fails when the sync database lacks nodejs
+		out, _ := h.Run("pacman", "-Si", "nodejs")
 		candidate = field(out, "Version", ":")
 		if nodeMajor(candidate) < 22 {
 			return p, h.tooOld("pacman's nodejs", candidate, "an up-to-date system", "pacman -Syu")
@@ -190,7 +182,7 @@ func (h Host) planNode() (nodePlan, error) {
 		if err != nil {
 			return p, err
 		}
-		for _, l := range strings.Split(string(out), "\n") { // warnings may come first
+		for _, l := range strings.Split(string(out), "\n") {
 			if l = strings.TrimSpace(l); l != "" && l[0] >= '0' && l[0] <= '9' {
 				candidate = l
 				break
@@ -218,7 +210,6 @@ func (h Host) planNode() (nodePlan, error) {
 	return p, nil
 }
 
-// nodeSourceArch is NodeSource's name for this architecture: amd or arm.
 func (h Host) nodeSourceArch(amd, arm string) (string, error) {
 	switch runtime.GOARCH {
 	case "amd64":
@@ -229,8 +220,6 @@ func (h Host) nodeSourceArch(amd, arm string) (string, error) {
 	return "", fmt.Errorf("NodeSource has no Node.js 22 for %s; install Node.js 22 or later and npm, then %s%s", runtime.GOARCH, h.Sudo, claudeInstall)
 }
 
-// tooOld says the distribution's nodejs is too old, or that there is none, which an update
-// command may fix.
 func (h Host) tooOld(what, version, needs, update string) error {
 	switch {
 	case version == "" && update == "":
@@ -241,8 +230,6 @@ func (h Host) tooOld(what, version, needs, update string) error {
 	return fmt.Errorf("%s is too old (%s): Claude Code needs Node.js 22 (%s); install Node.js 22 or later and npm, then %s%s", what, version, needs, h.Sudo, claudeInstall)
 }
 
-// installNode adds NodeSource's repository when the plan needs it and installs Node.js. It
-// returns the installed version.
 func (h Host) installNode(p nodePlan) (string, error) {
 	if p.nodeSource != "" {
 		if err := h.addNodeSource(p.manager, p.nodeSource); err != nil {
@@ -268,8 +255,6 @@ func (h Host) installNode(p nodePlan) (string, error) {
 	return v, nil
 }
 
-// addNodeSource writes NodeSource's repository for apt-get or dnf. A file that exists without
-// the marker is the host's own and stays as it is.
 func (h Host) addNodeSource(manager, arch string) error {
 	if manager == "dnf" {
 		return h.writeAdded(NodeSourceRepoPath, fmt.Sprintf(`[nodesource-nodejs]
@@ -282,7 +267,7 @@ gpgkey=https://rpm.nodesource.com/gpgkey/ns-operations-public.key
 module_hotfixes=1
 `, arch, arch))
 	}
-	if certs, _ := os.ReadDir(h.path("/etc/ssl/certs")); len(certs) == 0 { // apt and the key's download need them for https
+	if certs, _ := os.ReadDir(h.path("/etc/ssl/certs")); len(certs) == 0 {
 		fmt.Fprintln(h.Out, "… Installing ca-certificates for NodeSource's https repository.")
 		if _, err := h.run("apt-get", "install", "-y", "ca-certificates"); err != nil {
 			return err
@@ -318,8 +303,6 @@ Pin-Priority: 600
 `)
 }
 
-// checkHostsNodeSource checks that the host's own NodeSource file p, if there is one, points at
-// Node.js 22 or later: the first match of pattern holds the major.
 func (h Host) checkHostsNodeSource(p, pattern, want string) error {
 	if !h.hostOwned(p) {
 		return nil
@@ -334,13 +317,11 @@ func (h Host) checkHostsNodeSource(p, pattern, want string) error {
 	return fmt.Errorf("%s is the host's own NodeSource repository, for an older Node.js; point it at %s (or remove it), then run setup again", p, want)
 }
 
-// hostOwned reports whether p exists without the marker.
 func (h Host) hostOwned(p string) bool {
 	data, err := os.ReadFile(h.path(p))
 	return err == nil && !bytes.HasPrefix(data, []byte(AddedMarker+"\n"))
 }
 
-// writeAdded writes data after the marker to p, unless p is the host's own.
 func (h Host) writeAdded(p, data string) error {
 	if h.hostOwned(p) {
 		return nil
@@ -359,7 +340,6 @@ func (h Host) writeFile(p string, data []byte) error {
 	return os.Chmod(p, 0o644)
 }
 
-// nodeVersion is node --version, or "" without node.
 func (h Host) nodeVersion() string {
 	if _, err := h.LookPath("node"); err != nil {
 		return ""
@@ -371,8 +351,6 @@ func (h Host) nodeVersion() string {
 	return strings.TrimSpace(string(out))
 }
 
-// nodeMajor is the major version in a version like v22.11.0, 22.11.0-r0 or 1:22.11.0+dfsg-1;
-// 0 when there is none.
 func nodeMajor(v string) int {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if i := strings.IndexByte(v, ':'); i > 0 && strings.Trim(v[:i], "0123456789") == "" {
@@ -389,7 +367,6 @@ func nodeMajor(v string) int {
 	return n
 }
 
-// field is the value after "name<sep>" on the first line that starts with name, trimmed.
 func field(out []byte, name, sep string) string {
 	for _, l := range strings.Split(string(out), "\n") {
 		k, v, ok := strings.Cut(strings.TrimSpace(l), sep)
@@ -400,7 +377,6 @@ func field(out []byte, name, sep string) string {
 	return ""
 }
 
-// run runs a command and, when it fails, says which one with the end of its output.
 func (h Host) run(args ...string) ([]byte, error) {
 	out, err := h.Run(args[0], args[1:]...)
 	if err != nil {

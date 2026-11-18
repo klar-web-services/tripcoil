@@ -11,8 +11,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// Container is one entry of facts/containers.json: what limits or widens a container's reach on
-// the host (spec section 7.1).
 type Container struct {
 	Item           string           `json:"item"`
 	Name           string           `json:"name"`
@@ -20,14 +18,13 @@ type Container struct {
 	CapAdd         []string         `json:"capAdd"`
 	HostNetwork    bool             `json:"hostNetwork"`
 	PIDMode        string           `json:"pidMode"`
-	User           string           `json:"user"` // empty: the image's user, often root
+	User           string           `json:"user"`
 	ReadOnlyRootfs bool             `json:"readOnlyRootfs"`
 	Ports          []inventory.Port `json:"ports"`
 	Mounts         []ContainerMount `json:"mounts"`
-	DockerSocket   bool             `json:"dockerSocket"` // a mount gives it the Docker socket
+	DockerSocket   bool             `json:"dockerSocket"`
 }
 
-// ContainerMount is one mount of a container.
 type ContainerMount struct {
 	Type        string `json:"type"`
 	Source      string `json:"source"`
@@ -46,7 +43,7 @@ func (c collector) containers() ([]Container, error) {
 		}
 		det, err := c.d.Docker.Inspect(c.ctx, it.ContainerID)
 		if errors.Is(err, dockerapi.ErrNotFound) {
-			continue // it stopped since the Inventory
+			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", it.Name, err)
@@ -72,8 +69,6 @@ func (c collector) containers() ([]Container, error) {
 	return out, nil
 }
 
-// isDockerSocket reports whether a bind mount's source is the Docker socket or a directory that
-// holds it, such as /var/run.
 func (c collector) isDockerSocket(source string) bool {
 	for _, sock := range []string{c.d.DockerSocket, "/var/run/docker.sock", "/run/docker.sock"} {
 		if sock == "" {

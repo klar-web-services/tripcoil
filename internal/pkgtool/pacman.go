@@ -12,8 +12,6 @@ import (
 var (
 	pacmanOwned   = regexp.MustCompile(`^(/.+) is owned by (\S+) (\S+)$`)
 	pacmanUnowned = regexp.MustCompile(`^error: (No package owns /.*|failed to read file '/.*': No such file or directory)$`)
-	// Some hosts print a warning on every call, such as for missing sync databases or a stale
-	// pacman.conf directive.
 	pacmanWarning = regexp.MustCompile(`^warning: `)
 )
 

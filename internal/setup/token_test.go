@@ -17,8 +17,6 @@ import (
 
 const testToken = "sk-ant-oat01-BrPERz" + "Ab3_-xCd4Ef5Gh6Ij7Kl8Mn9Op0Qr1St2Uv3Wx4Yz5ab6cd7ef8gh9ij0kl1mn2op3qr4st5uv6wx7yz8" + "AAA"
 
-// setupTokenOutput is what claude setup-token prints at the end, with the token split at the
-// given widths, each part on its own indented line.
 func setupTokenOutput(widths ...int) string {
 	parts, rest := []string{}, testToken
 	for _, w := range widths {
@@ -65,8 +63,6 @@ func TestExtractToken(t *testing.T) {
 	}
 }
 
-// tokenHost is a systemd host with Claude Code, on a terminal, whose claude setup-token prints out
-// or fails with err.
 func tokenHost(t *testing.T, input, out string, err error) *fakeHost {
 	f := newFake(t, Systemd)
 	f.Terminal = func() bool { return true }
@@ -260,8 +256,6 @@ func TestSetupReadiness(t *testing.T) {
 	}
 }
 
-// TestPTYChild is the child of the runInPTY tests: it prints the token and the line it reads,
-// or its window size.
 func TestPTYChild(t *testing.T) {
 	switch os.Getenv("TRIPCOIL_PTY_CHILD") {
 	case "read":

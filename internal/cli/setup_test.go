@@ -85,7 +85,6 @@ func TestSetupStartsTheServiceAfterDoctor(t *testing.T) {
 		t.Error("setup kept the signals held")
 	}
 
-	// Ctrl-C during the checks stops them, and setup still starts the service.
 	running = false
 	d.interrupts = func() (context.Context, context.CancelFunc) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -129,7 +128,7 @@ func TestHoldSignals(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	time.Sleep(100 * time.Millisecond) // the process is still here to finish
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestSetupRefusals(t *testing.T) {

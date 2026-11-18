@@ -19,36 +19,31 @@ import (
 
 func init() { run.AgentGID = func() (int, bool) { return 0, false } }
 
-// fakeScanner imitates Grype. Scan writes the SBOM listed for the source and matches it; Match
-// matches every package of the SBOM it is given against vulns, keyed by name@version, by purl or
-// by CPE, so a cached or rewritten SBOM gives the matches it holds, unless matching changes them. A
-// file's SBOM is listed by the path of the copy Grype scans, scan/<sha>/<file name>, because the
-// SBOM of a jar or of a binary that Syft identifies by name depends on the file name.
 type fakeScanner struct {
 	status     grype.DBStatus
 	updateErr  error
 	prepareErr error
-	sboms      map[string][]grype.Component // by source
-	osVersion  string                       // the version of the SBOMs' operating system; Arch has none
-	distro     string                       // the distribution Grype reports; "" when it saw none
-	locations  map[string]string            // the file each package (by name) was read from
-	found      map[string][]string          // the locations Match reports for a package, by name; else /where/<name>
-	cpes       map[string]string            // the CPE of a package in the SBOMs Scan writes, by name
-	catalogErr map[string]error             // by source prefix
+	sboms      map[string][]grype.Component
+	osVersion  string
+	distro     string
+	locations  map[string]string
+	found      map[string][]string
+	cpes       map[string]string
+	catalogErr map[string]error
 	vulns      map[string][]grype.Vulnerability
 	lookups    map[string]grype.Vulnerability
 	lookupErr  error
-	matchErr   map[string]error  // by SBOM file name
-	purlAs     map[string]string // the purl Match reports for a package, when it is not the SBOM's
-	catalogs   []string          // the sources cataloged, in order
-	matched    []string          // the file names of the SBOMs matched, in order
+	matchErr   map[string]error
+	purlAs     map[string]string
+	catalogs   []string
+	matched    []string
 	lookedUp   []string
-	copiesLeft []string // copies of other files still in the scan folder when a file was scanned
+	copiesLeft []string
 	scanning   func(source string)
-	matching   func(*grype.Report) // changes what matching an SBOM gives, as against scanning its source
-	asUsers    map[string][]bool   // by package name: what each Match of an SBOM that holds it said users control; nil: not kept
-	sbomVulns  int                 // how many vulnerabilities of 5 KB the SBOMs Scan writes hold, as Grype's repeat its matches
-	onMatch    func(sbom string)   // called as Match starts
+	matching   func(*grype.Report)
+	asUsers    map[string][]bool
+	sbomVulns  int
+	onMatch    func(sbom string)
 }
 
 func (f *fakeScanner) Prepare(context.Context) (grype.DBStatus, error, error) {
@@ -65,7 +60,7 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 	}
 	for prefix, err := range f.catalogErr {
 		if strings.HasPrefix(source, prefix) {
-			os.WriteFile(raw, nil, 0o600) // Grype empties its output files when it fails
+			os.WriteFile(raw, nil, 0o600)
 			return nil, err
 		}
 	}
@@ -108,7 +103,7 @@ func (f *fakeScanner) Scan(ctx context.Context, source, raw, sbom string) (*gryp
 	}
 	for _, c := range comps {
 		cc := comp{Type: "library", Name: c.Name, Version: c.Version, PURL: c.PURL, CPE: f.cpes[c.Name]}
-		if typ, _, ok := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/"); ok { // Syft's type is the purl's for deb, rpm, apk, alpm and nix
+		if typ, _, ok := strings.Cut(strings.TrimPrefix(c.PURL, "pkg:"), "/"); ok {
 			if typ == "ebuild" {
 				typ = "portage"
 			}
@@ -151,7 +146,7 @@ func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Repor
 		return nil, err
 	}
 	if err := f.matchErr[filepath.Base(sbom)]; err != nil {
-		os.WriteFile(raw, nil, 0o600) // Grype empties its output files when it fails
+		os.WriteFile(raw, nil, 0o600)
 		return nil, err
 	}
 	data, err := os.ReadFile(sbom)
@@ -169,7 +164,7 @@ func (f *fakeScanner) match(ctx context.Context, sbom, raw string) (*grype.Repor
 		} `json:"components"`
 	}
 	json.Unmarshal(data, &doc)
-	var cpes []string // of comps, in order
+	var cpes []string
 	for _, c := range doc.Components {
 		if c.Type != "file" && c.Type != "operating-system" {
 			cpes = append(cpes, c.CPE)
@@ -206,7 +201,6 @@ func (f *fakeScanner) Lookup(_ context.Context, ids []string) (map[string]grype.
 	return f.lookups, f.lookupErr
 }
 
-// fakeImages is the images the Docker daemon has, or the error of asking it.
 type fakeImages struct {
 	ids map[string]bool
 	err error
@@ -214,7 +208,6 @@ type fakeImages struct {
 
 func (f fakeImages) ImageExists(_ context.Context, id string) (bool, error) { return f.ids[id], f.err }
 
-// fakeKernel is kernel CNA data, or the error of loading it.
 type fakeKernel struct {
 	data *kernelcna.Data
 	err  error
@@ -224,11 +217,10 @@ func (k fakeKernel) Load(context.Context, time.Time, time.Duration) (*kernelcna.
 	return k.data, k.err
 }
 
-// fakeProc opens the running files of processes, by PID.
 type fakeProc struct {
-	exes   map[int]string           // pid: the file /proc/<pid>/exe opens
-	maps   map[int][]procfs.Mapping // pid: its mappings
-	mapped map[string]string        // mapping path: the file /proc/<pid>/map_files/<range> opens
+	exes   map[int]string
+	maps   map[int][]procfs.Mapping
+	mapped map[string]string
 }
 
 func (p fakeProc) OpenExe(pid int) (io.ReadCloser, error) {

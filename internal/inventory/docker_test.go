@@ -22,7 +22,7 @@ const (
 
 func dockerServer(t *testing.T, h http.Handler) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "tc-docker") // short path: unix socket paths are limited to 108 bytes
+	dir, err := os.MkdirTemp("", "tc-docker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +45,6 @@ func engine(ping int) http.Handler {
 		w.Write([]byte("OK"))
 	})
 	mux.HandleFunc("/containers/json", func(w http.ResponseWriter, _ *http.Request) {
-		// The second container is removed before it is inspected: its inspect answers 404. The third
-		// stops before it is inspected: its inspect answers that it is not running.
 		w.Write([]byte(`[{"Id":"` + shopID + `","Names":["/shop-web-1"],"Image":"ghcr.io/acme/shop:2026.11.3","ImageID":"sha256:abc",` +
 			`"State":"running","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/shop"},` +
 			`"Ports":[{"IP":"::","PrivatePort":3000,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":9229,"Type":"tcp"},` +
@@ -66,7 +64,6 @@ func engine(ping int) http.Handler {
 			`"Mounts":[{"Type":"bind","Source":"/srv/shop/uploads","Destination":"/app/uploads","RW":true},` +
 			`{"Type":"volume","Source":"/var/lib/docker/volumes/shop_cache/_data","Destination":"/app/.cache","RW":true}]}`))
 	})
-	// Compose writes the project and service onto the images it builds.
 	mux.HandleFunc("/images/sha256:abc/json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"Id":"sha256:abc","Config":{"Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.version":"2.40.3"}}}`))
 	})
@@ -92,7 +89,6 @@ func TestDockerContainers(t *testing.T) {
 	if it.Compose == nil || !reflect.DeepEqual(*it.Compose, Compose{Project: "shop", Service: "web", WorkingDir: "/srv/shop", ConfigFiles: []string{"/srv/shop/compose.yml", "/srv/shop/compose.prod.yml"}}) {
 		t.Fatalf("compose %+v", it.Compose)
 	}
-	// Docker builds both lists from maps, so they are sorted for identical runs to be identical.
 	if !slices.Equal(it.Ports, []Port{
 		{IP: "0.0.0.0", HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
 		{IP: "0.0.0.0", HostPort: 8080, ContainerPort: 3000, Protocol: "tcp"},
@@ -117,7 +113,6 @@ func TestDockerContainers(t *testing.T) {
 	}
 }
 
-// A container inherits its image's labels, so an image can name any Compose directory or file.
 func TestDockerComposeLabelsOfTheImage(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -156,14 +151,12 @@ func TestDockerProblems(t *testing.T) {
 	if len(p) != 1 || p[0].Code != problem.DockerAbsent || p[0].Kind != problem.Notice {
 		t.Fatalf("absent: %+v", p)
 	}
-	// dockerd runs, but not on this socket (a custom -H), and so do its containers.
 	_, _, p = collectDocker(ctx, "unix:///nonexistent/docker.sock", true, connect, map[string][]int{shopID: {2201}}, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
 		!strings.Contains(p[0].Message, "1 container(s) have running processes, but dockerd does not listen on /nonexistent/docker.sock") ||
 		!strings.Contains(p[0].Message, "set DOCKER_HOST to its socket") {
 		t.Fatalf("socket missing with running containers: %+v", p)
 	}
-	// A stat error other than a missing file (ENOTDIR here; EACCES needs a non-root user).
 	notDir := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(notDir, nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -184,8 +177,6 @@ func TestDockerProblems(t *testing.T) {
 }
 
 func TestDockerNotRunning(t *testing.T) {
-	// docker.socket can be active while dockerd is stopped: connecting would start dockerd and
-	// every container with a restart policy.
 	requests := 0
 	sock := dockerServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -196,7 +187,6 @@ func TestDockerNotRunning(t *testing.T) {
 	if len(p) != 1 || p[0].Code != problem.DockerAbsent || p[0].Kind != problem.Notice || !strings.Contains(p[0].Message, "no Docker daemon") {
 		t.Fatalf("no dockerd, no containers: %+v", p)
 	}
-	// dockerd stopped with live-restore: its containers still run.
 	_, _, p = collectDocker(ctx, "unix://"+sock, false, connect, map[string][]int{shopID: {2201}}, fakeSource{})
 	if len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
 		!strings.Contains(p[0].Message, "1 container(s) have running processes, but no Docker daemon") {
@@ -215,14 +205,12 @@ func TestDockerContainersItDoesNotList(t *testing.T) {
 	const otherID = "0000000000000000000000000000000000000000000000000000000000000003"
 	sock := dockerServer(t, engine(http.StatusOK))
 	pids := map[string][]int{shopID: {2201}, otherID: {3001, 3002}}
-	// A second dockerd on another socket runs the other container.
 	running := fakeSource{3002: {cmdline: []string{"redis-server"}, cgroup: cg("/system.slice/docker-" + otherID + ".scope")}}
 	items, _, p := collectDocker(context.Background(), "unix://"+sock, true, connect, pids, running)
 	if len(items) != 1 || len(p) != 1 || p[0].Code != problem.DockerUnavailable || p[0].Kind != problem.Error || p[0].Stage != "inventory" ||
 		!strings.Contains(p[0].Message, "1 container(s)") {
 		t.Fatalf("items %+v problems %+v", items, p)
 	}
-	// Its processes ended meanwhile; one PID now belongs to a host process.
 	ended := fakeSource{3002: {cmdline: []string{"nginx"}, cgroup: cg("/system.slice/nginx.service")}}
 	items, _, p = collectDocker(context.Background(), "unix://"+sock, true, connect, pids, ended)
 	if len(items) != 1 || len(p) != 0 {
@@ -233,8 +221,6 @@ func TestDockerContainersItDoesNotList(t *testing.T) {
 func TestDockerListedContainersAreNotUnlisted(t *testing.T) {
 	const goneID = "0000000000000000000000000000000000000000000000000000000000000001"
 	sock := dockerServer(t, engine(http.StatusOK))
-	// Docker lists both, then answers that one stopped and the other was removed, while the host
-	// still shows a process in each one's cgroup.
 	pids := map[string][]int{shopID: {2201}, stoppedID: {3001}, goneID: {3002}}
 	src := fakeSource{
 		3001: {cmdline: []string{"sh"}, cgroup: cg("/system.slice/docker-" + stoppedID + ".scope")},

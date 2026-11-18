@@ -10,10 +10,8 @@ import (
 
 var interpreterPattern = regexp.MustCompile(`^(node|nodejs|bun|deno|python[0-9.]*|java|ruby[0-9.]*|php[0-9.]*|php-fpm[0-9.]*)$`)
 
-// isInterpreter reports whether the executable runs code from an app directory.
 func isInterpreter(exe string) bool { return interpreterPattern.MatchString(filepath.Base(exe)) }
 
-// appMarkers make a directory an app directory: lockfiles and manifests Grype reads, and venvs.
 var appMarkers = []string{
 	"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "package.json",
 	"pyproject.toml", "requirements.txt", "poetry.lock", "Pipfile.lock", "uv.lock", "pyvenv.cfg",
@@ -22,15 +20,14 @@ var appMarkers = []string{
 
 type appDir struct {
 	Path string
-	Jar  bool // Path is a jar file, cataloged as a file
+	Jar  bool
 }
 
 type appDirFinder struct {
-	root  string                                      // host root
-	owned func(ctx context.Context, path string) bool // whether an installed OS package owns the file
+	root  string
+	owned func(ctx context.Context, path string) bool
 }
 
-// find returns the app directory of an interpreter process.
 func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (appDir, bool) {
 	abs := func(p string) string {
 		if filepath.IsAbs(p) {
@@ -48,7 +45,7 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 			break
 		}
 		if a == "-m" {
-			break // python -m module: the code is found through the cwd
+			break
 		}
 		switch a {
 		case "-cp", "-classpath", "--class-path":
@@ -60,7 +57,7 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 			i++
 			continue
 		case "-r", "--require", "--import", "--loader", "--experimental-loader", "--module-path":
-			i++ // a preloaded module or a module path, not the script
+			i++
 			continue
 		}
 		if v, ok := strings.CutPrefix(a, "--class-path="); ok {
@@ -75,7 +72,7 @@ func (f appDirFinder) find(ctx context.Context, cmdline []string, cwd string) (a
 			continue
 		}
 		if p := abs(a); f.isFile(p) {
-			if !strings.HasPrefix(filepath.Base(p), "ProcessContainer") { // PM2's wrapper: the app is in the cwd
+			if !strings.HasPrefix(filepath.Base(p), "ProcessContainer") {
 				starts = append(starts, filepath.Dir(f.resolve(p)))
 			}
 			break
@@ -113,7 +110,6 @@ func (f appDirFinder) walk(ctx context.Context, start string) (string, bool) {
 	if m := f.marker(outer); outer != "" && m != "" && !f.owned(ctx, outer+"/"+m) {
 		return outer, true
 	}
-	// The directory holding node_modules is not a project: a globally installed npm package (npm -g).
 	if pkgDir != "" {
 		if m := f.marker(pkgDir); m != "" && !f.owned(ctx, pkgDir+"/"+m) {
 			return pkgDir, true
@@ -137,9 +133,6 @@ func (f appDirFinder) walkUp(ctx context.Context, start string) (string, bool) {
 	return "", false
 }
 
-// toolHome returns the home directory (/root or /home/<name>) when p lies in a hidden directory
-// directly under it, such as ~/.local or ~/.nvm, or "". A stray manifest in the home directory
-// does not make it the app directory of a tool installed there.
 func toolHome(p string) string {
 	parts := strings.SplitN(strings.TrimPrefix(p, "/"), "/", 4)
 	n := 1
@@ -154,8 +147,6 @@ func toolHome(p string) string {
 	return "/" + strings.Join(parts[:n], "/")
 }
 
-// splitNodeModules splits /usr/lib/node_modules/@scope/name/bin into /usr/lib and
-// /usr/lib/node_modules/@scope/name, at the outermost node_modules.
 func splitNodeModules(p string) (outer, pkgDir string, inside bool) {
 	i := strings.Index(p+"/", "/node_modules/")
 	if i < 0 {
@@ -173,7 +164,6 @@ func splitNodeModules(p string) (outer, pkgDir string, inside bool) {
 	return outer, outer + "/node_modules/" + strings.Join(rest[:n], "/"), true
 }
 
-// resolve follows symlinks within the host root.
 func (f appDirFinder) resolve(p string) string {
 	root, err := filepath.EvalSymlinks(f.root)
 	if err != nil {
@@ -195,7 +185,6 @@ func (f appDirFinder) isFile(p string) bool {
 	return err == nil && fi.Mode().IsRegular()
 }
 
-// marker returns the first project marker in dir, or "".
 func (f appDirFinder) marker(dir string) string {
 	for _, m := range appMarkers {
 		if _, err := os.Stat(filepath.Join(f.root, dir, m)); err == nil {

@@ -1,4 +1,3 @@
-// Package procfs reads processes from the /proc tree below a host root.
 package procfs
 
 import (
@@ -16,26 +15,20 @@ import (
 	"time"
 )
 
-// userHZ is the unit of the times in /proc/<pid>/stat; it is 100 on every Linux architecture.
 const userHZ = 100
 
-// FS reads Root/proc. Production uses Root "/".
 type FS struct{ Root string }
 
-// Mapping is one file mapped into a process, deduplicated by path.
 type Mapping struct {
-	// Start and End are the hex addresses as in /proc/<pid>/maps; without their zero padding,
-	// they name the map_files entry.
 	Start, End string
 	Path       string
-	Deleted    bool // the file was replaced or removed after it was mapped
+	Deleted    bool
 }
 
 func (f FS) proc(pid int, name string) string {
 	return filepath.Join(f.Root, "proc", strconv.Itoa(pid), name)
 }
 
-// PIDs lists the process IDs, ascending.
 func (f FS) PIDs() ([]int, error) {
 	entries, err := os.ReadDir(filepath.Join(f.Root, "proc"))
 	if err != nil {
@@ -51,8 +44,6 @@ func (f FS) PIDs() ([]int, error) {
 	return pids, nil
 }
 
-// Exe returns the executable's path and whether it was replaced after the process started.
-// A kernel thread has no executable: the error satisfies os.IsNotExist.
 func (f FS) Exe(pid int) (string, bool, error) {
 	target, err := os.Readlink(f.proc(pid, "exe"))
 	if err != nil {
@@ -62,8 +53,6 @@ func (f FS) Exe(pid int) (string, bool, error) {
 	return p, deleted, nil
 }
 
-// Cmdline returns the arguments, or nil when the command line is empty (a kernel thread or a
-// zombie).
 func (f FS) Cmdline(pid int) ([]string, error) {
 	data, err := os.ReadFile(f.proc(pid, "cmdline"))
 	if err != nil {
@@ -76,12 +65,10 @@ func (f FS) Cmdline(pid int) ([]string, error) {
 	return strings.Split(string(data), "\x00"), nil
 }
 
-// Cwd returns the working directory.
 func (f FS) Cwd(pid int) (string, error) {
 	return os.Readlink(f.proc(pid, "cwd"))
 }
 
-// UID returns the real user ID.
 func (f FS) UID(pid int) (int, error) {
 	data, err := os.ReadFile(f.proc(pid, "status"))
 	if err != nil {
@@ -97,8 +84,6 @@ func (f FS) UID(pid int) (int, error) {
 	return 0, fmt.Errorf("no Uid line in %s", f.proc(pid, "status"))
 }
 
-// StartTicks returns when the process started, in clock ticks since boot (field 22 of
-// /proc/<pid>/stat). Unlike StartTime, it does not move when the wall clock is stepped.
 func (f FS) StartTicks(pid int) (uint64, error) {
 	data, err := os.ReadFile(f.proc(pid, "stat"))
 	if err != nil {
@@ -109,14 +94,13 @@ func (f FS) StartTicks(pid int) (uint64, error) {
 	if i < 0 {
 		return 0, fmt.Errorf("unexpected format of %s", f.proc(pid, "stat"))
 	}
-	fields := strings.Fields(string(data[i+1:])) // fields[0] is field 3; starttime is field 22
+	fields := strings.Fields(string(data[i+1:]))
 	if len(fields) < 20 {
 		return 0, fmt.Errorf("unexpected format of %s", f.proc(pid, "stat"))
 	}
 	return strconv.ParseUint(fields[19], 10, 64)
 }
 
-// StartTime returns when the process started.
 func (f FS) StartTime(pid int) (time.Time, error) {
 	ticks, err := f.StartTicks(pid)
 	if err != nil {
@@ -142,14 +126,11 @@ func (f FS) bootTime() (int64, error) {
 	return 0, fmt.Errorf("no btime in %s", filepath.Join(f.Root, "proc", "stat"))
 }
 
-// Cgroup returns /proc/<pid>/cgroup as it is: ParseCgroup picks the path that names the systemd
-// unit, and DockerContainerID searches every line.
 func (f FS) Cgroup(pid int) (string, error) {
 	data, err := os.ReadFile(f.proc(pid, "cgroup"))
 	return string(data), err
 }
 
-// Maps returns the files mapped into the process, each path once, in the order of first mapping.
 func (f FS) Maps(pid int) ([]Mapping, error) {
 	data, err := os.ReadFile(f.proc(pid, "maps"))
 	if err != nil {
@@ -158,14 +139,13 @@ func (f FS) Maps(pid int) ([]Mapping, error) {
 	return ParseMaps(data), nil
 }
 
-// ParseMaps parses /proc/<pid>/maps, keeping only file-backed mappings.
 func ParseMaps(data []byte) []Mapping {
 	var out []Mapping
 	seen := map[string]bool{}
 	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line) // address perms offset dev inode [path]
+		fields := strings.Fields(line)
 		if len(fields) < 6 || !strings.HasPrefix(fields[5], "/") {
-			continue // not file-backed: [heap], [anon:name], anonymous
+			continue
 		}
 		path := line[strings.Index(line, " /")+1:]
 		p, deleted := strings.CutSuffix(path, " (deleted)")
@@ -179,11 +159,8 @@ func ParseMaps(data []byte) []Mapping {
 	return out
 }
 
-// ErrNotRegular is returned for a file that is not a regular file.
 var ErrNotRegular = errors.New("not a regular file")
 
-// ErrPseudoFile is returned for a file of a kernel file system, such as /proc/kmsg: it looks like a
-// regular file, but reading it can block forever or never end.
 var ErrPseudoFile = errors.New("a file of a kernel file system")
 
 // pseudoFS are the kernel file systems whose regular files are not file contents (statfs magic
@@ -191,25 +168,23 @@ var ErrPseudoFile = errors.New("a file of a kernel file system")
 // pstore, xenfs (/proc/xen/xenbus waits forever) and rpc_pipefs (opening an NFS upcall pipe
 // registers a reader).
 var pseudoFS = map[int64]bool{
-	0x9fa0:     true, // proc
-	0x62656572: true, // sysfs
-	0x74726163: true, // tracefs
-	0x64626720: true, // debugfs
-	0x73636673: true, // securityfs
-	0x27e0eb:   true, // cgroup
-	0x63677270: true, // cgroup2
-	0xcafe4a11: true, // bpf
-	0x62656570: true, // configfs
-	0xde5e81e4: true, // efivarfs
-	0x6165676c: true, // pstore
-	0xabba1974: true, // xenfs
-	0x67596969: true, // rpc_pipefs
+	0x9fa0:     true,
+	0x62656572: true,
+	0x74726163: true,
+	0x64626720: true,
+	0x73636673: true,
+	0x27e0eb:   true,
+	0x63677270: true,
+	0xcafe4a11: true,
+	0x62656570: true,
+	0xde5e81e4: true,
+	0x6165676c: true,
+	0xabba1974: true,
+	0x67596969: true,
 }
 
-// FileID identifies a file by device and inode.
 type FileID struct{ Dev, Ino uint64 }
 
-// IDOf returns a file's device and inode.
 func IDOf(fi fs.FileInfo) (FileID, bool) {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -230,7 +205,6 @@ func (f FS) statID(path string) (FileID, error) {
 	return id, nil
 }
 
-// SameRootAsInit reports whether the process's root directory is PID 1's.
 func (f FS) SameRootAsInit(pid int) (bool, error) {
 	a, err := f.statID(f.proc(pid, "root"))
 	if err != nil {
@@ -243,8 +217,6 @@ func (f FS) SameRootAsInit(pid int) (bool, error) {
 	return a == b, nil
 }
 
-// RootDir returns the process's root directory as seen from the host root, such as /run/sshd for
-// a chrooted process.
 func (f FS) RootDir(pid int) (string, error) {
 	target, err := os.Readlink(f.proc(pid, "root"))
 	if err != nil {
@@ -254,18 +226,14 @@ func (f FS) RootDir(pid int) (string, error) {
 	return root, nil
 }
 
-// RootFileID identifies the process's root directory (through /proc, so also from another mount
-// namespace).
 func (f FS) RootFileID(pid int) (FileID, error) {
 	return f.statID(f.proc(pid, "root"))
 }
 
-// ExeFileID identifies the running executable's file (through /proc, so also in another root).
 func (f FS) ExeFileID(pid int) (FileID, error) {
 	return f.statID(f.proc(pid, "exe"))
 }
 
-// MapFileID identifies a mapped file (through /proc, so also in another root).
 func (f FS) MapFileID(pid int, m Mapping) (FileID, error) {
 	return f.statID(f.mapFile(pid, m))
 }
@@ -274,17 +242,14 @@ func (f FS) mapFile(pid int, m Mapping) string {
 	return filepath.Join(f.proc(pid, "map_files"), strings.TrimLeft(m.Start, "0")+"-"+strings.TrimLeft(m.End, "0"))
 }
 
-// OpenExe opens the running executable, even when it was replaced on disk.
 func (f FS) OpenExe(pid int) (io.ReadCloser, error) {
 	return OpenRegular(f.proc(pid, "exe"))
 }
 
-// OpenMapFile opens a mapped file through /proc/<pid>/map_files, even when it was replaced.
 func (f FS) OpenMapFile(pid int, m Mapping) (io.ReadCloser, error) {
 	return OpenRegular(f.mapFile(pid, m))
 }
 
-// oPath is O_PATH, which package syscall defines only on some architectures.
 const oPath = 0x200000
 
 // OpenRegular opens a file for reading only if it is a regular file of a real file system. A

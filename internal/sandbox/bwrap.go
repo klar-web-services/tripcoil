@@ -13,11 +13,9 @@ import (
 	"time"
 )
 
-// Bwrap runs the command under bubblewrap, started as the agent's user so that bubblewrap uses
-// unprivileged user namespaces, in its own cgroup v2 group with memory and CPU caps.
 type Bwrap struct {
-	Bwrap      string // the bwrap binary
-	CgroupRoot string // /sys/fs/cgroup
+	Bwrap      string
+	CgroupRoot string
 }
 
 // BwrapArgs is bubblewrap's command line for s. The environment is bubblewrap's own, which it
@@ -31,13 +29,10 @@ func BwrapArgs(s Spec) []string {
 	}
 	a = append(a, "--tmpfs", s.runs(), "--ro-bind", s.RunDir, s.RunDir,
 		"--bind", s.Home(), s.Home(), "--chdir", s.RunDir,
-		// A private IPC namespace: shared memory or queues left by one review cannot reach the next.
 		"--unshare-pid", "--unshare-ipc", "--die-with-parent", "--new-session", "--")
 	return append(a, s.Command...)
 }
 
-// env is the sandbox's environment: the fixed path, the home, the variables of the env file and
-// the adapter's.
 func (s Spec) env() ([]string, error) {
 	env := []string{"PATH=" + Path, "HOME=" + s.Home(), "LANG=C.UTF-8"}
 	if s.EnvFile != "" {
@@ -54,11 +49,8 @@ func (s Spec) env() ([]string, error) {
 	return append(env, s.Env...), nil
 }
 
-// Cgroup is the agent's cgroup v2 group.
 func (d Bwrap) Cgroup() string { return filepath.Join(d.CgroupRoot, "tripcoil-agent") }
 
-// Run starts bubblewrap in the agent's cgroup and waits for it. At the timeout, or when ctx is
-// cancelled, every process in the cgroup is killed.
 func (d Bwrap) Run(ctx context.Context, s Spec) (Result, error) {
 	if ctx.Err() != nil {
 		return Result{}, ctx.Err()
@@ -105,7 +97,7 @@ func (d Bwrap) Run(ctx context.Context, s Spec) (Result, error) {
 		d.kill()
 		err = <-done
 	}
-	d.kill() // whatever the command left behind
+	d.kill()
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit):
@@ -119,7 +111,6 @@ func (d Bwrap) Run(ctx context.Context, s Spec) (Result, error) {
 	return res, nil
 }
 
-// prepare creates the cgroup with its caps and opens it for CgroupFD.
 func (d Bwrap) prepare(s Spec) (*os.File, error) {
 	mem, err := Bytes(s.MemoryMax)
 	if err != nil {
@@ -141,7 +132,7 @@ func (d Bwrap) prepare(s Spec) (*os.File, error) {
 			}
 		}
 	}
-	d.remove() // a group a killed Tripcoil left behind
+	d.remove()
 	if err := os.Mkdir(d.Cgroup(), 0o755); err != nil {
 		return nil, err
 	}
@@ -180,7 +171,6 @@ func (d Bwrap) kill() {
 	}
 }
 
-// remove deletes the cgroup once its processes are gone.
 func (d Bwrap) remove() {
 	if !exists(d.Cgroup()) {
 		return

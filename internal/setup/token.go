@@ -22,8 +22,6 @@ var (
 	pastePattern = regexp.MustCompile(`^sk-ant-[A-Za-z0-9_-]{33,}$`)
 )
 
-// claudeToken creates a token with claude setup-token and saves it to envFile, after
-// confirmation; when setup-token prints none, it asks for it. It returns whether it saved one.
 func (h Host) claudeToken(o Options, cli, envFile string) (bool, error) {
 	if o.Yes || !h.Terminal() {
 		return false, nil
@@ -54,13 +52,12 @@ func (h Host) claudeToken(o Options, cli, envFile string) (bool, error) {
 	return true, nil
 }
 
-// pasteToken asks for the token with the input hidden; "" skips.
 func (h Host) pasteToken() (string, error) {
 	for {
 		fmt.Fprint(h.Out, "Paste the token claude setup-token printed (input hidden, Enter skips): ")
 		line, err := h.readHidden()
 		fmt.Fprintln(h.Out)
-		t := strings.TrimSpace(strings.NewReplacer("\x1b[200~", "", "\x1b[201~", "").Replace(line)) // bracketed paste
+		t := strings.TrimSpace(strings.NewReplacer("\x1b[200~", "", "\x1b[201~", "").Replace(line))
 		if err != nil || t == "" {
 			return "", nil
 		}
@@ -71,8 +68,6 @@ func (h Host) pasteToken() (string, error) {
 	}
 }
 
-// readHidden reads a line with echo off. Ctrl-C or SIGTERM meanwhile turns echo back on before
-// Tripcoil exits.
 func (h Host) readHidden() (string, error) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -96,7 +91,6 @@ func (h Host) readHidden() (string, error) {
 	return readLine(h.In)
 }
 
-// hasToken reports whether envFile sets key to a value.
 func (h Host) hasToken(envFile, key string) (bool, error) {
 	if envFile == "" {
 		return false, nil
@@ -118,8 +112,6 @@ func (h Host) hasToken(envFile, key string) (bool, error) {
 	return v != "", nil
 }
 
-// writeToken sets key to token in envFile, keeping its other lines, and replaces the file at
-// once, root-only.
 func (h Host) writeToken(envFile, key, token string) error {
 	p, err := filepath.EvalSymlinks(h.path(envFile))
 	if err != nil {
@@ -167,8 +159,6 @@ func (h Host) writeToken(envFile, key, token string) error {
 	return os.Rename(f.Name(), p)
 }
 
-// extractToken finds the token in what claude setup-token printed: the last one, since the
-// terminal UI redraws, with a token that wraps over indented lines put back together.
 func extractToken(out []byte) (string, bool) {
 	s := string(stripEscapes(out))
 	token := ""
@@ -190,8 +180,6 @@ func isTokenChar(c byte) bool {
 	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-'
 }
 
-// scanToken reads token characters from the start of s, continuing on each next line that,
-// apart from spaces around it, holds only token characters, and not only dashes (a rule).
 func scanToken(s string) string {
 	var b strings.Builder
 	i := 0
@@ -216,8 +204,6 @@ func scanToken(s string) string {
 	}
 }
 
-// stripEscapes drops terminal escape sequences. Cursor moves to another line and carriage
-// returns without a newline become newlines, so text drawn on separate lines stays apart.
 func stripEscapes(b []byte) []byte {
 	out := make([]byte, 0, len(b))
 	for i := 0; i < len(b); i++ {
@@ -236,17 +222,17 @@ func stripEscapes(b []byte) []byte {
 		case i+1 >= len(b):
 		case b[i+1] == '[':
 			i += 2
-			for i < len(b) && b[i] >= 0x20 && b[i] <= 0x3f { // parameters and intermediates
+			for i < len(b) && b[i] >= 0x20 && b[i] <= 0x3f {
 				i++
 			}
 			if i < len(b) && strings.IndexByte("ABEHf", b[i]) >= 0 {
 				out = append(out, '\n')
-			} else if i < len(b) && b[i] == 'C' { // cursor forward stands for spaces
+			} else if i < len(b) && b[i] == 'C' {
 				out = append(out, ' ')
 			}
 		case b[i+1] == '(' || b[i+1] == ')' || b[i+1] == '#':
 			i += 2
-		case b[i+1] == ']' || b[i+1] == 'P': // OSC and DCS
+		case b[i+1] == ']' || b[i+1] == 'P':
 			i += 2
 			for i < len(b) && b[i] != 0x07 && !(b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\') {
 				i++

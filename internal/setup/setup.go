@@ -21,33 +21,25 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Host is the machine setup works on. Root prefixes every path, so tests can use a folder.
 type Host struct {
-	Root     string
-	Exe      string // Tripcoil's own binary, links resolved
-	Sudo     string // the prefix for a command in a hint (see Sudo)
-	Run      func(name string, args ...string) ([]byte, error)
-	LookPath func(name string) (string, error)
-	// UserExists and GroupExists look up the agent's user and group.
+	Root        string
+	Exe         string
+	Sudo        string
+	Run         func(name string, args ...string) ([]byte, error)
+	LookPath    func(name string) (string, error)
 	UserExists  func(name string) bool
 	GroupExists func(name string) bool
-	// FindCLI is agent.FindCLI; Fetch downloads NodeSource's key.
-	FindCLI func(command, name string) (string, error)
-	Fetch   func(url string) ([]byte, error)
-	// CheckBinary checks that the binary is root-owned and writable only by root, with every
-	// folder above it (the service runs it as root).
+	FindCLI     func(command, name string) (string, error)
+	Fetch       func(url string) ([]byte, error)
 	CheckBinary func(path string) error
-	Stat        config.StatFunc // checks review.envFile
-	// Terminal reports whether In is a terminal; NoEcho stops it echoing until restore.
-	Terminal func() bool
-	NoEcho   func() (restore func(), err error)
-	// SetupToken runs cli setup-token on a pseudo-terminal and returns what it printed.
-	SetupToken func(cli string) ([]byte, error)
-	In         io.Reader // answers to questions
-	Out        io.Writer
+	Stat        config.StatFunc
+	Terminal    func() bool
+	NoEcho      func() (restore func(), err error)
+	SetupToken  func(cli string) ([]byte, error)
+	In          io.Reader
+	Out         io.Writer
 }
 
-// NewHost is this machine.
 func NewHost(exe string, in io.Reader, out io.Writer) Host {
 	return Host{
 		Exe: exe, In: in, Out: out,
@@ -71,7 +63,7 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 			if err != nil {
 				return nil, err
 			}
-			defer os.RemoveAll(home) // no Claude login state stays behind
+			defer os.RemoveAll(home)
 			cmd := exec.Command(cli, "setup-token")
 			cmd.Env = []string{"PATH=" + sandbox.Path, "HOME=" + home}
 			for _, k := range []string{"TERM", "LANG", "LC_ALL", "COLORTERM"} {
@@ -84,7 +76,6 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 	}
 }
 
-// noEcho turns off the terminal's echo on stdin.
 func noEcho() (func(), error) {
 	t, err := unix.IoctlGetTermios(0, unix.TCGETS)
 	if err != nil {
@@ -98,7 +89,6 @@ func noEcho() (func(), error) {
 	return func() { unix.IoctlSetTermios(0, unix.TCSETS, &old) }, nil
 }
 
-// Sudo is the prefix for a command in a hint: "sudo " unless the user is root without sudo.
 func Sudo(euid int, sudoUser string) string {
 	if euid == 0 && sudoUser == "" {
 		return ""
@@ -113,7 +103,6 @@ func (h Host) exists(p string) bool {
 	return err == nil
 }
 
-// Manager detects the service manager: systemd when it booted the host, otherwise OpenRC.
 func (h Host) Manager() (Manager, error) {
 	switch {
 	case h.exists("/run/systemd/system"):
@@ -124,17 +113,11 @@ func (h Host) Manager() (Manager, error) {
 	return "", errors.New("this host runs neither systemd nor OpenRC, so Tripcoil cannot install its service")
 }
 
-// Options are setup's flags.
 type Options struct {
-	Agent string // claude, codex, none, or "" to ask (or keep the config's)
-	Yes   bool   // accept the defaults instead of asking
+	Agent string
+	Yes   bool
 }
 
-// Setup sets the host up (spec section 9). Every step leaves what is already in place alone, so
-// a second run changes nothing (AC-15). It reports whether the review is ready to check: no
-// agent, or the agent's CLI installed and its credentials in review.envFile. When it is ready,
-// the service's start (or restart) is left to start, which the caller runs after its checks so
-// that they do not wait for the first run; start is nil when there is nothing to start.
 func (h Host) Setup(o Options) (ready bool, start func() error, err error) {
 	m, err := h.Manager()
 	if err != nil {
@@ -232,7 +215,6 @@ func (h Host) Setup(o Options) (ready bool, start func() error, err error) {
 	if name == "none" {
 		fmt.Fprintln(h.Out, "review.agent is none, so reports are audit-only.")
 	} else if !ready {
-		// A rejected review.command was named above; installing the CLI would not help.
 		fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed || c.Review.Command != "", hasToken))
 	}
 	return ready, start, nil
@@ -266,7 +248,6 @@ func (h Host) warnOldSystemd() {
 	}
 }
 
-// agentUser creates the agent's system user and its group, without a home or a login shell.
 func (h Host) agentUser() (bool, error) {
 	u, g := h.UserExists(agent.UserName), h.GroupExists(run.AgentGroup)
 	switch {
@@ -293,9 +274,6 @@ func (h Host) agentUser() (bool, error) {
 	return true, nil
 }
 
-// config writes the config file when there is none, with the chosen agent, and the empty token
-// file it names, unless that exists. An existing config is kept as it is. Either way the config
-// must be valid; it returns it, and whether it wrote the config and created the token file.
 func (h Host) config(o Options) (config.Config, bool, bool, error) {
 	path := h.path(config.DefaultPath)
 	if _, err := os.Lstat(path); err == nil {
@@ -337,7 +315,6 @@ func (h Host) config(o Options) (config.Config, bool, bool, error) {
 	return c, true, created, err
 }
 
-// loadConfig reads and validates the config, with its paths under Root.
 func (h Host) loadConfig() (config.Config, error) {
 	path := h.path(config.DefaultPath)
 	data, err := os.ReadFile(path)
@@ -347,7 +324,6 @@ func (h Host) loadConfig() (config.Config, error) {
 	return config.Parse(path, data, func(p string) (config.FileInfo, error) { return h.Stat(h.path(p)) })
 }
 
-// ask asks a question until the answer is one of choices; an empty answer is def.
 func (h Host) ask(q, def string, choices ...string) (string, error) {
 	for {
 		fmt.Fprintf(h.Out, "%s [%s]: ", q, def)
@@ -388,7 +364,6 @@ func readLine(r io.Reader) (string, error) {
 	}
 }
 
-// bubblewrap installs bubblewrap, the review's sandbox without systemd, after confirmation.
 func (h Host) bubblewrap(o Options) (bool, error) {
 	if _, err := h.LookPath("bwrap"); err == nil {
 		return false, nil
@@ -411,9 +386,6 @@ func (h Host) bubblewrap(o Options) (bool, error) {
 	return true, nil
 }
 
-// service writes the service files that differ, then enables and starts the service, restarting
-// it when its files changed. It reports whether it did anything and whether it wrote the files.
-// With deferStart it returns that start or restart instead of running it.
 func (h Host) service(m Manager, deferStart bool) (bool, bool, []string, error) {
 	wrote := false
 	for _, f := range ServiceFiles(m, h.Exe) {
@@ -479,7 +451,6 @@ func (h Host) step(s []string) error {
 	return nil
 }
 
-// startService runs the start or restart that service deferred.
 func (h Host) startService(step []string, did string) error {
 	if err := h.step(step); err != nil {
 		return err
@@ -488,7 +459,6 @@ func (h Host) startService(step []string, did string) error {
 	return nil
 }
 
-// hasService reports whether rc-update show lists tripcoil.
 func hasService(out []byte) bool {
 	for _, l := range strings.Split(string(out), "\n") {
 		if f := strings.Fields(l); len(f) > 0 && f[0] == "tripcoil" {
@@ -498,8 +468,6 @@ func hasService(out []byte) bool {
 	return false
 }
 
-// nextSteps says how to install the agent CLI system-wide, unless it is installed, and give it
-// credentials in envFile (spec 8.3), unless it has them, and how each agent is billed.
 func nextSteps(name, envFile, sudo string, installed, hasToken bool) string {
 	edit := "sudoedit"
 	if sudo == "" {
@@ -543,14 +511,12 @@ func nextSteps(name, envFile, sudo string, installed, hasToken bool) string {
 	return s + fmt.Sprintf("Then check the host: %stripcoil doctor\n", sudo)
 }
 
-// Service is the tripcoil service's state.
 type Service struct {
 	Manager   Manager
 	Installed bool
 	Running   bool
 }
 
-// Service reports whether the tripcoil service is installed and running.
 func (h Host) Service() (Service, error) {
 	m, err := h.Manager()
 	if err != nil {

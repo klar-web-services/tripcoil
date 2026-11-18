@@ -1,5 +1,3 @@
-// Package kernelcna matches an upstream kernel version against the CVE records that the Linux
-// kernel CNA publishes in the kernel.org vulns repository (spec section 6.3).
 package kernelcna
 
 import (
@@ -8,13 +6,11 @@ import (
 	"strings"
 )
 
-// version is a kernel version such as 6.1.119, 2.6.32.71 or 7.4-rc2.
 type version struct {
 	parts []int
-	rc    int // 0 for a release
+	rc    int
 }
 
-// parseVersion parses a kernel version. "6.1.0" and "6.1" are the same version.
 func parseVersion(s string) (version, bool) {
 	var v version
 	if base, rc, ok := strings.Cut(s, "-rc"); ok {
@@ -34,7 +30,6 @@ func parseVersion(s string) (version, bool) {
 	return v, true
 }
 
-// digits reports whether s is one or more characters 0-9.
 func digits(s string) bool {
 	for _, c := range s {
 		if c < '0' || c > '9' {
@@ -44,8 +39,6 @@ func digits(s string) bool {
 	return s != ""
 }
 
-// compare orders versions numerically, a missing component counting as 0, and a release
-// candidate below its release.
 func compare(a, b version) int {
 	for i := range max(len(a.parts), len(b.parts)) {
 		x, y := at(a.parts, i), at(b.parts, i)
@@ -76,7 +69,6 @@ func at(p []int, i int) int {
 	return 0
 }
 
-// branch is the stable branch of a version: 6.1 for 6.1.119, and 2.6.32 for 2.6.32.71.
 func branch(v version) []int {
 	n := 2
 	if len(v.parts) >= 3 && v.parts[0] == 2 && v.parts[1] == 6 {
@@ -91,8 +83,6 @@ func branch(v version) []int {
 
 func sameBranch(a, b version) bool { return slices.Equal(branch(a), branch(b)) }
 
-// atMostPrefix reports whether v is at most "X.Y.*" (prefix X.Y), comparing only the prefix's
-// components.
 func atMostPrefix(v version, prefix []int) bool { return comparePrefix(v, prefix) <= 0 }
 
 func belowPrefix(v version, prefix []int) bool { return comparePrefix(v, prefix) < 0 }

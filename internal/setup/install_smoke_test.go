@@ -1,13 +1,5 @@
 //go:build installsmoke
 
-// The install smoke test runs setup's real Node.js 22 and Claude Code install, and uninstall's
-// NodeSource removal, as root in throwaway containers of several distributions. It needs docker
-// and network access, takes several minutes, and is not part of CI. Run it with:
-//
-//	go test -tags installsmoke -run '^TestInstallSmokeContainers$' -timeout 40m -v ./internal/setup
-//
-// Set TRIPCOIL_SMOKE_IMAGES to a space-separated list to test only some images.
-
 package setup
 
 import (
@@ -24,13 +16,10 @@ import (
 
 var smokeImages = []string{"debian:12", "ubuntu:24.04", "fedora:latest", "rockylinux:9", "alpine:3.21", "archlinux:latest"}
 
-// smokePrep is what an image needs first. The Arch image ships without a sync database, which a
-// real host has; setup then stops and names this command (it refreshes apt's and apk's indexes itself).
 var smokePrep = map[string]string{
 	"archlinux:latest": "pacman -Syu --noconfirm",
 }
 
-// TestInstallSmokeContainers runs TestInstallSmoke in a container of each image.
 func TestInstallSmokeContainers(t *testing.T) {
 	if os.Getenv("TRIPCOIL_SMOKE_INNER") != "" {
 		t.Skip("inside a container")
@@ -57,7 +46,7 @@ func TestInstallSmokeContainers(t *testing.T) {
 			name := fmt.Sprintf("tripcoil-smoke-%d-%s", os.Getpid(), strings.NewReplacer(":", "-", "/", "-").Replace(image))
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
-			defer exec.Command("docker", "rm", "-f", name).Run() // a timeout kills the client, not the container
+			defer exec.Command("docker", "rm", "-f", name).Run()
 			start := time.Now()
 			script := "exec /smoke -test.run '^TestInstallSmoke$' -test.v -test.timeout 15m"
 			if prep := smokePrep[image]; prep != "" {
@@ -73,8 +62,6 @@ func TestInstallSmokeContainers(t *testing.T) {
 	}
 }
 
-// TestInstallSmoke installs Node.js 22 and Claude Code on this host, then removes the NodeSource
-// repository setup added. It runs only inside a container.
 func TestInstallSmoke(t *testing.T) {
 	if os.Getenv("TRIPCOIL_SMOKE_INNER") == "" || os.Geteuid() != 0 {
 		t.Skip("runs only as root in a container; see TestInstallSmokeContainers")
@@ -111,7 +98,7 @@ func TestInstallSmoke(t *testing.T) {
 	}
 
 	marked := h.markedNodeSource()
-	var hosts []string // the host's own files, planted where setup wrote none
+	var hosts []string
 	for _, p := range NodeSourceFiles {
 		if !h.exists(p) && p != NodeSourceKeyMarkPath {
 			if err := h.writeFile(p, []byte("host's own\n")); err != nil {

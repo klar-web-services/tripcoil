@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// testData reads the records in testdata/kernelcna: 29 real records from the vulns repository
-// (commit 84a53c89, 2026-11-13) chosen to cover every kind of range the kernel CNA writes.
 func testData(t *testing.T) *Data {
 	t.Helper()
 	paths, err := filepath.Glob("../../testdata/kernelcna/cve/published/*/CVE-*.json")
@@ -48,13 +46,6 @@ func ids(ms []Match) []string {
 	return out
 }
 
-// strakDifferences are where the records' JSON and strak, the vulns repository's own tool (which
-// reads the commit-level .dyad files), disagree for these versions. extra: strak counts a fix of an
-// earlier introduction against a later reintroduction, so the JSON is right, except for
-// CVE-2021-47645: its record says "fixed in 5.2" for a bug introduced in 5.10 and gives no mainline
-// fix, so strak is right and Tripcoil reports a false positive (the only record of that shape in
-// the full data). missing: the generator left an unfixed backport out of the JSON, so no rule on
-// the JSON can find it.
 var strakDifferences = map[string]struct{ extra, missing []string }{
 	"7.3.3":    {extra: []string{"CVE-2021-47645"}},
 	"6.12.58":  {extra: []string{"CVE-2021-47645", "CVE-2026-46205"}},
@@ -109,9 +100,9 @@ func TestFixFor(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ version, cve, want string }{
-		{"5.15.131", "CVE-2024-26581", "5.15.149"}, // fixed in its own branch
-		{"7.3.3", "CVE-2026-68086", ""},            // fixed only in 7.1.4: no fix for 7.3
-		{"6.1.119", "CVE-2026-100080", "6.1.192"},  // "0 < 6.1.192" in the backports, "6.1.192 <= 6.1.*" fixed
+		{"5.15.131", "CVE-2024-26581", "5.15.149"},
+		{"7.3.3", "CVE-2026-68086", ""},
+		{"6.1.119", "CVE-2026-100080", "6.1.192"},
 	} {
 		if got, ok := fixes[c.version][c.cve]; !ok || got != c.want {
 			t.Errorf("%s %s: fixed %q (affected %v), want %q", c.version, c.cve, got, ok, c.want)
@@ -140,7 +131,6 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-// A fix that the record itself marks affected (a bug brought back by its own fix) is skipped.
 func TestFixForSkipsAffectedFixes(t *testing.T) {
 	r := Record{ID: "CVE-2026-1", Affected: []Entry{{DefaultStatus: "unaffected", Versions: []Range{
 		{Version: "6.6.1", LessThan: "6.6.125", Status: "affected"},

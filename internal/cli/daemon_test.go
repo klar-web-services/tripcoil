@@ -12,8 +12,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// daemonDeps is a host where time moves only while the daemon waits, and the daemon is stopped
-// after stopAfter runs.
 func daemonDeps(t *testing.T, stopAfter int) (deps, *[]time.Time) {
 	d := testDeps(t, sampleInventory(), nil)
 	d.random = bytes.NewReader(bytes.Repeat([]byte{0xab}, 64))
@@ -31,7 +29,7 @@ func daemonDeps(t *testing.T, stopAfter int) (deps, *[]time.Time) {
 	d.collect = func(context.Context, string) (*inventory.Inventory, error) {
 		runs = append(runs, now)
 		if len(runs) == stopAfter {
-			cancel() // SIGTERM arrives during this run's inventory
+			cancel()
 		}
 		now = now.Add(time.Minute)
 		return sampleInventory(), nil
@@ -56,7 +54,7 @@ func TestDaemonRunsEveryInterval(t *testing.T) {
 	st, _ := run.ReadState(d.stateDir)
 	rec, err := run.ReadRecord(d.stateDir + "/runs/" + st.LastRun)
 	if err != nil || rec.Trigger != "schedule" || st.LastRunAt != want[1] {
-		t.Fatalf("state %+v, last run %+v %v", st, rec, err) // the third run was interrupted
+		t.Fatalf("state %+v, last run %+v %v", st, rec, err)
 	}
 	for _, s := range []string{"Tripcoil daemon started: a run every 2h0m0s.", "Next run at 2026-11-14T08:15:00Z.", ": complete.", "Tripcoil daemon stopped."} {
 		if !strings.Contains(out.String(), s) {
@@ -67,7 +65,7 @@ func TestDaemonRunsEveryInterval(t *testing.T) {
 
 func TestDaemonWaitsForTheLastRun(t *testing.T) {
 	d, runs := daemonDeps(t, 1)
-	last := time.Date(2026, 11, 14, 5, 15, 0, 0, time.UTC) // a manual run an hour ago
+	last := time.Date(2026, 11, 14, 5, 15, 0, 0, time.UTC)
 	if err := run.WriteState(d.stateDir, run.State{LastRun: "x", LastRunAt: last}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +85,7 @@ func TestDaemonReload(t *testing.T) {
 	d.after = func(time.Duration) <-chan time.Time {
 		waits++
 		switch waits {
-		case 1: // the first wait: a broken config arrives with a SIGHUP
+		case 1:
 			os.WriteFile(d.configPath, []byte("version: 1\ninterval: 1m\n"), 0o644)
 		case 2:
 			os.WriteFile(d.configPath, []byte("version: 1\ninterval: 2h\n"), 0o644)

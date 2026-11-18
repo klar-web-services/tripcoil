@@ -12,10 +12,9 @@ import (
 	"time"
 )
 
-// Systemd runs the command as a transient unit with systemd-run (spec section 8.2).
 type Systemd struct {
-	SystemdRun string // the systemd-run binary
-	Systemctl  string // the systemctl binary
+	SystemdRun string
+	Systemctl  string
 }
 
 // SystemdArgs is systemd-run's command line for s. It leaves out --quiet: systemd-run then ends
@@ -28,7 +27,7 @@ func SystemdArgs(s Spec) []string {
 		"-p", "ReadWritePaths=" + s.Home()}
 	var hide []string
 	for _, h := range s.hidden() {
-		hide = append(hide, "-"+h) // "-": a path that does not exist is not an error
+		hide = append(hide, "-"+h)
 	}
 	a = append(a, "-p", "InaccessiblePaths="+strings.Join(hide, " "),
 		"-p", "TemporaryFileSystem="+s.runs(), "-p", "BindReadOnlyPaths="+s.RunDir,
@@ -42,7 +41,6 @@ func SystemdArgs(s Spec) []string {
 		// what one review stored or held in memory into the next.
 		"-p", "SystemCallFilter=~@keyring", "-p", "SystemCallErrorNumber=EPERM", "-p", "LimitCORE=0",
 		"-p", fmt.Sprintf("RuntimeMaxSec=%d", int(s.Timeout.Seconds())), "-p", "MemoryMax="+s.MemoryMax, "-p", "CPUQuota="+s.CPUQuota,
-		// memory.max leaves swap out; without swap the cap holds. TasksMax stops a fork bomb.
 		"-p", "MemorySwapMax=0", "-p", fmt.Sprintf("TasksMax=%d", MaxTasks),
 		"-p", "Nice=10", "-p", "IOSchedulingClass=idle")
 	if s.EnvFile != "" {
@@ -55,9 +53,6 @@ func SystemdArgs(s Spec) []string {
 	return append(append(a, "--"), s.Command...)
 }
 
-// Run starts the unit and waits for it. Killing systemd-run alone would leave the unit running,
-// so Run stops the unit whenever ctx is cancelled and again after systemd-run has exited, however
-// it ended (it may have been killed before the unit even started).
 func (d Systemd) Run(ctx context.Context, s Spec) (Result, error) {
 	if ctx.Err() != nil {
 		return Result{}, ctx.Err()
@@ -69,7 +64,7 @@ func (d Systemd) Run(ctx context.Context, s Spec) (Result, error) {
 	cmd.Env = []string{"PATH=" + Path, "LANG=C.UTF-8"}
 	cmd.Stdout = s.Stdout
 	cmd.Stderr = io.MultiWriter(s.Stderr, &tail)
-	cmd.WaitDelay = 5 * time.Second // a process that keeps the output open cannot block Wait
+	cmd.WaitDelay = 5 * time.Second
 	// Its own process group: a Ctrl-C or a service stop that signals Tripcoil's group must not
 	// end systemd-run before Tripcoil has stopped the unit.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -78,8 +73,6 @@ func (d Systemd) Run(ctx context.Context, s Spec) (Result, error) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	// RuntimeMaxSec ends the unit at the timeout; this only guards against a systemd-run that
-	// does not return.
 	backstop := time.NewTimer(s.Timeout + 2*time.Minute)
 	defer backstop.Stop()
 	var err error
@@ -107,7 +100,6 @@ func (d Systemd) Run(ctx context.Context, s Spec) (Result, error) {
 	return res, nil
 }
 
-// StopLeftovers stops units of earlier reviews that a crash or a killed Tripcoil left running.
 func (d Systemd) StopLeftovers() error {
 	out, err := exec.Command(d.Systemctl, "stop", UnitPrefix+"*.service").CombinedOutput()
 	if err != nil {
@@ -120,7 +112,6 @@ func (d Systemd) stop(unit string) {
 	exec.Command(d.Systemctl, "stop", unit).Run()
 }
 
-// waitOrKill waits for systemd-run after its unit was stopped, and kills it when it does not end.
 func waitOrKill(cmd *exec.Cmd, done chan error) error {
 	select {
 	case err := <-done:
@@ -131,7 +122,6 @@ func waitOrKill(cmd *exec.Cmd, done chan error) error {
 	}
 }
 
-// tailBuffer keeps the last 4 KiB written to it.
 type tailBuffer struct{ b []byte }
 
 func (t *tailBuffer) Write(p []byte) (int, error) {
@@ -142,8 +132,6 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// finished returns the result of the last "Finished with result: " line: systemd-run writes it
-// after the command has ended, so nothing the command wrote can follow it.
 func (t *tailBuffer) finished() string {
 	const marker = "Finished with result: "
 	i := bytes.LastIndex(t.b, []byte(marker))

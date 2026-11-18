@@ -19,7 +19,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/redact"
 )
 
-// Source is what the process collector reads from /proc. procfs.FS implements it.
 type Source interface {
 	PIDs() ([]int, error)
 	Exe(pid int) (string, bool, error)
@@ -39,32 +38,27 @@ type Source interface {
 	OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error)
 }
 
-// Caps on the distinct shared libraries taken per process and per run. A user can map up to
-// vm.max_map_count files named lib<N>.so, and each library costs a package tool query, inventory
-// space and later a scan.
 const (
 	maxProcessLibraries = 1024
 	maxRunLibraries     = 20000
 )
 
-var processLibraryCap, runLibraryCap = maxProcessLibraries, maxRunLibraries // lowered by tests
+var processLibraryCap, runLibraryCap = maxProcessLibraries, maxRunLibraries
 
 type processCollector struct {
 	src      Source
-	root     string            // host root, for /etc/passwd and for checking what is on disk now
-	resolver *pkgtool.Resolver // nil when the package tool is unavailable
+	root     string
+	resolver *pkgtool.Resolver
 	distro   Distro
 	cacheDir string
 
 	users    map[int]string
-	owned    map[string]bool    // package ownership of single paths (app directory markers), by path
-	files    map[fileKey]Origin // origins of unpackaged running files
-	libPaths map[string]bool    // the distinct library paths taken in this run
-	readLeft int64              // what is left of the run's read budget
+	owned    map[string]bool
+	files    map[fileKey]Origin
+	libPaths map[string]bool
+	readLeft int64
 }
 
-// fileKey identifies a running file by path and by device and inode: another mount namespace
-// can put another file at the same path. A file unlinked after one process was read needs a copy.
 type fileKey struct {
 	path    string
 	id      procfs.FileID
@@ -73,27 +67,27 @@ type fileKey struct {
 
 type rawProcess struct {
 	pid        int
-	cmdline    []string // unredacted; only used to find the app directory, never written
+	cmdline    []string
 	exe        string
 	exeDeleted bool
 	cwd        string
 	user       string
 	started    time.Time
-	startTicks uint64 // tells a reused PID apart; 0 when unknown
+	startTicks uint64
 	unit       string
 	libs       []procfs.Mapping
-	otherRoot  bool     // its root directory is not the host's
-	notHost    []string // libraries of a process in another root that are not the host's files
-	libLimit   string   // why some libraries were not taken, if some were not
-	unresolved string   // why the origin cannot be resolved, if it cannot
-	dockerd    bool     // it is the host's dockerd: not rootless, not in a container or another root
+	otherRoot  bool
+	notHost    []string
+	libLimit   string
+	unresolved string
+	dockerd    bool
 }
 
 type processResult struct {
 	items         []Item
 	origins       []Origin
-	containerPIDs map[string][]int // Docker container ID -> its host PIDs
-	dockerd       bool             // the host's own dockerd runs
+	containerPIDs map[string][]int
+	dockerd       bool
 	problems      []problem.Problem
 }
 
@@ -134,15 +128,13 @@ func (c *processCollector) collect(ctx context.Context) (processResult, error) {
 	return res, nil
 }
 
-// read reads one process. ok is false for a process that ended or is a kernel thread; a
-// containerID means the process belongs to that Docker container.
 func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok bool) {
 	cmdline, err := c.src.Cmdline(pid)
 	if err != nil {
 		return nil, "", false
 	}
 	exe, deleted, exeErr := c.src.Exe(pid)
-	if errors.Is(exeErr, fs.ErrNotExist) { // a kernel thread or zombie, or it exited meanwhile
+	if errors.Is(exeErr, fs.ErrNotExist) {
 		return nil, "", false
 	}
 	cgroup, _ := c.src.Cgroup(pid)
@@ -150,7 +142,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 		return nil, id, true
 	}
 	p = &rawProcess{pid: pid, cmdline: cmdline, exe: exe, exeDeleted: deleted}
-	if !procfs.UserManaged(cgroup) { // a unit of a user's own manager is not a system unit
+	if !procfs.UserManaged(cgroup) {
 		p.unit = procfs.SystemdUnit(procfs.ParseCgroup([]byte(cgroup)))
 	}
 	if uid, err := c.src.UID(pid); err == nil {
@@ -192,7 +184,7 @@ func (c *processCollector) read(pid int) (p *rawProcess, containerID string, ok 
 			}
 			c.libPaths[m.Path] = true
 		}
-		if p.otherRoot && !m.Deleted { // a replaced file never matches the newer one at its path
+		if p.otherRoot && !m.Deleted {
 			if id, err := c.src.MapFileID(pid, m); err != nil || !c.isHostFile(m.Path, id) {
 				p.notHost = append(p.notHost, m.Path)
 				continue
@@ -229,7 +221,6 @@ func (c *processCollector) runsHostFile(pid int, exe string, deleted bool) bool 
 	return err == nil && c.isHostFile(exe, id)
 }
 
-// isHostFile reports whether the host's file at path is the file id.
 func (c *processCollector) isHostFile(path string, id procfs.FileID) bool {
 	fi, err := os.Stat(filepath.Join(c.root, path))
 	if err != nil {
@@ -269,7 +260,6 @@ func readPasswd(path string) map[int]string {
 	return m
 }
 
-// owners asks the package tool about every executable and library in one batch.
 func (c *processCollector) owners(ctx context.Context, procs []*rawProcess) (map[string]pkgtool.Package, error) {
 	if c.resolver == nil {
 		return nil, nil
@@ -297,7 +287,6 @@ func (c *processCollector) owners(ctx context.Context, procs []*rawProcess) (map
 	return c.resolver.Owners(ctx, paths)
 }
 
-// ownedPath reports, once per path, whether an installed OS package owns path.
 func (c *processCollector) ownedPath(ctx context.Context, path string) bool {
 	if c.resolver == nil {
 		return false
@@ -318,7 +307,6 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 			name = commandName(p.cmdline)
 			subject = "command:" + name
 		}
-		// Its own item: another root's /usr/sbin/nginx is not the host's /usr/sbin/nginx.
 		d := b.process("unresolved:"+subject, p.exe, "", name)
 		d.addProcess(proc, p.unit)
 		o := Origin{ID: UnresolvedOriginID("process:" + subject), Kind: OriginUnresolved, Reason: p.unresolved}
@@ -347,9 +335,9 @@ func (c *processCollector) build(ctx context.Context, p *rawProcess, owners map[
 	for _, m := range p.libs {
 		if found && !dir.Jar && within(m.Path, dir.Path) {
 			if m.Deleted && c.existsOnHost(m.Path) {
-				d.restartNeeded(m.Path) // the Audit scans the newer file on disk
+				d.restartNeeded(m.Path)
 			}
-			continue // covered by the app directory
+			continue
 		}
 		c.linkFile(ctx, b, d, m.Path, m.Deleted, owners, c.opener(p, errUnmapped, func() (io.ReadCloser, error) { return c.src.OpenMapFile(p.pid, m) }))
 	}
@@ -387,12 +375,10 @@ func (c *processCollector) opener(p *rawProcess, gone error, open func() (io.Rea
 	}
 }
 
-// linkFile attaches the origin of a running executable or library: its package, or the file
-// itself. open reads the running file through /proc.
 func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draft, path string, deleted bool, owners map[string]pkgtool.Package, open func() (io.ReadCloser, error)) {
 	pkg, owned := owners[path]
 	if deleted && (owned || c.existsOnHost(path)) {
-		d.restartNeeded(path) // a newer file is in place, and a restart loads it
+		d.restartNeeded(path)
 	}
 	if c.resolver == nil {
 		b.link(d, Origin{ID: UnresolvedOriginID(path), Kind: OriginUnresolved, Reason: "package ownership is unknown because the package tool failed", Paths: []string{path}})
@@ -413,10 +399,6 @@ func (c *processCollector) linkFile(ctx context.Context, b *itemBuilder, d *draf
 	b.link(d, o)
 }
 
-// fileOrigin identifies an unpackaged running file by its content, read through /proc: that is
-// the file that runs, not whatever is at the path now (another mount namespace may differ), and
-// it can never be a FIFO or device someone put at that path. A replaced file is also copied into
-// the cache, because the Audit cannot read it from the path.
 func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted bool, open func() (io.ReadCloser, error)) (Origin, error) {
 	f, err := openRunning(open, &c.readLeft)
 	if err != nil {
@@ -443,8 +425,6 @@ func (c *processCollector) fileOrigin(ctx context.Context, path string, deleted 
 	return o, nil
 }
 
-// errReason describes err without the paths it names, such as /proc/<pid>/map_files/<range>,
-// which change from run to run.
 func errReason(err error) string {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {

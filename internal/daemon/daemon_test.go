@@ -30,7 +30,6 @@ func TestWait(t *testing.T) {
 	}
 }
 
-// fake is a host where time moves only when the loop waits.
 type fake struct {
 	now      time.Time
 	last     time.Time
@@ -38,10 +37,10 @@ type fake struct {
 	runs     []time.Time
 	waits    []time.Time
 	reloads  int
-	finishes bool // a run records itself as the last finished run
+	finishes bool
 	hangup   chan struct{}
 	cancel   context.CancelFunc
-	stopAt   int // cancel after this many waits
+	stopAt   int
 }
 
 func (f *fake) scheduler() Scheduler {
@@ -97,7 +96,7 @@ func TestLoopReloadsOnHangup(t *testing.T) {
 	f := &fake{now: t0, last: t0.Add(-time.Hour), interval: 6 * time.Hour, finishes: true, hangup: make(chan struct{}, 1), cancel: cancel, stopAt: 2}
 	f.hangup <- struct{}{}
 	s := f.scheduler()
-	s.After = func(time.Duration) <-chan time.Time { return nil } // the hangup comes first
+	s.After = func(time.Duration) <-chan time.Time { return nil }
 	f.stopAt = 0
 	s.Waiting = func(at time.Time) {
 		f.waits = append(f.waits, at)
@@ -106,7 +105,6 @@ func TestLoopReloadsOnHangup(t *testing.T) {
 		}
 	}
 	s.Loop(ctx)
-	// After the reload the interval is 1h, so the run is due at once and runs.
 	if f.reloads != 1 || len(f.runs) != 1 || f.runs[0] != t0 {
 		t.Fatalf("reloads %d, runs %v", f.reloads, f.runs)
 	}

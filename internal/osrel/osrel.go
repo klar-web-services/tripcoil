@@ -1,4 +1,3 @@
-// Package osrel reads /etc/os-release and maps the distribution to the family Tripcoil handles it as.
 package osrel
 
 import (
@@ -11,7 +10,6 @@ import (
 	"strings"
 )
 
-// Release is the part of os-release Tripcoil uses.
 type Release struct {
 	ID         string   `json:"id"`
 	VersionID  string   `json:"versionId,omitempty"`
@@ -19,7 +17,6 @@ type Release struct {
 	PrettyName string   `json:"prettyName,omitempty"`
 }
 
-// Read reads root/etc/os-release, or root/usr/lib/os-release when the first is missing.
 func Read(root string) (Release, error) {
 	for _, p := range []string{"etc/os-release", "usr/lib/os-release"} {
 		data, err := os.ReadFile(filepath.Join(root, p))
@@ -33,7 +30,6 @@ func Read(root string) (Release, error) {
 	return Release{}, fmt.Errorf("no os-release file below %s", root)
 }
 
-// Parse reads os-release content.
 func Parse(data []byte) Release {
 	var r Release
 	for _, line := range strings.Split(string(data), "\n") {
@@ -67,7 +63,6 @@ func unquote(v string) string {
 	return strings.NewReplacer(`\"`, `"`, `\\`, `\`, `\$`, `$`, "\\`", "`").Replace(v)
 }
 
-// Family is how Tripcoil treats a distribution.
 type Family string
 
 const (
@@ -82,7 +77,6 @@ const (
 	Unknown Family = ""
 )
 
-// Family maps the release to a family, by ID first and then ID_LIKE.
 func (r Release) Family() Family {
 	is := func(ids ...string) bool {
 		for _, id := range ids {
@@ -113,7 +107,6 @@ func (r Release) Family() Family {
 	return Unknown
 }
 
-// PackageType is the package format, named as Grype names it: deb, rpm, apk or alpm.
 func (f Family) PackageType() string {
 	switch f {
 	case Debian, Ubuntu:
@@ -128,8 +121,6 @@ func (f Family) PackageType() string {
 	return ""
 }
 
-// BackportsKernelFixes reports whether the distribution backports fixes into its kernels, so the
-// kernel is matched through its package and the distribution's advisories (spec section 6.3).
 func (f Family) BackportsKernelFixes() bool {
 	switch f {
 	case Debian, Ubuntu, RHEL, Amazon, SUSE:

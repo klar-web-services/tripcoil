@@ -38,8 +38,6 @@ var (
 	snapO     = inventory.UnresolvedOriginID("snap")
 )
 
-// host is a Debian host whose kernel package was upgraded in place: installed 6.1.123-1, running
-// 6.1.119-1.
 func host(t *testing.T) (root, cache string, inv *inventory.Inventory) {
 	root = files(t, map[string]string{
 		"etc/os-release":             "ID=debian\nVERSION_ID=12\n",
@@ -119,9 +117,9 @@ func hostScanner(root, cache string) *fakeScanner {
 		},
 		vulns: map[string][]grype.Vulnerability{
 			"libssl3@3.0.15-1~deb12u1":             {epss},
-			"vim@2:9.0.1378-2":                     {vuln("CVE-2026-0009", "High", "fixed", "2:9.0.1378-3")}, // not running
+			"vim@2:9.0.1378-2":                     {vuln("CVE-2026-0009", "High", "fixed", "2:9.0.1378-3")},
 			"linux-image-6.1.0-28-amd64@6.1.119-1": {kev},
-			"linux-image-6.1.0-28-amd64@6.1.123-1": {vuln("CVE-2026-2999", "High", "not-fixed")}, // installed, not running
+			"linux-image-6.1.0-28-amd64@6.1.123-1": {vuln("CVE-2026-2999", "High", "not-fixed")},
 			"golang.org/x/net@v0.1.0":              {xnet},
 			"golang.org/x/text@v0.3.5":             {vuln("CVE-2021-38561", "High", "fixed", "v0.3.7")},
 			"lodash@4.17.20":                       {vuln("GHSA-35jh-r3h4-6jhm", "High", "fixed", "4.17.21"), vuln("GHSA-29mw-wpgm-hmr9", "Medium", "fixed", "4.17.21")},
@@ -227,7 +225,6 @@ func TestAudit(t *testing.T) {
 		t.Errorf("verified copies are removed after each scan: %v %q", err, g.copiesLeft)
 	}
 
-	// The cache holds stripped SBOMs, but none with Go modules.
 	sboms, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*.cdx.json"))
 	var kinds []string
 	for _, p := range sboms {
@@ -237,11 +234,9 @@ func TestAudit(t *testing.T) {
 		}
 	}
 	slices.Sort(kinds)
-	if !slices.Equal(kinds, []string{"appdir", "binary", "image", "jar", "packages"}) { // the binary is the stripped one
+	if !slices.Equal(kinds, []string{"appdir", "binary", "image", "jar", "packages"}) {
 		t.Errorf("cached SBOMs %v", kinds)
 	}
-	// A second run matches the cached SBOMs. It scans again only what has no lockfile, and the Go
-	// binaries, whose matches depend on the code linked into them.
 	g.catalogs = nil
 	a2 := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
 	want = []string{"local-file:" + filepath.Join(cache, "scan", sumOf("go binary v1"), "api"), "local-file:" + filepath.Join(cache, "scan", sumOf("go binary v0"), "old"), "local-directory:" + filepath.Join(root, "srv/venv")}
@@ -265,8 +260,6 @@ func TestAuditChecksUpgradeLines(t *testing.T) {
 	}
 }
 
-// A binary in an app directory that Grype matched by its CPE gets a line only when matching its CPE
-// at the version finds nothing: its purl alone never matches.
 func TestAuditChecksUpgradeLinesByCPE(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -293,15 +286,14 @@ func TestAuditChecksUpgradeLinesByCPE(t *testing.T) {
 func TestAuditScansWhatAnSBOMCannotMatchEveryRun(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
-	g.osVersion = "" // as on Arch Linux, whose os-release has no VERSION_ID
+	g.osVersion = ""
 	Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
 	g.catalogs = nil
-	if a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); len(a.Findings) != 8 || len(g.catalogs) != 8 { // every origin Grype scans
+	if a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); len(a.Findings) != 8 || len(g.catalogs) != 8 {
 		t.Fatalf("second run: %d findings, scanned %q", len(a.Findings), g.catalogs)
 	}
 }
 
-// cachedKinds lists the kinds of the cached SBOMs, such as appdir, sorted.
 func cachedKinds(cache string) []string {
 	sboms, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*.cdx.json"))
 	var kinds []string
@@ -312,9 +304,6 @@ func cachedKinds(cache string) []string {
 	return kinds
 }
 
-// An SBOM is cached only when matching it, as it would be cached, gives what scanning its origin
-// gave: the same distribution and the same matches. Otherwise the origin is scanned every run.
-// Either way the findings are the scan's, and a failed match fails nothing.
 func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 	setuptools := grype.Match{Vulnerability: vuln("CVE-2026-5000", "High", "fixed", "40.0.0"),
 		Artifact: grype.Artifact{Name: "setuptools", Version: "39.2.0", Type: "python"}}
@@ -323,8 +312,6 @@ func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 		setup  func(*fakeScanner, *inventory.Inventory)
 		cached []string
 	}{
-		// The package database's SBOM is compared as Grype wrote it, before the running kernel's
-		// package is changed in it, as with the scan: the changed one matches otherwise.
 		{"the same", func(*fakeScanner, *inventory.Inventory) {}, []string{"appdir", "binary", "image", "jar", "packages"}},
 		{"another distribution", func(g *fakeScanner, _ *inventory.Inventory) {
 			g.matching = func(r *grype.Report) { r.Distro = "archlinux" }
@@ -343,8 +330,7 @@ func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 					}
 				}
 			}
-		}, []string{"binary", "image"}}, // the stripped binary has no matches, the image's no fix version
-		// The finding ID hashes the location: a cached SBOM must not change it.
+		}, []string{"binary", "image"}},
 		{"another location", func(g *fakeScanner, _ *inventory.Inventory) {
 			g.matching = func(r *grype.Report) {
 				for i := range r.Matches {
@@ -373,8 +359,6 @@ func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 			tc.setup(g, inv)
 			runDir := t.TempDir()
 			a := Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
-			// Matched against another distribution, the kernel package has no matches at its
-			// running version: it is unidentified.
 			findings, kernel := 8, Scanned
 			if strings.HasPrefix(tc.name, "another distribution") {
 				findings, kernel = 7, Unidentified
@@ -412,7 +396,7 @@ func TestAuditVerifiesSBOMsBeforeCaching(t *testing.T) {
 
 func TestAuditOriginFailuresArePartial(t *testing.T) {
 	root, cache, inv := host(t)
-	os.WriteFile(filepath.Join(root, "opt/api/api"), []byte("go binary v2"), 0o755) // upgraded since the inventory
+	os.WriteFile(filepath.Join(root, "opt/api/api"), []byte("go binary v2"), 0o755)
 	g := hostScanner(root, cache)
 	g.catalogErr = map[string]error{"docker:": errors.New("Grype failed: could not fetch image")}
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
@@ -433,8 +417,6 @@ func TestAuditOriginFailuresArePartial(t *testing.T) {
 	}
 }
 
-// An image removed after the Inventory is never handed to Grype, for which the Docker daemon would
-// try a pull from Docker Hub, nor matched from its cached SBOM.
 func TestAuditImageRemovedSinceTheInventory(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -460,7 +442,7 @@ func TestAuditImageRemovedSinceTheInventory(t *testing.T) {
 		if slices.Contains(g.matched, keyOf("image", "sha256:1111")+".cdx.json") || slices.Contains(g.catalogs, "docker:sha256:1111") {
 			t.Fatalf("Grype was asked: scanned %q, matched %q", g.catalogs, g.matched)
 		}
-		os.RemoveAll(filepath.Join(cache, "sbom")) // the next one would catalog the image
+		os.RemoveAll(filepath.Join(cache, "sbom"))
 	}
 }
 
@@ -476,9 +458,6 @@ func TestAuditPackageScanFailure(t *testing.T) {
 	}
 }
 
-// The kernel package was upgraded in place, under the same name, after the Inventory: only the
-// kernel's origin fails, and the other packages are audited. The package database is scanned
-// first, which keeps that window short.
 func TestAuditKernelPackageUpgradedSinceTheInventory(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -487,7 +466,7 @@ func TestAuditKernelPackageUpgradedSinceTheInventory(t *testing.T) {
 	comps[1].Version = "6.1.124-1"
 	comps[1].PURL = "pkg:deb/debian/linux-image-6.1.0-28-amd64@6.1.124-1?arch=amd64&distro=debian-12"
 	g.sboms[staging] = comps
-	for range 2 { // cataloged, then matched from the cached SBOM
+	for range 2 {
 		a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
 		st := statuses(a)
 		if st[libsslO] != Scanned || st[kernelO] != ScanFailed || a.Status != Partial || len(a.Errors) != 1 ||
@@ -549,7 +528,7 @@ func TestAuditFreshDatabaseAfterAFailedUpdate(t *testing.T) {
 func TestAuditUnknownDistribution(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
-	g.distro = "" // Grype did not recognise the os-release
+	g.distro = ""
 	image := "docker:sha256:1111"
 	g.sboms[image] = append(g.sboms[image], grype.Component{Name: "lodash", Version: "4.17.20", PURL: "pkg:npm/lodash@4.17.20"})
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
@@ -569,7 +548,6 @@ func TestAuditUnknownDistribution(t *testing.T) {
 	}
 }
 
-// Syft 1.57 reads Gentoo's packages as type portage and the Nix store's as type nix.
 func TestAuditUnknownDistributionGentooAndNix(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -590,7 +568,7 @@ func TestAuditHealsBrokenCacheEntries(t *testing.T) {
 	first := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
 	entries, _ := filepath.Glob(filepath.Join(cache, "sbom", grype.Version, "*.cdx.json"))
 	for _, e := range entries {
-		os.WriteFile(e, nil, 0o600) // as a power loss can leave them
+		os.WriteFile(e, nil, 0o600)
 	}
 	g.catalogs = nil
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
@@ -604,9 +582,6 @@ func TestAuditHealsBrokenCacheEntries(t *testing.T) {
 	}
 }
 
-// Copies of jars and binaries used to be named by their SHA-256 alone, so Syft found nothing in
-// a jar or in a binary it identifies by name, and the empty SBOMs were cached. They are never
-// used, and age out of the cache.
 func TestAuditDoesNotUseSBOMsCachedWithoutTheFileName(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -631,8 +606,6 @@ func TestAuditDoesNotUseSBOMsCachedWithoutTheFileName(t *testing.T) {
 	}
 }
 
-// A cached SBOM is dropped only when it is at fault: a disk-full run folder, a Grype timeout or
-// an interruption never wipes the cache.
 func TestAuditDropsCachedSBOMsOnlyWhenTheyAreAtFault(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -656,14 +629,14 @@ func TestAuditDropsCachedSBOMsOnlyWhenTheyAreAtFault(t *testing.T) {
 	}
 	g.catalogs = nil
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
-	if a.Status != Partial || len(g.catalogs) != 3 { // the Go binaries and the app directory without a lockfile
+	if a.Status != Partial || len(g.catalogs) != 3 {
 		t.Fatalf("audit %s, scanned %q: a cached SBOM that timed out is scanned again", a.Status, g.catalogs)
 	}
 	kept("after a timeout")
 
 	g.matchErr, g.catalogs = nil, nil
 	runDir := t.TempDir()
-	os.MkdirAll(filepath.Join(runDir, "raw", rawName(imageO, ".cdx.json")), 0o750) // the SBOM's copy cannot be written
+	os.MkdirAll(filepath.Join(runDir, "raw", rawName(imageO, ".cdx.json")), 0o750)
 	a = Run(context.Background(), deps(root, cache, runDir, g, fakeKernel{}), inv)
 	if st := statuses(a); st[imageO] != ScanFailed || slices.Contains(g.catalogs, "docker:sha256:1111") {
 		t.Fatalf("statuses %v, scanned %q", st, g.catalogs)
@@ -675,7 +648,7 @@ func TestAuditDropsCachedSBOMsOnlyWhenTheyAreAtFault(t *testing.T) {
 		g.matchErr[filepath.Base(e)] = errors.New("Grype failed: [0002] ERROR failed to catalog: unable to decode sbom: sbom format not recognized")
 	}
 	a = Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
-	if a.Status != Complete || len(g.catalogs) != 7 { // the package database's is matched as packages-match.cdx.json
+	if a.Status != Complete || len(g.catalogs) != 7 {
 		t.Fatalf("audit %s, scanned %q: an SBOM Grype rejects is cataloged again", a.Status, g.catalogs)
 	}
 }
@@ -685,7 +658,7 @@ func TestAuditAppDirCachedOnlyFromItsOwnLockfiles(t *testing.T) {
 	g := hostScanner(root, cache)
 	shop := "local-directory:" + filepath.Join(root, "srv/shop")
 	g.sboms[shop] = append(g.sboms[shop], grype.Component{Name: "minimist", Version: "1.2.5", PURL: "pkg:npm/minimist@1.2.5"})
-	for _, where := range []string{"/worker/package-lock.json", ""} { // a nested app the key does not hash; no file at all
+	for _, where := range []string{"/worker/package-lock.json", ""} {
 		g.locations["minimist"] = where
 		if where == "" {
 			delete(g.locations, "minimist")
@@ -700,8 +673,6 @@ func TestAuditAppDirCachedOnlyFromItsOwnLockfiles(t *testing.T) {
 	}
 }
 
-// A package source added anywhere below an app directory after its SBOM was cached, such as a
-// nested lockfile, is scanned at the next run.
 func TestAuditAppDirNewPackageSource(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -714,8 +685,6 @@ func TestAuditAppDirNewPackageSource(t *testing.T) {
 	}
 }
 
-// An app directory whose lockfile changed while Grype read it is not cached: the SBOM may be of
-// the new lockfile, and the key of the old one, to which an app's owner could change it back.
 func TestAuditAppDirChangedDuringTheScan(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -736,7 +705,6 @@ func TestAuditAppDirChangedDuringTheScan(t *testing.T) {
 	}
 }
 
-// Every app directory is cataloged at least once per UTC day.
 func TestAuditAppDirEachDay(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -746,7 +714,7 @@ func TestAuditAppDirEachDay(t *testing.T) {
 		at      time.Time
 		scanned bool
 	}{
-		{time.Date(2026, 11, 15, 0, 30, 0, 0, time.FixedZone("CET", 3600)), false}, // 23:30 UTC
+		{time.Date(2026, 11, 15, 0, 30, 0, 0, time.FixedZone("CET", 3600)), false},
 		{now.Add(24 * time.Hour), true},
 	} {
 		g.catalogs = nil
@@ -759,8 +727,6 @@ func TestAuditAppDirEachDay(t *testing.T) {
 }
 
 func TestAuditReadsBinariesThroughTheProcess(t *testing.T) {
-	// A service with PrivateTmp extracted a native library into its own /tmp, and runs an
-	// executable from it: the host's /tmp has neither.
 	root, cache, inv := host(t)
 	running := files(t, map[string]string{"lib": "netty v1", "exe": "tool v1"})
 	libO := inventory.BinaryOriginID(sumOf("netty v1"))
@@ -783,8 +749,6 @@ func TestAuditReadsBinariesThroughTheProcess(t *testing.T) {
 	}
 }
 
-// A library replaced on disk after the Inventory is still mapped, as deleted, by the process: its
-// map_files entry holds the content the Inventory identified.
 func TestAuditReadsDeletedMappings(t *testing.T) {
 	root, cache, inv := host(t)
 	running := files(t, map[string]string{"lib": "netty v1"})
@@ -860,8 +824,6 @@ func TestAuditRPMEpochAndArchitecture(t *testing.T) {
 }
 
 func TestAuditDebianKernelByUpstreamVersion(t *testing.T) {
-	// A third-party kernel on Debian, or Debian in a container: the kernel is matched by its
-	// upstream version, so no package is rewritten.
 	root, cache, inv := host(t)
 	up := inventory.KernelUpstreamOriginID("7.3.3")
 	inv.Items[0].Origins = []string{up}
@@ -906,7 +868,6 @@ func TestAuditInterrupted(t *testing.T) {
 	if st := statuses(a); len(st) != len(inv.Origins) || st[libsslO] != ScanFailed || st[snapO] != Unresolved {
 		t.Fatalf("statuses %v: every origin is listed, and a gap stays a gap", st)
 	}
-	// Interrupted while Grype is prepared: not GRYPE_UNAVAILABLE either.
 	g := hostScanner(root, cache)
 	g.prepareErr = context.Canceled
 	if a := Run(ctx, deps(root, cache, t.TempDir(), g, fakeKernel{}), inv); a.Errors[0].Code != problem.Interrupted || a.Status != Failed {
@@ -914,8 +875,6 @@ func TestAuditInterrupted(t *testing.T) {
 	}
 }
 
-// Interrupted while the origins are scanned: what was found is sorted as ever, and no upgrade line
-// is checked with Grype or given.
 func TestAuditInterruptedWhileScanning(t *testing.T) {
 	for _, tc := range []struct{ name, at string }{
 		{"in the middle", "/app.jar"},
@@ -923,7 +882,7 @@ func TestAuditInterruptedWhileScanning(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, cache, inv := host(t)
-			inv.Origins = slices.DeleteFunc(inv.Origins, func(o inventory.Origin) bool { return o.ID == snapO }) // the image is the last
+			inv.Origins = slices.DeleteFunc(inv.Origins, func(o inventory.Origin) bool { return o.ID == snapO })
 			g := hostScanner(root, cache)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -947,8 +906,6 @@ func TestAuditInterruptedWhileScanning(t *testing.T) {
 	}
 }
 
-// Grype lists a package's locations in another order when it matches the cached SBOM than when it
-// scans, as for every package of a Debian image: the findings keep their IDs.
 func TestAuditFindingIDsDoNotDependOnLocationOrder(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -960,7 +917,7 @@ func TestAuditFindingIDsDoNotDependOnLocationOrder(t *testing.T) {
 		"zlib1g":     {"/var/lib/dpkg/status", "/usr/share/doc/zlib1g/copyright", "/var/lib/dpkg/info/zlib1g:amd64.md5sums"},
 		"setuptools": {dist + "top_level.txt", dist + "METADATA", dist + "RECORD"},
 	}
-	g.matching = func(r *grype.Report) { // as Grype 0.121.2 lists them for an SBOM: sorted
+	g.matching = func(r *grype.Report) {
 		for i := range r.Matches {
 			slices.Sort(r.Matches[i].Artifact.Locations)
 		}
@@ -986,7 +943,6 @@ func TestAuditFindingIDsDoNotDependOnLocationOrder(t *testing.T) {
 	}
 }
 
-// Grype can report a vulnerability of a package twice, such as by two matchers: it is one finding.
 func TestAuditOneFindingPerID(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -1004,7 +960,7 @@ func TestAuditRunFolderUnwritable(t *testing.T) {
 	write(t, runDir, "a file, not a folder")
 	a := Run(context.Background(), deps(root, cache, runDir, hostScanner(root, cache), fakeKernel{}), inv)
 	if a.Status != Failed || len(a.Errors) != 1 || a.Errors[0].Code != problem.RunFolderUnwritable || a.Errors[0].Stage != "" {
-		t.Fatalf("audit %s %+v: a run folder error is of no stage (spec section 12)", a.Status, a.Errors)
+		t.Fatalf("audit %s %+v: a run folder error is of no stage", a.Status, a.Errors)
 	}
 }
 
@@ -1051,7 +1007,6 @@ func TestAuditKernelByUpstreamVersion(t *testing.T) {
 		k.Fix.State != "fixed" || k.Fix.Versions[0] != "6.1.192" || k.Remediation != "Upgrade the kernel to Linux 6.1.192 or later (pacman -Syu), then reboot." {
 		t.Errorf("finding %+v", k)
 	}
-	// Without the database's data, the CNA's own CVSS score gives the severity.
 	if c := f["CVE-2025-40190"].Vulnerability; c.Severity != "High" || len(c.CVSS) != 1 || c.CVSS[0].Score != 7.8 {
 		t.Errorf("CVE-2025-40190 %+v", c)
 	}

@@ -8,13 +8,8 @@ import (
 	"slices"
 )
 
-// idPattern matches run folder names; runs/ also holds the latest links and dot entries (.probe-*,
-// .tmp-*), which retention never touches.
 var idPattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$`)
 
-// Prune deletes run folders beyond the newest keep (spec section 11.4). It keeps the runs that
-// latest and latest-reviewed point to and the run each kept run carries its review from. A
-// folder without a readable run.json counts by its name like any other. It returns the removed IDs.
 func Prune(stateDir string, keep int) ([]string, error) {
 	runs := filepath.Join(stateDir, "runs")
 	es, err := os.ReadDir(runs)
@@ -23,7 +18,7 @@ func Prune(stateDir string, keep int) ([]string, error) {
 	}
 	var ids []string
 	for _, e := range es {
-		if e.IsDir() && idPattern.MatchString(e.Name()) { // a link is never a folder here
+		if e.IsDir() && idPattern.MatchString(e.Name()) {
 			ids = append(ids, e.Name())
 		}
 	}

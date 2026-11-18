@@ -26,7 +26,6 @@ func TestGroupFindings(t *testing.T) {
 		kernel("f:k0", "", "  tls: an unknown risk tier sorts after low"),
 		kernel("f:k4", "low", "\n\nA flaw was found in something without a subsystem."),
 		kernel("f:k5", "high", "\n\nnet/mlx5e: fix a race", "6.8.13"),
-		// a distribution kernel package matched by Grype counts as the kernel too
 		{ID: "f:k6", Risk: "low", Source: "ubuntu:distro:ubuntu:24.04", Origin: "pkg:linux-image", Items: []string{"kernel"},
 			Package: audit.Package{Name: "linux-image-6.8.0-45-generic", Version: "6.8.0-45.45"}, Fix: audit.Fix{Versions: []string{}},
 			Vulnerability: audit.Vulnerability{Description: kernelPrefix + "\n\nnet: sched: fix a leak", KnownExploited: true, EPSS: 0.4}},

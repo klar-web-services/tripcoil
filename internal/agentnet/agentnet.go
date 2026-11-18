@@ -1,8 +1,3 @@
-// Package agentnet manages the agent's nftables table, inet tripcoil (spec section 8.2). Its
-// output chain applies only to packets of sockets owned by the agent's user: DNS to the
-// nameservers and the allowed addresses are accepted, local, private, link-local and multicast
-// ranges and the host's own addresses are blocked, everything else is accepted. The table is
-// written through netlink, so no nft binary is needed.
 package agentnet
 
 import (
@@ -16,10 +11,8 @@ import (
 	"github.com/google/nftables"
 )
 
-// Name is the table's name in the inet family.
 const Name = "tripcoil"
 
-// rules is how many rules Apply writes; Present compares against it.
 const rules = 10
 
 // blocked are the ranges the agent may never reach, besides the host's own addresses: loopback,
@@ -30,15 +23,13 @@ const rules = 10
 var blocked = []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
 	"224.0.0.0/4", "240.0.0.0/4", "168.63.129.16/32", "::1/128", "fe80::/10", "fc00::/7", "ff00::/8"}
 
-// Policy is what the table enforces for one review.
 type Policy struct {
-	UID         uint32         // the agent's user
-	Nameservers []netip.Addr   // DNS to these is accepted
-	Allow       []netip.Prefix // review.allowAddresses
-	Own         []netip.Addr   // the addresses on the host's interfaces
+	UID         uint32
+	Nameservers []netip.Addr
+	Allow       []netip.Prefix
+	Own         []netip.Addr
 }
 
-// Blocked is every range the policy blocks: the fixed ranges and the host's own addresses.
 func (p Policy) Blocked() []netip.Prefix {
 	var out []netip.Prefix
 	for _, s := range blocked {
@@ -47,7 +38,6 @@ func (p Policy) Blocked() []netip.Prefix {
 	return append(out, hosts(p.Own)...)
 }
 
-// Apply replaces the table in one netlink batch.
 func Apply(p Policy) error {
 	c, err := nftables.New()
 	if err != nil {
@@ -57,8 +47,6 @@ func Apply(p Policy) error {
 	return c.Flush()
 }
 
-// Present reports whether the table and its chain hold the rules Apply writes. A host firewall
-// reload that flushes the ruleset removes them.
 func Present() (bool, error) {
 	c, err := nftables.New()
 	if err != nil {
@@ -79,7 +67,6 @@ func Present() (bool, error) {
 	return len(rs) == rules, nil
 }
 
-// Delete removes the table; a missing table is no error.
 func Delete() error {
 	c, err := nftables.New()
 	if err != nil {
@@ -91,7 +78,6 @@ func Delete() error {
 	return c.Flush()
 }
 
-// OwnAddrs returns the addresses on the host's interfaces.
 func OwnAddrs() ([]netip.Addr, error) {
 	as, err := net.InterfaceAddrs()
 	if err != nil {
@@ -108,7 +94,6 @@ func OwnAddrs() ([]netip.Addr, error) {
 	return out, nil
 }
 
-// Nameservers reads the nameserver lines of a resolv.conf.
 func Nameservers(resolvConf []byte) []netip.Addr {
 	var out []netip.Addr
 	sc := bufio.NewScanner(bytes.NewReader(resolvConf))
@@ -124,8 +109,6 @@ func Nameservers(resolvConf []byte) []netip.Addr {
 	return out
 }
 
-// ParseAllow turns review.allowAddresses (addresses or CIDR ranges, validated by the config)
-// into prefixes.
 func ParseAllow(ss []string) []netip.Prefix {
 	var out []netip.Prefix
 	for _, s := range ss {
@@ -168,7 +151,6 @@ func minimal(ps []netip.Prefix) []netip.Prefix {
 	return out
 }
 
-// split sorts the minimal prefixes into IPv4 and IPv6.
 func split(ps []netip.Prefix) (v4, v6 []netip.Prefix) {
 	for _, p := range minimal(ps) {
 		if p.Addr().Is4() {
@@ -180,8 +162,6 @@ func split(ps []netip.Prefix) (v4, v6 []netip.Prefix) {
 	return v4, v6
 }
 
-// elems are a prefix's interval elements: its first address, and the first address after it as
-// the interval's end (none when the prefix runs to the end of the address space).
 func elems(ps []netip.Prefix) []nftables.SetElement {
 	var out []nftables.SetElement
 	for _, p := range ps {

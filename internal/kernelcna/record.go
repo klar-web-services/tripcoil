@@ -8,21 +8,17 @@ import (
 
 var cveID = regexp.MustCompile(`^CVE-[0-9]{4}-[0-9]+$`)
 
-// Record is what Tripcoil keeps of one CVE record: its affected entries without the git ranges,
-// and the CNA's own CVSS score when it gave one.
 type Record struct {
 	ID       string  `json:"id"`
 	Affected []Entry `json:"affected"`
 	CVSS     *CVSS   `json:"cvss,omitempty"`
 }
 
-// Entry is one entry of a record's affected list.
 type Entry struct {
 	DefaultStatus string  `json:"defaultStatus"`
 	Versions      []Range `json:"versions"`
 }
 
-// Range is one version or version range of an entry, as CVE JSON 5 writes it.
 type Range struct {
 	Version         string `json:"version"`
 	LessThan        string `json:"lessThan,omitempty"`
@@ -31,14 +27,12 @@ type Range struct {
 	VersionType     string `json:"versionType,omitempty"`
 }
 
-// CVSS is the CNA's CVSS 3.1 score.
 type CVSS struct {
 	Score    float64 `json:"score"`
 	Vector   string  `json:"vector"`
 	Severity string  `json:"severity"`
 }
 
-// ParseRecord reads a published CVE JSON 5 record.
 func ParseRecord(data []byte) (Record, error) {
 	var doc struct {
 		CVEMetadata struct {
@@ -68,7 +62,7 @@ func ParseRecord(data []byte) (Record, error) {
 	for _, e := range doc.Containers.CNA.Affected {
 		kept := Entry{DefaultStatus: e.DefaultStatus, Versions: []Range{}}
 		for _, v := range e.Versions {
-			if v.VersionType != "git" { // commit ranges are not versions
+			if v.VersionType != "git" {
 				kept.Versions = append(kept.Versions, v)
 			}
 		}

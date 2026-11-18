@@ -14,23 +14,18 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
-// maxScanFileSize is the largest file the Audit hashes or copies, as for running files.
 const maxScanFileSize = 4 << 30
 
-var scanFileCap int64 = maxScanFileSize // lowered by tests
+var scanFileCap int64 = maxScanFileSize
 
-// maxRunReadBytes is the most the Audit reads from files in one run, as the Inventory: it hashes
-// every jar and reads every app directory's lockfiles twice on every run.
 const maxRunReadBytes = 64 << 30
 
-var runReadCap int64 = maxRunReadBytes // lowered by tests
+var runReadCap int64 = maxRunReadBytes
 
 var errReadBudget = errors.New("the audit's read budget of 64 GiB for this run is spent")
 
-// readBudget is what is left of the bytes the Audit may still read from files in this run.
 type readBudget struct{ left int64 }
 
-// take charges n bytes, or fails when fewer are left: a file is read at most to its size.
 func (b *readBudget) take(n int64) error {
 	if n > b.left {
 		return errReadBudget
@@ -39,7 +34,6 @@ func (b *readBudget) take(n int64) error {
 	return nil
 }
 
-// cacheSpace returns the available and total bytes of the file system that holds dir.
 var cacheSpace = func(dir string) (free, total uint64, err error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(dir, &st); err != nil {
@@ -48,7 +42,6 @@ var cacheSpace = func(dir string) (free, total uint64, err error) {
 	return st.Bavail * uint64(st.Frsize), st.Blocks * uint64(st.Frsize), nil
 }
 
-// A copy leaves the cache file system a tenth free, but at most 4 GiB, as the Inventory's do.
 const (
 	cacheFloorPercent = 10
 	maxCacheFloor     = 4 << 30
@@ -100,7 +93,6 @@ func openPath(path string) func() (*os.File, error) {
 	return func() (*os.File, error) { return procfs.OpenRegular(path) }
 }
 
-// hashFile returns the SHA-256 of the regular file at path, charged to reads.
 func hashFile(ctx context.Context, reads *readBudget, path string) (string, error) {
 	f, size, err := openFile(path, openPath(path))
 	if err != nil {
@@ -115,14 +107,12 @@ func hashFile(ctx context.Context, reads *readBudget, path string) (string, erro
 	switch {
 	case err != nil:
 		return "", err
-	case n != size: // it shrank since
+	case n != size:
 		return "", errFileChanged
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// readSmall reads a small regular file, such as a lockfile, of at most limit bytes, charged to
-// reads.
 func readSmall(reads *readBudget, path string, limit int64) ([]byte, error) {
 	f, size, err := openFile(path, openPath(path))
 	if err != nil {
@@ -137,16 +127,13 @@ func readSmall(reads *readBudget, path string, limit int64) ([]byte, error) {
 	}
 	data, err := io.ReadAll(io.LimitReader(f, size))
 	if err == nil && int64(len(data)) != size {
-		err = errFileChanged // it shrank since
+		err = errFileChanged
 	}
 	return data, err
 }
 
-// hasRoom checks that size bytes fit on the cache file system that holds dir, above its floor.
 func hasRoom(dir string, size int64) error { return aboveFloor(dir, size, errCacheFull) }
 
-// aboveFloor checks that size bytes fit on the file system that holds dir, above the floor that
-// copies leave the cache, and returns full when they do not.
 func aboveFloor(dir string, size int64, full error) error {
 	free, total, err := cacheSpace(dir)
 	if err != nil {
@@ -159,9 +146,6 @@ func aboveFloor(dir string, size int64, full error) error {
 	return nil
 }
 
-// copyVerified copies the file that open opens, name, to dst when its content has that SHA-256,
-// charged to reads. Grype then reads exactly the file the Inventory identified: never a FIFO, a
-// device or a kernel file, nor a file that changed since.
 func copyVerified(ctx context.Context, reads *readBudget, name string, open func() (*os.File, error), sha, dst string) error {
 	f, size, err := openFile(name, open)
 	if err != nil {
@@ -182,7 +166,7 @@ func copyVerified(ctx context.Context, reads *readBudget, name string, open func
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
+	defer os.Remove(tmp.Name())
 	h := sha256.New()
 	_, err = io.Copy(io.MultiWriter(tmp, h), io.LimitReader(ctxReader{ctx, f}, size))
 	if cerr := tmp.Close(); err == nil {

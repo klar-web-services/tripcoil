@@ -74,7 +74,7 @@ func TestCollect(t *testing.T) {
 func TestCollectContainersWithoutDockerSocket(t *testing.T) {
 	d := collectDeps(t)
 	procs := hostProcesses()
-	d.Proc = fakeSource{10: procs[10], 40: procs[40]} // 40 runs in a Docker container
+	d.Proc = fakeSource{10: procs[10], 40: procs[40]}
 	inv, err := Collect(context.Background(), d)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,6 @@ func TestCollectJSONLikeTheSpec(t *testing.T) {
 }
 
 func TestCollectInterrupted(t *testing.T) {
-	// Ctrl-C kills the package tool and ends the Docker requests; run.json records INTERRUPTED.
 	interrupted := fmt.Errorf("cannot run dpkg-query: %w", context.Canceled)
 	newerKernel := map[string][]pkgtool.Package{"linux-image-*": {deb("linux-image-6.1.0-31-amd64", "6.1.128-1")}}
 	for name, mutate := range map[string]func(*Deps, *fakeTool){
@@ -206,7 +205,6 @@ func TestCollectInterrupted(t *testing.T) {
 			}
 		})
 	}
-	// A timeout of the tool itself, in a run that goes on, is a failure.
 	d := collectDeps(t)
 	tool := d.Tool.(fakeTool)
 	tool.ownersErr = fmt.Errorf("cannot run dpkg-query: %w", context.DeadlineExceeded)
@@ -227,9 +225,9 @@ func TestCollectDockerInsideOtherContainers(t *testing.T) {
 	}
 	d.Proc = fakeSource{
 		10: hostProcesses()[10],
-		20: nested("/lxc.payload.c1"),                                   // LXD, Incus
-		21: nested("/lxc/101/ns"),                                       // Proxmox
-		22: nested("/machine.slice/systemd-nspawn@box.service/payload"), // systemd-nspawn
+		20: nested("/lxc.payload.c1"),
+		21: nested("/lxc/101/ns"),
+		22: nested("/machine.slice/systemd-nspawn@box.service/payload"),
 	}
 	inv, err := Collect(context.Background(), d)
 	if err != nil {

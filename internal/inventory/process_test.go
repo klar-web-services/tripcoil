@@ -23,7 +23,6 @@ const containerID = "23665d1635863a96dce002582f0cc899b885bcacbd2d186b54858a079c5
 
 func sum(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 
-// cg is /proc/<pid>/cgroup content on a cgroup v2 host.
 func cg(path string) string { return "0::" + path + "\n" }
 
 var (
@@ -34,7 +33,7 @@ var (
 
 func hostProcesses() fakeSource {
 	return fakeSource{
-		2: {exeErr: fs.ErrNotExist}, // kernel thread
+		2: {exeErr: fs.ErrNotExist},
 		10: {cmdline: []string{"nginx: master process /usr/sbin/nginx"}, exe: "/usr/sbin/nginx", cgroup: cg("/system.slice/nginx.service"),
 			maps: []procfs.Mapping{{Path: "/usr/sbin/nginx"}, libc, {Start: "3", End: "4", Path: "/usr/lib/libssl.so.3", Deleted: true}, {Path: "/usr/lib/locale/locale-archive"}}},
 		11: {cmdline: []string{"nginx: worker process"}, exe: "/usr/sbin/nginx", uid: 33, cgroup: cg("/system.slice/nginx.service"), maps: []procfs.Mapping{libc}},
@@ -46,8 +45,8 @@ func hostProcesses() fakeSource {
 		31: {cmdline: []string{"/opt/api/old"}, exe: "/opt/api/old", deleted: true, exeData: "go binary v0"},
 		40: {cmdline: []string{"nginx"}, exe: "/usr/sbin/nginx", cgroup: cg("/system.slice/docker-" + containerID + ".scope")},
 		50: {cmdline: []string{"lxd"}, exe: "/snap/lxd/123/bin/lxd"},
-		60: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true, root: "/var/lib/machines/box"},                                      // another root, another file; the test sets exeID
-		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", cgroup: cg("/system.slice/ssh.service")}, // chrooted; the test sets exeID
+		60: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true, root: "/var/lib/machines/box"},
+		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", cgroup: cg("/system.slice/ssh.service")},
 		62: {cmdline: []string{"sshd: /usr/sbin/sshd -D [listener]"}, exe: "/usr/sbin/sshd", cgroup: cg("/system.slice/ssh.service")},
 		63: {cmdline: []string{"-bash"}, exe: "/usr/bin/bash"},
 		70: {cmdline: []string{"python3", "-m", "http.server"}, exe: "/usr/bin/python3.12", cwd: "/"},
@@ -104,9 +103,9 @@ func TestProcessCollector(t *testing.T) {
 	root, cache := hostRoot(t), t.TempDir()
 	tool := hostTool()
 	src := hostProcesses()
-	src[60].exeID = fileID(t, root, "usr/sbin/sshd") // not the host's /usr/bin/bash
+	src[60].exeID = fileID(t, root, "usr/sbin/sshd")
 	src[60].rootID = fileID(t, root, "var/lib/machines/box")
-	src[61].exeID = fileID(t, root, "usr/sbin/sshd") // the host's own sshd, run in a chroot
+	src[61].exeID = fileID(t, root, "usr/sbin/sshd")
 	src[61].rootID = fileID(t, root, "run/sshd")
 	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: tool}, distro: debian, cacheDir: cache}
 	res, err := c.collect(context.Background())
@@ -143,7 +142,7 @@ func TestProcessCollector(t *testing.T) {
 	if node.AppDir != "/srv/shop" || !slices.Contains(node.Origins, AppDirOriginID("/srv/shop")) {
 		t.Fatalf("node %+v", node)
 	}
-	if len(node.Origins) != 4 { // app dir, nodejs, libc6, libnode115; sharp.so is covered by the app dir
+	if len(node.Origins) != 4 {
 		t.Fatalf("node origins %v", node.Origins)
 	}
 	if !slices.Equal(node.Processes[0].Cmdline, []string{"node", "server.js", "--token", "<redacted>"}) {
@@ -223,7 +222,7 @@ func TestProcessCollectorWithoutPackageTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.origins) != 3 { // nginx, libc, libssl
+	if len(res.origins) != 3 {
 		t.Fatalf("origins %+v", res.origins)
 	}
 	for _, o := range res.origins {
@@ -243,7 +242,7 @@ func TestProcessCollectorOwnersError(t *testing.T) {
 	if len(res.problems) != 1 || res.problems[0].Code != problem.PackageToolFailed {
 		t.Fatalf("problems %+v", res.problems)
 	}
-	if len(res.origins) != 3 { // nginx, libc, libssl
+	if len(res.origins) != 3 {
 		t.Fatalf("origins %+v", res.origins)
 	}
 	for _, o := range res.origins {
@@ -256,10 +255,10 @@ func TestProcessCollectorOwnersError(t *testing.T) {
 func TestProcessCollectorRefusesUnsafeFiles(t *testing.T) {
 	cases := map[string]struct {
 		mutate  func(p *fakeProc, cancel context.CancelFunc)
-		cap     int64                                // lowers runningFileCap
-		space   func(string) (uint64, uint64, error) // free and total bytes of the cache file system
+		cap     int64
+		space   func(string) (uint64, uint64, error)
 		reason  string
-		maxRead int // the most bytes it may read, if not unlimited
+		maxRead int
 	}{
 		"not a regular file": {mutate: func(p *fakeProc, _ context.CancelFunc) {
 			p.openErr = &fs.PathError{Op: "open", Path: "/proc/30/exe", Err: procfs.ErrNotRegular}
@@ -319,7 +318,7 @@ func TestProcessCollectorRefusesUnsafeFiles(t *testing.T) {
 
 func TestProcessCollectorCopiesOnABigFullDisk(t *testing.T) {
 	old := cacheSpace
-	cacheSpace = func(string) (uint64, uint64, error) { return 5 << 30, 100 << 40, nil } // 5 GiB of 100 TiB free
+	cacheSpace = func(string) (uint64, uint64, error) { return 5 << 30, 100 << 40, nil }
 	t.Cleanup(func() { cacheSpace = old })
 	c := &processCollector{src: fakeSource{31: hostProcesses()[31]}, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
 	res, err := c.collect(context.Background())
@@ -337,14 +336,13 @@ func TestProcessCollectorPrunesCache(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// The last run's copies would leave too little free space for this run's.
 	for name, size := range map[string]int{sum("an old binary"): 890, ".copy-123": 5} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.Repeat("x", size)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	old := cacheSpace
-	cacheSpace = func(dir string) (uint64, uint64, error) { // a 1000-byte file system
+	cacheSpace = func(dir string) (uint64, uint64, error) {
 		var used uint64
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
@@ -427,10 +425,8 @@ func TestProcessCollectorCapsLibraries(t *testing.T) {
 func TestProcessCollectorKeysFilesByIdentity(t *testing.T) {
 	replaced := procfs.FileID{Dev: 1, Ino: 300}
 	src := fakeSource{
-		// A user's process with a decoy bind-mounted over /opt/api/api in its own mount namespace.
-		5: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", uid: 1001, exeID: procfs.FileID{Dev: 1, Ino: 200}, exeData: "decoy"},
-		9: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeID: procfs.FileID{Dev: 1, Ino: 100}, exeData: "vulnerable v1"},
-		// Two workers of one replaced binary.
+		5:  {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", uid: 1001, exeID: procfs.FileID{Dev: 1, Ino: 200}, exeData: "decoy"},
+		9:  {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeID: procfs.FileID{Dev: 1, Ino: 100}, exeData: "vulnerable v1"},
 		20: {cmdline: []string{"/opt/api/old"}, exe: "/opt/api/old", deleted: true, exeID: replaced, exeData: "go binary v0"},
 		21: {cmdline: []string{"/opt/api/old"}, exe: "/opt/api/old", deleted: true, exeID: replaced, exeData: "go binary v0"},
 	}
@@ -460,7 +456,7 @@ func TestProcessCollectorRestartForReplacedLibraryInAppDir(t *testing.T) {
 	lib := "/srv/api/.venv/lib/python3.12/site-packages/cryptography/hazmat/bindings/_rust.abi3.so"
 	root := files(t, map[string]string{"srv/api/requirements.txt": "", "srv/api/app.py": "", lib[1:]: "42.0.5"})
 	src := fakeSource{7: {cmdline: []string{"python3", "app.py"}, exe: "/usr/bin/python3.12", cwd: "/srv/api",
-		maps: []procfs.Mapping{{Start: "1", End: "2", Path: lib, Deleted: true}}}} // pip install -U ran
+		maps: []procfs.Mapping{{Start: "1", End: "2", Path: lib, Deleted: true}}}}
 	c := &processCollector{src: src, root: root, resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
 	res, err := c.collect(context.Background())
 	if err != nil {
@@ -474,11 +470,9 @@ func TestProcessCollectorRestartForReplacedLibraryInAppDir(t *testing.T) {
 
 func TestProcessCollectorIgnoresProcessesThatEnd(t *testing.T) {
 	src := fakeSource{
-		// Its PID was reused after the process list was read: the files are another process's.
 		30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeData: "another process's file", reused: true,
 			maps:    []procfs.Mapping{{Start: "5", End: "6", Path: "/tmp/libnetty_transport.so"}},
 			mapData: map[string]string{"/tmp/libnetty_transport.so": "another process's library"}},
-		// It exited between the reads of its command line and its executable.
 		90: {cmdline: []string{"worker"}, exeErr: &fs.PathError{Op: "readlink", Path: "/proc/90/exe", Err: syscall.ENOENT}},
 	}
 	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
@@ -551,13 +545,10 @@ func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
 	root := files(t, map[string]string{"usr/sbin/sshd": "sshd", "usr/bin/tool": "tool", "usr/lib/libc.so.6": "libc",
 		"run/sshd/.keep": "", "var/lib/tool/.keep": ""})
 	src := fakeSource{
-		// sshd's chrooted pre-authentication child maps the host's own C library.
 		61: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", rootID: fileID(t, root, "run/sshd"),
 			exeID: fileID(t, root, "usr/sbin/sshd"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
-		// A container runs the host's executable, bind-mounted, with its own C library.
 		70: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/containers/tool", exeID: fileID(t, root, "usr/bin/tool"),
 			maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
-		// A chroot in a host directory runs the host's executable, but maps another C library.
 		71: {cmdline: []string{"tool"}, exe: "/usr/bin/tool", otherRoot: true, root: "/var/lib/tool", rootID: fileID(t, root, "var/lib/tool"),
 			exeID: fileID(t, root, "usr/bin/tool"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: {Dev: 99, Ino: 1}}},
 	}
@@ -581,7 +572,7 @@ func TestProcessCollectorLibrariesInAnotherRoot(t *testing.T) {
 		t.Fatalf("sshd origins %q", got)
 	}
 	it := byName(res.items, "tool")
-	want := []string{"package:tool", "unresolved:" + libc.Path} // their C library is not the host's
+	want := []string{"package:tool", "unresolved:" + libc.Path}
 	if got := names(it); len(it.Processes) != 2 || !slices.Equal(got, want) {
 		t.Fatalf("tool %+v origins %q, want %q", it.Processes, got, want)
 	}
@@ -599,9 +590,7 @@ func TestProcessCollectorReadBudget(t *testing.T) {
 	link := procfs.FileID{Dev: 1, Ino: 100}
 	src := fakeSource{
 		30: {cmdline: []string{"/opt/api/a"}, exe: "/opt/api/a", exeID: link, exeData: "go binary v1"},
-		// A hard link to the same file: the read cache is keyed by path, the budget is not.
 		31: {cmdline: []string{"/opt/api/b"}, exe: "/opt/api/b", exeID: link, exeData: "go binary v1"},
-		// It reports 4 bytes but holds 12, more than the 8 left.
 		32: {cmdline: []string{"/opt/api/c"}, exe: "/opt/api/c", exeData: "go binary v2", size: 4},
 	}
 	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
@@ -627,7 +616,6 @@ func TestProcessCollectorReplacedLibraryOfChrootedDaemon(t *testing.T) {
 	root := files(t, map[string]string{"usr/sbin/haproxy": "haproxy", "usr/lib/libssl.so.3": "libssl, upgraded", "var/lib/haproxy/.keep": ""})
 	ssl := procfs.Mapping{Start: "3", End: "4", Path: "/usr/lib/libssl.so.3", Deleted: true}
 	src := fakeSource{
-		// haproxy with "chroot /var/lib/haproxy" still maps the libssl that was replaced on disk.
 		40: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", otherRoot: true, root: "/var/lib/haproxy", rootID: fileID(t, root, "var/lib/haproxy"),
 			exeID: fileID(t, root, "usr/sbin/haproxy"),
 			maps:  []procfs.Mapping{ssl}, mapIDs: map[string]procfs.FileID{ssl.Path: {Dev: 99, Ino: 2}}},
@@ -649,9 +637,7 @@ func TestProcessCollectorReplacedLibraryOfChrootedDaemon(t *testing.T) {
 func TestProcessCollectorPlainChroot(t *testing.T) {
 	root := files(t, map[string]string{"srv/jail/sleeper": "sleeper", "usr/sbin/haproxy": "haproxy, upgraded", "var/lib/haproxy/.keep": ""})
 	src := fakeSource{
-		// unshare -Ur chroot /srv/jail /sleeper: seen from the host, its executable is the jail's file.
 		80: {cmdline: []string{"/sleeper"}, exe: "/srv/jail/sleeper", otherRoot: true, root: "/srv/jail", exeID: fileID(t, root, "srv/jail/sleeper"), exeData: "sleeper"},
-		// A chrooted haproxy whose own binary was upgraded on disk.
 		81: {cmdline: []string{"/usr/sbin/haproxy"}, exe: "/usr/sbin/haproxy", deleted: true, otherRoot: true, root: "/var/lib/haproxy",
 			rootID: fileID(t, root, "var/lib/haproxy")},
 	}
@@ -708,8 +694,7 @@ func TestProcessCollectorProcessEndsWhileRead(t *testing.T) {
 			reasons[o.Paths[0]] = o.Reason
 		}
 		want := map[string]string{
-			"/opt/api/api": "the running file was not read (the process ended during the inventory)",
-			// A live process can also unmap a library between the reads.
+			"/opt/api/api":               "the running file was not read (the process ended during the inventory)",
 			"/tmp/libnetty_transport.so": "the running file was not read (the process ended or unmapped the file during the inventory)",
 		}
 		if !maps.Equal(reasons, want) {
@@ -722,7 +707,6 @@ func TestProcessCollectorFileUnlinkedBetweenProcesses(t *testing.T) {
 	id := procfs.FileID{Dev: 1, Ino: 100}
 	src := fakeSource{
 		30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeID: id, exeData: "go binary v1"},
-		// The same file, unlinked after process 30 was read: the Audit can only scan a copy.
 		31: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", deleted: true, exeID: id, exeData: "go binary v1"},
 	}
 	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
@@ -740,8 +724,6 @@ func TestProcessCollectorChrootInAContainer(t *testing.T) {
 	root := hostRoot(t)
 	src := fakeSource{
 		62: {cmdline: []string{"sshd: /usr/sbin/sshd -D [listener]"}, exe: "/usr/sbin/sshd", cgroup: cg("/system.slice/ssh.service")},
-		// sshd's chrooted child in an LXC container, whose own sshd was upgraded: its /run/sshd is
-		// the container's, not the host's.
 		90: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", deleted: true, otherRoot: true, root: "/run/sshd", rootID: procfs.FileID{Dev: 99, Ino: 5}},
 	}
 	tool := hostTool()
@@ -791,18 +773,12 @@ func TestProcessCollectorSandboxRunsHostFile(t *testing.T) {
 	root := files(t, map[string]string{"usr/lib/chromium/chromium": "chromium", "usr/lib/libc.so.6": "libc", "usr/sbin/sshd": "sshd", "run/sshd/.keep": "",
 		"usr/lib/glycin-loaders/2+/glycin-image-rs": "glycin", "usr/bin/bash": "bash"})
 	src := fakeSource{
-		// Chromium's zygote and renderers (and headless Chrome on servers) chroot into the emptied
-		// /proc/<pid>/fdinfo of a helper that has exited: not a host directory.
 		40: {cmdline: []string{"/usr/lib/chromium/chromium", "--type=zygote"}, exe: "/usr/lib/chromium/chromium", otherRoot: true, root: "/proc/38/fdinfo",
 			exeID: fileID(t, root, "usr/lib/chromium/chromium"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
-		// glycin's image loader runs in a bubblewrap sandbox, whose root is in another mount
-		// namespace and reads as "/", with the host's /usr bound into it.
 		50: {cmdline: []string{"/usr/lib/glycin-loaders/2+/glycin-image-rs", "--dbus-fd", "3"}, exe: "/usr/lib/glycin-loaders/2+/glycin-image-rs", otherRoot: true,
 			exeID: fileID(t, root, "usr/lib/glycin-loaders/2+/glycin-image-rs"), maps: []procfs.Mapping{libc}, mapIDs: map[string]procfs.FileID{libc.Path: fileID(t, root, "usr/lib/libc.so.6")}},
-		// Containers whose roots also read as "/" run their own bash, and a bash replaced since.
 		60: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", otherRoot: true, exeID: procfs.FileID{Dev: 99, Ino: 7}},
 		61: {cmdline: []string{"bash"}, exe: "/usr/bin/bash", deleted: true, otherRoot: true, rootID: procfs.FileID{Dev: 99, Ino: 8}},
-		// sshd's chrooted child in an LXC container runs the container's own sshd.
 		90: {cmdline: []string{"sshd: [net]"}, exe: "/usr/sbin/sshd", otherRoot: true, root: "/run/sshd", rootID: procfs.FileID{Dev: 99, Ino: 5}, exeID: procfs.FileID{Dev: 99, Ino: 6}},
 	}
 	tool := hostTool()
@@ -879,7 +855,6 @@ func TestProcessCollectorUserUnits(t *testing.T) {
 }
 
 func TestProcessCollectorSnapsOnArchAndFedora(t *testing.T) {
-	// Arch and Fedora mount snaps under /var/lib/snapd/snap; /snap is at most a symlink to it.
 	src := fakeSource{50: {cmdline: []string{"lxd"}, exe: "/var/lib/snapd/snap/lxd/123/bin/lxd"}}
 	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
 	res, err := c.collect(context.Background())
@@ -893,7 +868,6 @@ func TestProcessCollectorSnapsOnArchAndFedora(t *testing.T) {
 }
 
 func TestProcessCollectorClockStep(t *testing.T) {
-	// NTP stepped the wall clock between the reads: btime, and with it every start time, moved.
 	src := fakeSource{30: {cmdline: []string{"/opt/api/api"}, exe: "/opt/api/api", exeData: "go binary v1", clockStepped: true}}
 	c := &processCollector{src: src, root: hostRoot(t), resolver: &pkgtool.Resolver{Tool: hostTool()}, distro: debian, cacheDir: t.TempDir()}
 	res, err := c.collect(context.Background())

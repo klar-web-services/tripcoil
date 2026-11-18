@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// rpmFormat is passed to rpm --qf; rpm itself expands \t and \n.
 const rpmFormat = `%{NAME}\t%{EPOCHNUM}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n`
 
 type rpm struct{ run Runner }
@@ -48,8 +47,6 @@ func (r rpm) Owners(ctx context.Context, paths []string) (map[string]Package, er
 	return out, nil
 }
 
-// rpmErrors returns rpm's stderr lines without its warnings, which some hosts print on every call
-// (such as for a Berkeley DB database under an rpm that expects sqlite).
 func rpmErrors(stderr []byte) []string {
 	var out []string
 	for _, l := range lines(stderr) {
@@ -60,7 +57,6 @@ func rpmErrors(stderr []byte) []string {
 	return out
 }
 
-// rpmUnowned reports whether a failed rpm -qf said only that p is not owned or does not exist.
 func rpmUnowned(p string, stdout []byte, errs []string) bool {
 	for _, l := range errs {
 		if l != "error: file "+p+": No such file or directory" {

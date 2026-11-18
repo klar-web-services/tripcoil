@@ -24,7 +24,6 @@ func fixedIn(typ, pkg, version string, fixes ...string) Finding {
 	return finding(shop, typ, pkg, version, "fixed", fixes...)
 }
 
-// withPURL gives a finding the purl Grype reported for its package.
 func withPURL(f Finding, purl string) Finding {
 	f.Package.PURL = purl
 	return f
@@ -40,7 +39,6 @@ func TestUpgrades(t *testing.T) {
 		want     []Upgrade
 	}{
 		{
-			// The real Grype 0.121.2 fix versions of lodash 4.17.20 (Shearbolt's npm-vulnerable fixture).
 			name: "the highest fix version over all findings of a package",
 			findings: []Finding{fixedIn("npm", "lodash", "4.17.20", "4.17.21"), fixedIn("npm", "lodash", "4.17.20", "4.17.21"),
 				fixedIn("npm", "lodash", "4.17.20", "4.18.0"), fixedIn("npm", "lodash", "4.17.20", "4.17.23")},
@@ -94,7 +92,6 @@ func TestUpgrades(t *testing.T) {
 				{Origin: "appdir:/srv/b", Path: "/srv/b", Package: "a", Type: "npm", Installed: []string{"1.0.0"}, Version: "1.0.1", Findings: 1}},
 		},
 		{
-			// The real Grype 0.121.2 fix versions of lodash 3.10.1 and 4.17.20 in one app.
 			name: "two installed versions are one line naming both, lowest first",
 			findings: []Finding{withPURL(fixedIn("npm", "lodash", "4.17.20", "4.18.0"), "pkg:npm/lodash@4.17.20"),
 				withPURL(fixedIn("npm", "lodash", "3.10.1", "4.17.21"), "pkg:npm/lodash@3.10.1"), withPURL(fixedIn("npm", "lodash", "4.17.20", "4.17.21"), "pkg:npm/lodash@4.17.20")},
@@ -156,7 +153,7 @@ func TestPURLVersion(t *testing.T) {
 		{"pkg:npm/a@1.0.0?vcs_url=git%2Bhttps://u@host/a.git#lib", "1.0.1", "pkg:npm/a@1.0.1?vcs_url=git%2Bhttps://u@host/a.git#lib", "pkg:npm/a"},
 		{"pkg:golang/github.com/docker/docker@v20.10.7%2Bincompatible", "v28.0.0+incompatible",
 			"pkg:golang/github.com/docker/docker@v28.0.0%2Bincompatible", "pkg:golang/github.com/docker/docker"},
-		{"pkg:generic/a?x=1@2", "1.0.0", "", "pkg:generic/a"}, // no version
+		{"pkg:generic/a?x=1@2", "1.0.0", "", "pkg:generic/a"},
 		{"", "1.0.0", "", ""},
 	}
 	for _, tc := range tests {
@@ -170,7 +167,6 @@ func TestPURLVersion(t *testing.T) {
 	}
 }
 
-// checked runs checkUpgrades with g, and returns the lines and the warnings.
 func checked(ctx context.Context, t *testing.T, g *fakeScanner, findings []Finding) ([]Upgrade, []problem.Problem, string) {
 	t.Helper()
 	au := &auditor{d: Deps{CacheDir: t.TempDir(), Grype: g}, a: &Audit{Warnings: []problem.Problem{}}}
@@ -240,14 +236,13 @@ func TestCheckUpgrades(t *testing.T) {
 	})
 	t.Run("dropped when it cannot be checked", func(t *testing.T) {
 		cpe := fixedIn("binary", "node", "18.12.1", "18.20.4")
-		cpe.Package.PURL, cpe.Source = "pkg:generic/node@18.12.1", "nvd:cpe" // matched by CPE, but has none
+		cpe.Package.PURL, cpe.Source = "pkg:generic/node@18.12.1", "nvd:cpe"
 		bad := withPURL(fixedIn("binary", "curl", "7.80.0", "8.23.0"), "pkg:generic/curl@7.80.0")
-		bad.Package.CPEs = []string{"cpe:/a:haxx:curl:7.80.0"} // CPE 2.2
+		bad.Package.CPEs = []string{"cpe:/a:haxx:curl:7.80.0"}
 		g := &fakeScanner{}
 		if ups, warns, _ := checked(ctx, t, g, []Finding{fixedIn("npm", "a", "1.0.0", "1.0.1"), cpe, bad}); len(ups) != 0 || len(warns) != 0 || len(g.matched) != 0 {
 			t.Fatalf("lines %v, warnings %v, matched %v: a finding without a purl, matched by CPE without one, or with a CPE that is not 2.3, cannot be checked", names(ups), warns, g.matched)
 		}
-		// A copy without a purl is told apart by its name, so it is a package of its own.
 		ups, _, _ := checked(ctx, t, g, append(lodash, fixedIn("npm", "lodash", "4.17.19", "4.17.21")))
 		if len(ups) != 1 || !slices.Equal(ups[0].Installed, []string{"3.10.1", "4.17.20"}) {
 			t.Fatalf("lines %+v", ups)

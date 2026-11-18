@@ -16,11 +16,9 @@ func TestFindingID(t *testing.T) {
 	if FindingID("pkg:deb/debian/libssl3@3.0.15-1~deb12u1?arch=amd64&distro=debian-12", "CVE-2026-1234", other) == id {
 		t.Fatal("the location is part of the ID")
 	}
-	// The parts are separated, so moving text from one part to the next changes the ID.
 	if FindingID("a", "bc", Package{}) == FindingID("ab", "c", Package{}) {
 		t.Fatal("parts run together")
 	}
-	// The example of spec section 6.4: the formula must never change, or every finding gets a new ID.
 	p = Package{Name: "libssl3", Version: "3.0.15-1~deb12u1", Type: "deb", Location: "/var/lib/dpkg/status"}
 	if id := FindingID("pkg:deb/debian/libssl3@3.0.15-1~deb12u1?distro=debian-12", "CVE-2026-1234", p); id != "f:2fbbc5f665b4ae55" {
 		t.Fatalf("id %q, want f:2fbbc5f665b4ae55", id)

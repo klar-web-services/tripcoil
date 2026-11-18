@@ -14,15 +14,12 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// upgradeCandidate is a candidate upgrade line with the packages to match at its version (see
-// matchAt), or a nil check when a finding cannot be matched again.
 type upgradeCandidate struct {
 	Upgrade
-	name  string // the package's name as Grype reports it
+	name  string
 	check []component
 }
 
-// component is a package of the SBOM that checks the candidates. CycloneDX allows it one CPE.
 type component struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
@@ -31,15 +28,6 @@ type component struct {
 	CPE     string `json:"cpe,omitempty"`
 }
 
-// upgradeCandidates returns the candidate upgrade lines of spec section 6.6: for each package in
-// an app directory or jar whose findings all have a fix, the one version that may clear them all.
-// That is the highest fix version, given only when every installed and fix version is semver, the
-// highest is spelled one way only, and it is above every installed version. The version is always
-// one that Grype reported; none is derived. Grype reports for each finding only the fix of the
-// version range that matched, so the highest fix may still be in another range: the Audit gives a
-// line only when matching the package at that version finds nothing (checkUpgrades). A package is
-// told apart by its purl without the version, or by its name when it has none. Sorted by findings
-// cleared, then path and package.
 func upgradeCandidates(findings []Finding) []upgradeCandidate {
 	type key struct{ origin, typ, purl, name string }
 	groups := map[key][]Finding{}
@@ -50,7 +38,7 @@ func upgradeCandidates(findings []Finding) []upgradeCandidate {
 		}
 		k := key{origin: f.Origin, typ: f.Package.Type}
 		if f.Package.PURL != "" {
-			k.purl = purlWithoutVersion(f.Package.PURL) // a Maven name is only the artifactId
+			k.purl = purlWithoutVersion(f.Package.PURL)
 		} else {
 			k.name = f.Package.Name
 		}
@@ -93,8 +81,6 @@ func upgradeName(p Package) string {
 	return group + ":" + artifact
 }
 
-// installedVersions lists the installed versions of a package's findings, each once, lowest first.
-// upgradeVersion has checked that they are semver.
 func installedVersions(findings []Finding) []string {
 	var out []string
 	for _, f := range findings {
@@ -110,10 +96,6 @@ func installedVersions(findings []Finding) []string {
 	return out
 }
 
-// matchAt lists the packages of findings at version: each purl once, and a package with CPEs once
-// per CPE, with that purl and the CPE at version, because Grype matches a CPE at its own version.
-// It is nil when a finding cannot be matched again: it has no purl, a CPE that is not a CPE 2.3
-// formatted string, or no CPE although Grype matched it by CPE.
 func matchAt(findings []Finding, version string) []component {
 	var out []component
 	for _, f := range findings {
@@ -141,16 +123,13 @@ func matchAt(findings []Finding, version string) []component {
 	return out
 }
 
-// cpeWithVersion is a CPE 2.3 formatted string with its version, the sixth field, replaced and
-// escaped as the binding requires: a backslash before each character other than a letter, digit,
-// period, hyphen or underscore.
 func cpeWithVersion(cpe, version string) (string, bool) {
 	var fields []string
 	start := 0
 	for i := 0; i < len(cpe); i++ {
 		switch cpe[i] {
 		case '\\':
-			i++ // an escaped character, such as \:
+			i++
 		case ':':
 			fields = append(fields, cpe[start:i])
 			start = i + 1
@@ -183,7 +162,6 @@ func purlVersion(purl string) (start, end int, ok bool) {
 	return at + 1, end, at >= 0
 }
 
-// purlWithoutVersion is a purl without its version, qualifiers and subpath.
 func purlWithoutVersion(purl string) string {
 	start, end, ok := purlVersion(purl)
 	if ok {
@@ -192,8 +170,6 @@ func purlWithoutVersion(purl string) string {
 	return purl[:end]
 }
 
-// purlWithVersion is a purl with its version replaced, keeping the qualifiers and subpath. The
-// version is semver, so + (of build metadata) is the only character to percent-encode.
 func purlWithVersion(purl, version string) (string, bool) {
 	start, end, ok := purlVersion(purl)
 	if !ok {
@@ -202,13 +178,8 @@ func purlWithVersion(purl, version string) (string, bool) {
 	return purl[:start] + strings.ReplaceAll(version, "+", "%2B") + purl[end:], true
 }
 
-// checkUpgrades keeps the candidates that Grype confirms: it matches every candidate's packages at
-// the candidate version in one SBOM, and keeps a line only when none of them gets any match, so a
-// version still known to be vulnerable is never recommended. A match for a purl that is not in the
-// SBOM drops every candidate of that package type and name. When the matching fails, no line is
-// given, and a warning says why, unless the run was interrupted.
 func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) []Upgrade {
-	byPURL := map[string][]int{} // the candidates of each purl in the SBOM
+	byPURL := map[string][]int{}
 	seen := map[component]bool{}
 	var comps []component
 	for i, c := range cands {
@@ -253,8 +224,6 @@ func (au *auditor) checkUpgrades(ctx context.Context, cands []upgradeCandidate) 
 	return out
 }
 
-// matchUpgrades matches packages written as a CycloneDX SBOM. Both the SBOM and Grype's report stay
-// in the scan folder, which is removed at the end of the run.
 func (au *auditor) matchUpgrades(ctx context.Context, comps []component) (*grype.Report, error) {
 	doc := struct {
 		BOMFormat   string      `json:"bomFormat"`
@@ -275,7 +244,6 @@ func (au *auditor) matchUpgrades(ctx context.Context, comps []component) (*grype
 	return au.d.Grype.Match(ctx, sbom, filepath.Join(au.scanDir(), "upgrades.grype.json"), true)
 }
 
-// upgradeVersion is the highest fix version of one package's findings, if a line is allowed.
 func upgradeVersion(findings []Finding) (string, bool) {
 	var (
 		best      string
@@ -301,7 +269,7 @@ func upgradeVersion(findings []Finding) (string, bool) {
 			case best == "" || c > 0:
 				best, bestV, ambiguous = s, v, false
 			case c == 0 && s != best:
-				ambiguous = true // e.g. 1.0.1 and v1.0.1, or 1.0.1+a and 1.0.1+b
+				ambiguous = true
 			}
 		}
 	}
@@ -316,14 +284,11 @@ func upgradeVersion(findings []Finding) (string, bool) {
 	return best, true
 }
 
-// semver is a parsed semver 2.0 version. Numbers stay decimal strings without leading zeros,
-// so arbitrarily large values compare correctly. Build metadata is dropped.
 type semver struct {
 	core [3]string
-	pre  []string // pre-release identifiers; empty for a release
+	pre  []string
 }
 
-// parseSemver parses MAJOR.MINOR.PATCH with optional -pre and +build and an optional leading v.
 func parseSemver(s string) (semver, bool) {
 	s = strings.TrimPrefix(s, "v")
 	if i := strings.IndexByte(s, '+'); i >= 0 {
@@ -353,7 +318,6 @@ func parseSemver(s string) (semver, bool) {
 	return v, true
 }
 
-// validIdentifiers checks dot-separated pre-release (pre) or build identifiers.
 func validIdentifiers(s string, pre bool) bool {
 	for _, id := range strings.Split(s, ".") {
 		if id == "" {
@@ -372,9 +336,6 @@ func validIdentifiers(s string, pre bool) bool {
 	return true
 }
 
-// compareSemver orders by semver 2.0 precedence: numeric core, then a pre-release below its
-// release, identifiers numerically or else in ASCII order, numeric below alphanumeric, and a
-// shorter identifier list below a longer one with the same prefix.
 func compareSemver(a, b semver) int {
 	for i := range a.core {
 		if c := compareDecimal(a.core[i], b.core[i]); c != 0 {
@@ -382,7 +343,7 @@ func compareSemver(a, b semver) int {
 		}
 	}
 	if len(a.pre) == 0 || len(b.pre) == 0 {
-		return cmp.Compare(len(b.pre), len(a.pre)) // a release (no identifiers) sorts higher
+		return cmp.Compare(len(b.pre), len(a.pre))
 	}
 	for i := 0; i < len(a.pre) && i < len(b.pre); i++ {
 		x, y := a.pre[i], b.pre[i]
@@ -404,7 +365,6 @@ func compareSemver(a, b semver) int {
 	return cmp.Compare(len(a.pre), len(b.pre))
 }
 
-// compareDecimal compares decimal strings without leading zeros.
 func compareDecimal(x, y string) int {
 	return cmp.Or(cmp.Compare(len(x), len(y)), strings.Compare(x, y))
 }

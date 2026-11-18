@@ -48,15 +48,6 @@ if [ -n "$FAKE_GRYPE_SLEEP" ]; then exec sleep "$FAKE_GRYPE_SLEEP"; fi
 exit "${FAKE_GRYPE_EXIT:-0}"
 `
 
-// fakeGrype writes an executable that imitates Grype's command line and returns its path.
-// FAKE_GRYPE_LOG receives the arguments ("<log>.env", ".pwd" and ".cfg" get the environment,
-// working directory and config; ".calls" collects the arguments of every call, each followed by
-// an empty line). FAKE_GRYPE_JSON and FAKE_GRYPE_SBOM are written for -o json= and
-// -o cyclonedx-json=; the file FAKE_GRYPE_JSON_FILE, when set, is copied for -o json=. FAKE_GRYPE_STATUS and FAKE_GRYPE_STATUS_EXIT are the output and exit code
-// of "db status", FAKE_GRYPE_SEARCH the output of "db search". FAKE_GRYPE_DB is the database
-// directory: "db update" lists it to "<log>.db" and leaves a half-unpacked grype-db-download2 in
-// it. FAKE_GRYPE_EXIT, FAKE_GRYPE_STDERR and FAKE_GRYPE_SLEEP apply to every other command, and
-// FAKE_GRYPE_PID receives its process ID, which stays that of the sleep.
 func fakeGrype(t testing.TB) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "grype")

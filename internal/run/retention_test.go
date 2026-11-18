@@ -20,7 +20,6 @@ func TestPrune(t *testing.T) {
 		}
 	}
 	runs := filepath.Join(state, "runs")
-	// ids[5] carries the review of ids[1]; latest-reviewed points at ids[0]; ids[3] has no run.json.
 	for i, id := range ids {
 		if i == 3 {
 			continue
@@ -39,7 +38,7 @@ func TestPrune(t *testing.T) {
 	if err := UpdateLatest(state, "latest-reviewed", ids[0]); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{".probe-abc", ".tmp-1"} { // what a killed run left: not retention's
+	for _, p := range []string{".probe-abc", ".tmp-1"} {
 		os.Mkdir(filepath.Join(runs, p), 0o700)
 	}
 	removed, err := Prune(state, 2)

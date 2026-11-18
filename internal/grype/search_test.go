@@ -36,7 +36,7 @@ func TestSearchVulnerabilities(t *testing.T) {
 	if err != nil || !vs["CVE-2024-1086"].KnownExploited {
 		t.Fatalf("%+v %v", vs, err)
 	}
-	got := args(t, log) // the second call, with the 1001st ID
+	got := args(t, log)
 	if !slices.Equal(got, []string{"db", "search", "vuln", "CVE-2026-1000", "--provider", "nvd", "--limit", "0", "-o", "json", "-c", got[len(got)-1]}) {
 		t.Fatalf("args %q", got)
 	}

@@ -17,21 +17,16 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
-// maxRunningFileSize is the most read of one running file. The largest real libraries are about
-// 1.5 GB, but a user can run or map a sparse file of any size.
 const maxRunningFileSize = 4 << 30
 
-var runningFileCap int64 = maxRunningFileSize // lowered by tests
+var runningFileCap int64 = maxRunningFileSize
 
-// maxRunReadBytes is the most read from running files in one run: the per-file cap still allows
-// one sparse file per library and per hard link to it.
 const maxRunReadBytes = 64 << 30
 
-var runReadCap int64 = maxRunReadBytes // lowered by tests
+var runReadCap int64 = maxRunReadBytes
 
 var errReadBudget = errors.New("the run's read budget was spent")
 
-// cacheSpace returns the available and total bytes of the file system that holds dir.
 var cacheSpace = func(dir string) (free, total uint64, err error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(dir, &st); err != nil {
@@ -40,8 +35,6 @@ var cacheSpace = func(dir string) (free, total uint64, err error) {
 	return st.Bavail * uint64(st.Frsize), st.Blocks * uint64(st.Frsize), nil
 }
 
-// A copy leaves the cache file system a tenth free, but at most 4 GiB, so copies still work on a
-// big, fairly full disk.
 const (
 	cacheFloorPercent = 10
 	maxCacheFloor     = 4 << 30
@@ -53,28 +46,21 @@ func errTooLarge() error { return fmt.Errorf("it is larger than %d bytes", runni
 
 var soPattern = regexp.MustCompile(`\.so($|\.)`)
 
-// isSharedLibrary reports whether a mapped file is a shared library (libssl.so.3,
-// ld-linux-x86-64.so.2, _ssl.cpython-312-x86_64-linux-gnu.so), not a locale archive or data file
-// such as /etc/ld.so.cache, which ldconfig replaces on every upgrade.
 func isSharedLibrary(path string) bool {
 	b := filepath.Base(path)
 	return soPattern.MatchString(b) && !strings.HasSuffix(b, ".cache")
 }
 
-// within reports whether path lies below dir.
 func within(path, dir string) bool { return strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/") }
 
-// runningFile is a running file opened through /proc.
 type runningFile struct {
 	io.ReadCloser
-	size    int64 // -1 when unknown
+	size    int64
 	id      procfs.FileID
 	idKnown bool
-	left    *int64 // what is left of the run's read budget
+	left    *int64
 }
 
-// openRunning opens a running file, refusing one larger than runningFileCap. Reading it takes
-// from left.
 func openRunning(open func() (io.ReadCloser, error), left *int64) (runningFile, error) {
 	r, err := open()
 	if err != nil {
@@ -97,9 +83,6 @@ func openRunning(open func() (io.ReadCloser, error), left *int64) (runningFile, 
 	return f, nil
 }
 
-// readRunning copies a running file to w until ctx is cancelled. It refuses a file larger than
-// what is left of the read budget and fails with over past limit, or past the budget, because the
-// file can grow while it is read.
 func readRunning(ctx context.Context, w io.Writer, f runningFile, limit int64, over error) error {
 	if f.size > *f.left {
 		return errReadBudget
@@ -130,7 +113,6 @@ func (c ctxReader) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-// hashRunning hashes a running file.
 func hashRunning(ctx context.Context, f runningFile) (string, error) {
 	h := sha256.New()
 	if err := readRunning(ctx, h, f, runningFileCap, errTooLarge()); err != nil {
@@ -139,8 +121,6 @@ func hashRunning(ctx context.Context, f runningFile) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// copyToCache stores a running file as cacheDir/replaced/<sha256> and returns its hash and path.
-// The Audit scans this copy, because the file on disk is a newer one.
 func copyToCache(ctx context.Context, f runningFile, cacheDir string) (string, string, error) {
 	dir := filepath.Join(cacheDir, "replaced")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -165,7 +145,7 @@ func copyToCache(ctx context.Context, f runningFile, cacheDir string) (string, s
 	if err != nil {
 		return "", "", err
 	}
-	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
+	defer os.Remove(tmp.Name())
 	h := sha256.New()
 	if err := readRunning(ctx, io.MultiWriter(tmp, h), f, limit, over); err != nil {
 		tmp.Close()
@@ -182,8 +162,6 @@ func copyToCache(ctx context.Context, f runningFile, cacheDir string) (string, s
 	return sha, final, nil
 }
 
-// pruneCache removes the copies of earlier runs before a run copies anything: they would pile up
-// and count against the free space a copy must leave. The run lock keeps other runs away.
 func pruneCache(cacheDir string) {
 	dir := filepath.Join(cacheDir, "replaced")
 	entries, _ := os.ReadDir(dir)

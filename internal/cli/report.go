@@ -87,7 +87,6 @@ func runReport(args []string, stdout, stderr io.Writer, d deps) int {
 	return 0
 }
 
-// printJSONReport prints `tripcoil report --json` for a run folder.
 func printJSONReport(stdout, stderr io.Writer, sudo, dir, id string) int {
 	rec, err := run.ReadRecord(dir)
 	if err != nil {
@@ -125,7 +124,6 @@ func printJSONReport(stdout, stderr io.Writer, sudo, dir, id string) int {
 	return 0
 }
 
-// readOptional reads a JSON file of a run folder that a stage may not have written.
 func readOptional(path string, v any) bool {
 	data, err := os.ReadFile(path)
 	return err == nil && json.Unmarshal(data, v) == nil

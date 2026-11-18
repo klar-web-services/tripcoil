@@ -118,7 +118,6 @@ func TestBwrapArgs(t *testing.T) {
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
-	// A hidden path that does not exist is left out: bubblewrap cannot create it on the read-only root.
 	os.Remove(s.ConfigDir)
 	if a := strings.Join(BwrapArgs(s), " "); strings.Contains(a, "etc-tripcoil") {
 		t.Errorf("missing config dir still mounted: %s", a)
@@ -164,8 +163,6 @@ func TestSystemdVersion(t *testing.T) {
 	}
 }
 
-// fakeSystemd writes stand-ins for systemd-run and systemctl: systemd-run records its PID and runs
-// body, systemctl appends its arguments to a log and, like stopping the unit, ends systemd-run.
 func fakeSystemd(t *testing.T, body string) (Systemd, string) {
 	dir := t.TempDir()
 	log, pid := filepath.Join(dir, "systemctl.log"), filepath.Join(dir, "pid")
@@ -181,7 +178,6 @@ func TestSystemdRun(t *testing.T) {
 	}{
 		{"success", "echo out; echo 'Running as unit: x' >&2; echo 'Finished with result: success' >&2; exit 0", Result{}},
 		{"failure", "echo 'Finished with result: exit-code' >&2; exit 7", Result{ExitCode: 7}},
-		// The command's own output cannot fake the result: systemd-run's line comes last.
 		{"timeout", "echo 'Finished with result: success' >&2; echo 'Finished with result: timeout' >&2; exit 1", Result{ExitCode: 1, TimedOut: true}},
 	}
 	for _, tc := range cases {
@@ -194,7 +190,6 @@ func TestSystemdRun(t *testing.T) {
 			if err != nil || got != tc.want {
 				t.Fatalf("got %+v %v, want %+v", got, err, tc.want)
 			}
-			// The unit is stopped after systemd-run has exited, however it ended.
 			if stopped, _ := os.ReadFile(log); string(stopped) != "stop tripcoil-review-20261115T061500Z-3fa2-agent.service\n" {
 				t.Errorf("systemctl got %q", stopped)
 			}
@@ -225,7 +220,6 @@ func TestSystemdRunCancelStopsUnit(t *testing.T) {
 	}
 }
 
-// A cancelled review starts no unit.
 func TestSystemdRunCancelledBeforeStart(t *testing.T) {
 	d, log := fakeSystemd(t, "exit 0")
 	s := spec(t)

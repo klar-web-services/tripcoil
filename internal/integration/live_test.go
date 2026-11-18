@@ -22,10 +22,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
-// TestLiveHost inventories and audits the machine it runs on, with the pinned Grype and today's
-// vulnerability data (it downloads both into a temporary cache). Run it as root:
-//
-//	go test -c -tags live -o live.test ./internal/integration/ && sudo ./live.test -test.v -test.run TestLiveHost
 func TestLiveHost(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
@@ -87,8 +83,6 @@ func TestLiveHost(t *testing.T) {
 		if o.ID == kernel.Origins[0] && o.Status != audit.Scanned {
 			t.Fatalf("kernel origin %+v", o)
 		}
-		// Without the distribution, every package origin is unidentified and nothing matches. A
-		// single binary may carry an operating system package without a distribution.
 		if o.Kind == inventory.OriginPackage && strings.Contains(o.Reason, "did not recognise the distribution") {
 			t.Fatalf("origin %+v", o)
 		}
@@ -101,7 +95,6 @@ func TestLiveHost(t *testing.T) {
 	}
 	t.Logf("audit: %d findings %v; origins %v; database built %s", len(a.Findings), tiers, statuses, a.Grype.DBBuilt)
 
-	// The facts of a healthy host: everything but sshd.txt (when sshd is not installed) is collected.
 	fd := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath}
 	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
 		fd.Docker, fd.DockerSocket = dockerapi.New(socket), socket

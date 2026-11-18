@@ -15,7 +15,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/setup"
 )
 
-// healthy is a host on which every doctor check passes; checked records the check's run folder.
 func healthy(t *testing.T, d *deps, checked *string) {
 	d.service = func() (setup.Service, error) {
 		return setup.Service{Manager: setup.Systemd, Installed: true, Running: true}, nil
@@ -42,7 +41,7 @@ func TestDoctorPasses(t *testing.T) {
 	d := testDeps(t, nil, nil)
 	var checked string
 	healthy(t, &d, &checked)
-	os.MkdirAll(filepath.Join(d.stateDir, "runs", ".doctor", "agent"), 0o700) // a killed doctor's
+	os.MkdirAll(filepath.Join(d.stateDir, "runs", ".doctor", "agent"), 0o700)
 	var out, errb bytes.Buffer
 	if code := dispatch([]string{"doctor"}, &out, &errb, d); code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out.String(), errb.String())

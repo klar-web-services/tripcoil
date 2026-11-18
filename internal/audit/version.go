@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// compareVersions orders two versions of a package of a Grype package type as the package's own
-// tool does: deb as dpkg, rpm as rpm, alpm as pacman and apk as apk. Other versions compare as
-// semver when both are semver, and otherwise as dpkg compares them.
 func compareVersions(typ, a, b string) int {
 	switch typ {
 	case "deb":
@@ -31,8 +28,6 @@ func compareVersions(typ, a, b string) int {
 	return compareDpkg(a, b)
 }
 
-// compareDpkg orders by the epoch (the number before a colon, else 0), then the version before
-// the last hyphen, then the revision after it.
 func compareDpkg(a, b string) int {
 	ea, a := epoch(a)
 	eb, b := epoch(b)
@@ -55,9 +50,6 @@ func revision(v string) (string, string) {
 	return v, ""
 }
 
-// verrevcmp is dpkg's: it compares runs of non-digits character by character, where ~ sorts
-// before everything, even the end, and letters before other characters, and runs of digits as
-// numbers.
 func verrevcmp(a, b string) int {
 	i, j := 0, 0
 	for i < len(a) || j < len(b) {
@@ -105,9 +97,6 @@ func order(s string, i int) int {
 	}
 }
 
-// compareEVR orders epoch:version-release versions as rpm does, or as pacman does: by the epoch
-// (0 when there is none), then the version, then the release. rpm counts a missing release as
-// empty; pacman compares releases only when both versions have one.
 func compareEVR(a, b string, pacman bool) int {
 	ea, va, ra, hasA := evr(a)
 	eb, vb, rb, hasB := evr(b)
@@ -213,7 +202,6 @@ func rpmvercmp(a, b string, pacman bool) int {
 	return 1
 }
 
-// apk's token types, in the order apk ranks them.
 const (
 	apkInvalid = iota - 1
 	apkDigitOrZero
@@ -225,10 +213,6 @@ const (
 	apkEnd
 )
 
-// compareApk orders versions as apk does: numbers, a letter after the last one, suffixes, of which
-// _alpha, _beta, _pre and _rc come before the release and _cvs, _svn, _git, _hg and _p after it,
-// then the -r revision. A number after a dot that starts with zeros sorts before one that does
-// not, the more zeros the lower.
 func compareApk(a, b string) int {
 	ta, tb := apkDigit, apkDigit
 	var va, vb int64
@@ -242,7 +226,6 @@ func compareApk(a, b string) int {
 	case ta == tb:
 		return 0
 	}
-	// What is left decides: more is newer, unless it is a pre-release suffix.
 	if t := ta; ta == apkSuffix && apkToken(&t, &a) < 0 {
 		return -1
 	}
@@ -257,8 +240,6 @@ var (
 	apkPostSuffixes = []string{"cvs", "svn", "git", "hg", "p"}
 )
 
-// apkToken reads the value of the next token, of type *t, from *s, and sets *t to the type of the
-// token after it.
 func apkToken(t *int, s *string) int64 {
 	if *s == "" {
 		*t = apkEnd
@@ -313,7 +294,6 @@ func apkToken(t *int, s *string) int64 {
 	return v
 }
 
-// apkNextType reads the type of the next token from *s, consuming its separator.
 func apkNextType(t *int, s *string) {
 	n, c := apkInvalid, (*s)[0]
 	switch {
@@ -341,7 +321,6 @@ func apkNextType(t *int, s *string) {
 	*t = n
 }
 
-// at is the character at i, or 0 past the end.
 func at(s string, i int) byte {
 	if i < len(s) {
 		return s[i]

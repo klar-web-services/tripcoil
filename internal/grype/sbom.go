@@ -10,10 +10,9 @@ import (
 	"strings"
 )
 
-// Component is one package in a CycloneDX SBOM written by Grype.
 type Component struct {
 	Name, Version, PURL string
-	Type                string // Syft's package type, such as deb or npm
+	Type                string
 }
 
 type cdxComponent struct {
@@ -43,11 +42,6 @@ func parseSBOM(data []byte) (cdxDocument, error) {
 	return doc, nil
 }
 
-// ReadSBOM reads the SBOM that Grype wrote to path of the package database or an image without its
-// vulnerabilities, which it reads past an element at a time: they repeat the report's matches. An
-// Ubuntu 22.04 host with two kernels gives 28,000 of them, in an SBOM of 34 MB of which 1 MB is
-// packages. A file larger than maxSystemReportSize is not read, and what is left must be at most
-// limit bytes.
 func ReadSBOM(path string, limit int64) ([]byte, error) {
 	f, err := openOutput(path, "Grype's SBOM", maxSystemReportSize)
 	if err != nil {
@@ -88,8 +82,6 @@ func ReadSBOM(path string, limit int64) ([]byte, error) {
 	return append(out, '}'), nil
 }
 
-// sbomPackages returns the packages in an SBOM: its components that are neither files nor the
-// operating system.
 func sbomPackages(data []byte) ([]cdxComponent, error) {
 	doc, err := parseSBOM(data)
 	if err != nil {
@@ -104,8 +96,6 @@ func sbomPackages(data []byte) ([]cdxComponent, error) {
 	return out, nil
 }
 
-// SBOMPackages lists the packages in an SBOM: its components that are neither files nor the
-// operating system.
 func SBOMPackages(data []byte) ([]Component, error) {
 	pkgs, err := sbomPackages(data)
 	if err != nil {
@@ -126,8 +116,6 @@ func SBOMPackages(data []byte) ([]Component, error) {
 
 var locationProperty = regexp.MustCompile(`^syft:location:[0-9]+:path$`)
 
-// SBOMLocations lists, for each package of SBOMPackages in the same order, the files it was read
-// from, as paths below the scanned directory with a leading slash, such as "/package-lock.json".
 func SBOMLocations(data []byte) ([][]string, error) {
 	pkgs, err := sbomPackages(data)
 	if err != nil {
@@ -146,12 +134,6 @@ func SBOMLocations(data []byte) ([][]string, error) {
 	return out, nil
 }
 
-// Matchable reports false for an SBOM known to match otherwise than a scan of what it came from. It
-// only filters: the Audit still matches any other SBOM and compares its matches with the scan's
-// before caching it. An SBOM that holds Go modules matches otherwise: Grype keeps only the Go
-// matches whose code is linked into a binary, which it sees in the binary but not in an SBOM. So
-// may an SBOM whose operating system has no version: matching it may lose the distribution of a
-// derivative, as it did for CachyOS.
 func Matchable(data []byte) (bool, error) {
 	doc, err := parseSBOM(data)
 	if err != nil {
@@ -195,7 +177,6 @@ func StripSBOM(data []byte) ([]byte, error) {
 		}
 		doc["components"] = kept
 	}
-	// The dependencies name packages by their bom-ref.
 	deps, _ := doc["dependencies"].([]any)
 	for _, d := range deps {
 		m, _ := d.(map[string]any)
@@ -212,7 +193,6 @@ func StripSBOM(data []byte) ([]byte, error) {
 	return json.Marshal(doc)
 }
 
-// WithoutDistro returns s without its distro qualifier when s is a purl, and s otherwise.
 func WithoutDistro(s string) string {
 	rest, subpath, hasSubpath := strings.Cut(s, "#")
 	base, query, ok := strings.Cut(rest, "?")

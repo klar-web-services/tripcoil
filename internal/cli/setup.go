@@ -59,8 +59,6 @@ func runSetup(args []string, stdout, stderr io.Writer, d deps) int {
 		return 0
 	}
 	if start != nil {
-		// A dropped SSH session or Ctrl-C during the checks must not leave the service stopped;
-		// Ctrl-C still stops the checks.
 		defer d.holdSignals()()
 	}
 	fmt.Fprintln(stdout, "\nChecking the host (tripcoil doctor):")
@@ -74,7 +72,6 @@ func runSetup(args []string, stdout, stderr io.Writer, d deps) int {
 	return code
 }
 
-// setupHost sets this machine up, for the binary that runs now (see setup.Host.Setup).
 func setupHost(o setup.Options, stdout io.Writer) (bool, func() error, error) {
 	exe, err := os.Executable()
 	if err == nil {

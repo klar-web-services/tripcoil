@@ -16,29 +16,21 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// Network is facts/network.json: the host's listening TCP sockets and bound UDP sockets, mapped to
-// the items whose processes hold them (spec section 7.1). Sockets in a container's own network
-// namespace are not here; the container's published ports are (containers.json).
 type Network struct {
-	Sockets []Socket `json:"sockets"`
-	// LocalPortRangeStart is the start of net.ipv4.ip_local_port_range: the kernel picks a UDP
-	// client's port at or above it, which the change check leaves out (spec section 8.6).
-	LocalPortRangeStart int `json:"localPortRangeStart"`
+	Sockets             []Socket `json:"sockets"`
+	LocalPortRangeStart int      `json:"localPortRangeStart"`
 }
 
-// Socket is one listening TCP socket or bound UDP socket.
 type Socket struct {
-	Proto     string   `json:"proto"`   // tcp or udp
-	Address   string   `json:"address"` // the bind address: 0.0.0.0, ::, 127.0.0.1, ...
+	Proto     string   `json:"proto"`
+	Address   string   `json:"address"`
 	Port      int      `json:"port"`
-	Connected bool     `json:"connected,omitempty"` // a UDP socket connected to one peer
-	Items     []string `json:"items"`               // the items whose processes hold it
+	Connected bool     `json:"connected,omitempty"`
+	Items     []string `json:"items"`
 	PIDs      []int    `json:"pids"`
 	inode     string
 }
 
-// Socket states in /proc/net/*: TCP_ESTABLISHED (a connected UDP socket), TCP_CLOSE (a bound,
-// unconnected UDP socket) and TCP_LISTEN.
 const (
 	stateEstablished = "01"
 	stateClose       = "07"
@@ -50,7 +42,7 @@ func (c collector) network() (Network, error) {
 	for _, f := range []struct{ file, proto string }{{"tcp", "tcp"}, {"tcp6", "tcp"}, {"udp", "udp"}, {"udp6", "udp"}} {
 		data, err := os.ReadFile(filepath.Join(c.d.Root, "proc/net", f.file))
 		if os.IsNotExist(err) && strings.HasSuffix(f.file, "6") {
-			continue // IPv6 is off
+			continue
 		}
 		if err != nil {
 			return Network{}, err
@@ -87,14 +79,13 @@ func (c collector) network() (Network, error) {
 	return n, nil
 }
 
-// parseSockets reads the listening TCP and bound UDP sockets from a /proc/net table.
 func parseSockets(data []byte, proto string) ([]Socket, error) {
 	var out []Socket
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	first := true
 	for sc.Scan() {
-		if first { // the header
+		if first {
 			first = false
 			continue
 		}
@@ -118,8 +109,6 @@ func parseSockets(data []byte, proto string) ([]Socket, error) {
 	return out, sc.Err()
 }
 
-// parseAddr reads "0100007F:1F90": the address as the kernel stores it, in 32-bit words of host
-// byte order, then the port in hex.
 func parseAddr(s string) (netip.Addr, int, error) {
 	h, p, ok := strings.Cut(s, ":")
 	if !ok {
@@ -160,7 +149,7 @@ func (c collector) socketOwners() map[string][]int {
 		dir := filepath.Join(c.d.Root, "proc", strconv.Itoa(pid), "fd")
 		fds, err := os.ReadDir(dir)
 		if err != nil {
-			continue // a kernel thread, or the process ended
+			continue
 		}
 		for _, e := range fds {
 			target, err := os.Readlink(filepath.Join(dir, e.Name()))
@@ -175,10 +164,6 @@ func (c collector) socketOwners() map[string][]int {
 	return out
 }
 
-// itemOfPID is the item of a process: the Inventory's, or for a process the Inventory did not see,
-// the one process item without an app directory that runs the same executable, when the process is
-// in the host's mount namespace. An interpreter's item stands for one app only (another script of the
-// same python is another app), and a process in a container's mount namespace names its own files.
 func (c collector) itemOfPID(pid int) (string, bool) {
 	if id, ok := c.itemOf[pid]; ok {
 		return id, true
@@ -194,7 +179,7 @@ func (c collector) itemOfPID(pid int) (string, bool) {
 	for _, it := range c.inv.Items {
 		if it.Kind == inventory.KindProcess && it.AppDir == "" && it.Exe == exe {
 			if found != "" {
-				return "", false // several items run it (other app directories)
+				return "", false
 			}
 			found = it.ID
 		}
@@ -202,7 +187,6 @@ func (c collector) itemOfPID(pid int) (string, bool) {
 	return found, found != ""
 }
 
-// itemsByPID maps the inventory's process and container PIDs to their items.
 func itemsByPID(inv *inventory.Inventory) map[int]string {
 	out := map[int]string{}
 	for _, it := range inv.Items {

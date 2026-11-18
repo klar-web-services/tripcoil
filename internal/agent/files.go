@@ -15,10 +15,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
-// FindCLI resolves the agent CLI: review.command when set, otherwise name on the fixed system
-// path. The file, every link on the way to it and every directory above them must be owned by
-// root and writable by nobody else, so that the agent cannot change the CLI it runs in (spec
-// section 8.3).
 func FindCLI(command, name string) (string, error) {
 	path := command
 	if path == "" {
@@ -47,7 +43,6 @@ func FindCLI(command, name string) (string, error) {
 	return path, nil
 }
 
-// checkPath checks every component of path, following links, and returns the final file.
 func checkPath(path string, depth int) (string, error) {
 	if depth > 40 {
 		return "", fmt.Errorf("%s: too many links", path)
@@ -83,7 +78,6 @@ func checkPath(path string, depth int) (string, error) {
 	return cur, nil
 }
 
-// safe accepts a file owned by root that only root can write to.
 func safe(p string) error {
 	fi, err := os.Lstat(p)
 	if err != nil {
@@ -105,9 +99,6 @@ func safe(p string) error {
 	return nil
 }
 
-// ResetHome deletes home and creates it again for the agent's user, with a copy of the template
-// when there is one (spec section 8.2). mount, when set, mounts a file system on the new folder
-// before the template is copied.
 func ResetHome(home, template string, uid, gid int, mount func(dir string) error) error {
 	if err := os.RemoveAll(home); err != nil {
 		return err
@@ -150,7 +141,7 @@ func ResetHome(home, template string, uid, gid int, mount func(dir string) error
 		case info.Mode().IsRegular():
 			err = copyFile(p, dst, info.Mode().Perm())
 		default:
-			return nil // no devices, sockets or pipes
+			return nil
 		}
 		if err != nil {
 			return err
@@ -182,9 +173,6 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 	return out.Close()
 }
 
-// readEntries reads the entries file the agent may have written to its home, which root reads
-// but the agent controls: it follows no link, opens no pipe or device, and reads at most
-// max bytes. A missing file is no entries; an error says why the file was ignored.
 func readEntries(home, name string, max int64) ([]byte, error) {
 	dir, err := unix.Open(home, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {

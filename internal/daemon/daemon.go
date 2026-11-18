@@ -1,6 +1,3 @@
-// Package daemon schedules runs (spec section 13): a run is due once the last finished run is at
-// least one interval old, so a manual run pushes the next scheduled run back, and runs missed
-// while the host was off are not made up.
 package daemon
 
 import (
@@ -8,19 +5,15 @@ import (
 	"time"
 )
 
-// Scheduler holds what the loop takes from the outside world, so tests can replace it.
 type Scheduler struct {
 	Now      func() time.Time
 	After    func(time.Duration) <-chan time.Time
-	Interval func() time.Duration // the current config's interval
-	Last     func() time.Time     // the start of the last finished run; zero when there is none
-	// Run runs once if a run is still due when it holds the run lock (a manual run may have
-	// finished while it waited for it).
-	Run    func(ctx context.Context)
-	Hangup <-chan struct{} // SIGHUP
-	Reload func()
-	// Waiting is told when the next run is due, before each wait.
-	Waiting func(at time.Time)
+	Interval func() time.Duration
+	Last     func() time.Time
+	Run      func(ctx context.Context)
+	Hangup   <-chan struct{}
+	Reload   func()
+	Waiting  func(at time.Time)
 }
 
 // Wait is how long until a run is due, after the last finished run and after the last attempt: a
@@ -47,7 +40,6 @@ func Wait(last, attempt time.Time, interval time.Duration, now time.Time) time.D
 	return next.Sub(now)
 }
 
-// Loop schedules runs until ctx is done.
 func (s Scheduler) Loop(ctx context.Context) {
 	var attempt time.Time
 	for ctx.Err() == nil {

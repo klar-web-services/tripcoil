@@ -8,19 +8,17 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// Kernel is facts/kernel.json (spec section 7.1).
 type Kernel struct {
 	Cmdline         string            `json:"cmdline"`
 	Modules         []string          `json:"modules"`
-	Lockdown        string            `json:"lockdown"` // the selected mode, such as none or integrity; empty when unsupported
+	Lockdown        string            `json:"lockdown"`
 	LSMs            []string          `json:"lsms"`
-	AppArmor        string            `json:"apparmor"` // Y, N or empty
-	SELinux         string            `json:"selinux"`  // enforcing, permissive or empty
+	AppArmor        string            `json:"apparmor"`
+	SELinux         string            `json:"selinux"`
 	Vulnerabilities map[string]string `json:"cpuVulnerabilities"`
-	Sysctls         map[string]string `json:"sysctls"` // only those the kernel has
+	Sysctls         map[string]string `json:"sysctls"`
 }
 
-// sysctls are the settings of spec section 7.1.
 var sysctls = []string{"kernel.unprivileged_userns_clone", "user.max_user_namespaces", "kernel.unprivileged_bpf_disabled", "kernel.kptr_restrict",
 	"kernel.dmesg_restrict", "kernel.yama.ptrace_scope", "fs.protected_symlinks", "fs.protected_hardlinks", "net.ipv4.ip_forward"}
 
@@ -42,7 +40,6 @@ func (c collector) kernel() (Kernel, error) {
 			k.Modules = it.Modules
 		}
 	}
-	// "none [integrity] confidentiality": the selected mode is in brackets.
 	if l := read("sys/kernel/security/lockdown"); l != "" {
 		if i, j := strings.Index(l, "["), strings.Index(l, "]"); i >= 0 && j > i {
 			k.Lockdown = l[i+1 : j]

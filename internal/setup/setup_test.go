@@ -12,9 +12,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/config"
 )
 
-// fakeHost is a host in a folder. Commands are recorded; fail names commands that fail (by a
-// prefix), replies holds their output, and creating the user, or installing a package, makes it
-// exist. Claude Code is installed unless a test removes it from tools.
 type fakeHost struct {
 	Host
 	cmds    []string
@@ -39,7 +36,6 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 		os.WriteFile(filepath.Join(root, "sbin/openrc-run"), nil, 0o755)
 		f.tools["apk"] = true
 	}
-	// Until the service is set up, it is neither enabled nor running.
 	for _, c := range []string{"systemctl is-enabled", "systemctl is-active", "rc-service tripcoil status"} {
 		f.fail[c] = true
 	}
@@ -101,14 +97,12 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 	return f
 }
 
-// rootStat stats a file but reports root as its owner, since the tests do not run as root.
 func rootStat(p string) (config.FileInfo, error) {
 	fi, err := config.OSStat(p)
 	fi.UID = 0
 	return fi, err
 }
 
-// anyEnvFile is a stat that finds review.envFile root-only, wherever the config points it.
 func anyEnvFile(string) (config.FileInfo, error) {
 	return config.FileInfo{Mode: 0o600, Regular: true}, nil
 }
@@ -202,7 +196,7 @@ func TestSetupRestartsAChangedService(t *testing.T) {
 
 func TestSetupOpenRC(t *testing.T) {
 	f := newFake(t, OpenRC)
-	f.In = strings.NewReader("maybe\n\nyes\n") // an invalid answer is asked again; empty is the default
+	f.In = strings.NewReader("maybe\n\nyes\n")
 	if _, _, err := f.Setup(Options{}); err != nil {
 		t.Fatal(err)
 	}

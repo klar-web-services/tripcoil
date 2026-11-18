@@ -1,6 +1,3 @@
-// Package agent runs the AI Review: it finds the agent CLI, prepares the per-review home and the
-// network table, proves the sandbox with the probe, and runs the CLI through its adapter (spec
-// sections 8.2 and 8.3).
 package agent
 
 import (
@@ -13,21 +10,14 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/review"
 )
 
-// Adapter builds one CLI's command line and reads its result.
 type Adapter interface {
-	// Args are the CLI's arguments for a review.
 	Args(in Inputs) []string
-	// Env are variables the sandbox sets for the CLI, such as turning off its self-update.
 	Env() []string
-	// Files are written into the per-review home before the CLI starts, by name.
 	Files(in Inputs) map[string][]byte
-	// Parse reads the review JSON from the CLI's output, or returns a *review.Failure.
 	Parse(stdout, stderr []byte, exitCode int) ([]byte, error)
-	// Version names the CLI and its version from its --version output, such as "claude 2.1.309".
 	Version(out []byte) string
 }
 
-// Inputs are what every review passes to the adapter.
 type Inputs struct {
 	Prompt string
 	Schema []byte
@@ -36,7 +26,6 @@ type Inputs struct {
 	Extra  []string
 }
 
-// For returns the adapter of review.agent.
 func For(agent string) Adapter {
 	switch agent {
 	case "claude":
@@ -47,8 +36,6 @@ func For(agent string) Adapter {
 	return nil
 }
 
-// version reads "<name> <version>" from the first field of --version output that starts with a
-// digit, or returns name alone.
 func version(name string, out []byte) string {
 	line, _, _ := bytes.Cut(out, []byte("\n"))
 	for _, f := range strings.Fields(string(line)) {
@@ -59,7 +46,6 @@ func version(name string, out []byte) string {
 	return name
 }
 
-// lastLine is the last non-empty line of a CLI's error output, shortened, for an error message.
 func lastLine(b []byte) string {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	l := strings.TrimSpace(lines[len(lines)-1])
@@ -125,7 +111,7 @@ func (claude) Parse(stdout, stderr []byte, exitCode int) ([]byte, error) {
 // codex is codex exec, verified with 0.154.0: the final message, which --output-schema shapes,
 // is printed on stdout; progress and log lines go to stderr. exec reads CODEX_API_KEY. Its own
 // sandbox lets it write to the home (--add-dir), for the entries file; the working directory, the
-// run folder, stays read-only in the OS sandbox, which is the security boundary (spec section 8.2).
+// run folder, stays read-only in the OS sandbox, which is the security boundary.
 type codex struct{}
 
 const codexSchema = "tripcoil-schema.json"

@@ -105,7 +105,7 @@ func TestFolderJSONAndLatest(t *testing.T) {
 }
 
 func TestSubfolderShareAndWriteFile(t *testing.T) {
-	old := syscall.Umask(0o077) // the modes must come from the code, not the umask
+	old := syscall.Umask(0o077)
 	defer syscall.Umask(old)
 	gid := 12345
 	if os.Geteuid() != 0 {
@@ -121,8 +121,6 @@ func TestSubfolderShareAndWriteFile(t *testing.T) {
 			t.Skip("needs a supplementary group or root to tell the agent group from the primary group")
 		}
 	}
-	// A user namespace that maps only the process's own IDs, as in a rootless container, leaves
-	// every other gid unmapped.
 	probe := filepath.Join(t.TempDir(), "probe")
 	if err := os.WriteFile(probe, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -142,7 +140,7 @@ func TestSubfolderShareAndWriteFile(t *testing.T) {
 		t.Fatalf("a second call: %s %v", again, err)
 	}
 	p := filepath.Join(raw, "a.grype.json")
-	if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil { // as Grype writes it
+	if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := Share(p, 0o640); err != nil {

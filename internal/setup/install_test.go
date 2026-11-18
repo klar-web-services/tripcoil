@@ -13,7 +13,6 @@ import (
 
 const npmInstall = "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code"
 
-// withoutClaude is a systemd host without Claude Code, with the package manager pm (or none).
 func withoutClaude(t *testing.T, pm string) *fakeHost {
 	f := newFake(t, Systemd)
 	delete(f.tools, "claude")
@@ -231,7 +230,7 @@ func TestClaudeCodeKeepsTheHostsNodeSource(t *testing.T) {
 		os.MkdirAll(filepath.Dir(filepath.Join(f.Root, p)), 0o755)
 		os.WriteFile(filepath.Join(f.Root, p), []byte(data), 0o644)
 	}
-	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil { // f.Fetch fails, so the key is not fetched
+	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	for p, data := range own {
@@ -252,7 +251,7 @@ func TestClaudeCodeKeepsAnExistingKey(t *testing.T) {
 	f.replies["apt-cache policy nodejs"] = "nodejs:\n  Candidate: (none)\n"
 	os.MkdirAll(filepath.Join(f.Root, "etc/apt/keyrings"), 0o755)
 	os.WriteFile(filepath.Join(f.Root, NodeSourceKeyPath), []byte("the host's key\n"), 0o644)
-	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil { // f.Fetch fails, so the key is not fetched
+	if _, _, err := f.claudeCode(Options{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.read(t, NodeSourceKeyPath); got != "the host's key\n" {

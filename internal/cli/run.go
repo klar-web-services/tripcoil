@@ -38,7 +38,6 @@ Run once now, as root, and write an evidence folder to /var/lib/tripcoil/runs/<r
 Flags:
 `
 
-// collectHost inventories the real host.
 func collectHost(ctx context.Context, cacheDir string) (*inventory.Inventory, error) {
 	rel, err := osrel.Read("/")
 	if err != nil {
@@ -86,7 +85,6 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 		fmt.Fprintln(stderr, "tripcoil run must run as root (try: sudo tripcoil run)")
 		return 2
 	}
-	// As light on the host as a scheduled run, and so are the Grype processes it starts.
 	if code, ran, err := d.enterScope(args); ran {
 		return code
 	} else if err != nil {
@@ -112,7 +110,7 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	// Signals are caught only after the lock is held: Ctrl-C while waiting for it just ends tripcoil.
 	ctx, stop := d.interrupts()
 	defer stop()
-	go func() { <-ctx.Done(); stop() }() // after the first signal, a second one ends tripcoil at once
+	go func() { <-ctx.Done(); stop() }()
 
 	rec, dir, err := execute(ctx, d, cfg, "manual", *noReviewFlag, *forceReview, stderr)
 	if err != nil {
@@ -122,9 +120,6 @@ func runRun(args []string, stdout, stderr io.Writer, d deps) int {
 	return printRun(stdout, d.sudo, rec, dir, *jsonOut)
 }
 
-// execute runs the pipeline once, with the run lock held, and writes the run folder. It returns
-// an error only when the run could not start. It records the run in state.json and prunes old
-// run folders afterwards.
 func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noReview, force bool, stderr io.Writer) (*run.Record, string, error) {
 	start := d.now()
 	id, err := run.NewID(start, d.random)
@@ -149,7 +144,7 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 	switch {
 	case ctx.Err() != nil:
 		rec.Interrupt(d.now(), "inventory")
-		if inv != nil { // what was raised before the signal still counts
+		if inv != nil {
 			rec.Add(inv.Errors...)
 			rec.Add(inv.Warnings...)
 			rec.Add(inv.Notices...)
@@ -181,7 +176,7 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 		if ctx.Err() != nil {
 			rec.Interrupt(d.now(), "audit")
 			for _, e := range aud.Errors {
-				if e.Code != problem.Interrupted { // rec.Interrupt added one for the run
+				if e.Code != problem.Interrupted {
 					rec.Add(e)
 				}
 			}
@@ -220,7 +215,6 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 
 	if rec.Status != run.Interrupted {
 		rec.Finish(d.now())
-		// Evidence that could not be written fails the run, whichever file it was (spec section 12).
 		if slices.ContainsFunc(rec.Errors, func(e problem.Problem) bool { return e.Code == problem.RunFolderUnwritable }) {
 			rec.Status, rec.ExitCode = run.Failed, 2
 		}
@@ -235,13 +229,13 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 	if err := run.WriteJSON(filepath.Join(dir, "run.json"), rec, 0o640); err != nil {
 		return nil, "", fmt.Errorf("%s: %v", problem.RunFolderUnwritable, err)
 	}
-	if rec.Status != run.Interrupted { // latest keeps pointing at the last finished run
+	if rec.Status != run.Interrupted {
 		if err := run.UpdateLatest(d.stateDir, "latest", id); err != nil {
-			fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest: %v\n", err) // only a pointer; run.json stands
+			fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest: %v\n", err)
 		}
 		if rec.Reviewed {
 			if err := run.UpdateLatest(d.stateDir, "latest-reviewed", id); err != nil {
-				fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest-reviewed: %v\n", err) // the next run reviews again
+				fmt.Fprintf(stderr, "tripcoil: cannot update runs/latest-reviewed: %v\n", err)
 			}
 		}
 	}
@@ -259,7 +253,6 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 	return rec, dir, nil
 }
 
-// factsHost collects the facts snapshot of the real host.
 func factsHost(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error) {
 	d := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath}
 	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
@@ -268,7 +261,6 @@ func factsHost(ctx context.Context, inv *inventory.Inventory, runDir string) (*f
 	return facts.Collect(ctx, d, inv, runDir)
 }
 
-// auditHost audits the Inventory with the pinned Grype and the kernel CNA data.
 func auditHost(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir string, cfg config.Config) *audit.Audit {
 	rel, _ := osrel.Read("/")
 	return audit.Run(ctx, audit.Deps{
@@ -285,10 +277,6 @@ func auditHost(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir s
 	}, inv)
 }
 
-// dockerImages is the Docker daemon at the socket the Inventory reads (DOCKER_HOST, or the
-// default), for the Audit to check that it still has an image before Grype scans it. It is nil
-// when DOCKER_HOST is not a unix socket: the Inventory then reads no containers, so there are no
-// images to scan.
 func dockerImages(dockerHost string) audit.Images {
 	socket, err := dockerapi.Socket(dockerHost)
 	if err != nil {
@@ -331,7 +319,6 @@ func titleCase(s string) string {
 	return string(s[0]-'a'+'A') + s[1:]
 }
 
-// printRun prints run.json (--json) or a short summary, and returns the run's exit code.
 func printRun(stdout io.Writer, sudo string, rec *run.Record, dir string, asJSON bool) int {
 	if asJSON {
 		enc := json.NewEncoder(stdout)
@@ -350,8 +337,6 @@ func printRun(stdout io.Writer, sudo string, rec *run.Record, dir string, asJSON
 	return rec.ExitCode
 }
 
-// oneLine replaces control and Unicode format characters (bidi controls, zero-width characters),
-// which text from the host may carry, with spaces.
 func oneLine(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {

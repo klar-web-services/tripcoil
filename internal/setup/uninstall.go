@@ -15,17 +15,13 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
-// UninstallOptions are uninstall's flags and the state folder it removes.
 type UninstallOptions struct {
-	Yes      bool // remove without asking
+	Yes      bool
 	StateDir string
 }
 
 const logPath = "/var/log/tripcoil.log"
 
-// Uninstall removes what setup and the installer put on the host, asking first unless o.Yes.
-// Every step finds out what is there, so a second run succeeds; a step that fails does not stop
-// the others, and Uninstall then returns an error.
 func (h Host) Uninstall(o UninstallOptions) error {
 	underHome := strings.HasPrefix(h.Exe, "/home/") || h.Exe == "/home"
 	if !o.Yes {
@@ -86,7 +82,7 @@ func (h Host) Uninstall(o UninstallOptions) error {
 	switch {
 	case underHome:
 		fmt.Fprintf(h.Out, "· %s is under /home; it stays.\n", h.Exe)
-	case failed: // the binary stays so that a rerun can finish the job
+	case failed:
 		fmt.Fprintf(h.Out, "! Kept %s so tripcoil uninstall can run again once the above is fixed.\n", h.Exe)
 	default:
 		removedExe, err := h.remove(h.Exe)
@@ -99,15 +95,14 @@ func (h Host) Uninstall(o UninstallOptions) error {
 	return nil
 }
 
-// removeService stops and disables the service and removes its files.
 func (h Host) removeService(m Manager) (bool, error) {
 	if m == Systemd {
 		if out, err := h.Run("systemctl", "disable", "--now", "tripcoil.service"); err != nil &&
 			!bytes.Contains(out, []byte("not loaded")) && !bytes.Contains(out, []byte("does not exist")) {
 			return false, fmt.Errorf("systemctl disable --now tripcoil.service: %v: %s", err, bytes.TrimSpace(out))
 		}
-		h.Run("systemctl", "stop", sandbox.UnitPrefix+"*") // reviews still running
-		h.Run("systemctl", "stop", "tripcoil-run-*")       // manual runs' scopes
+		h.Run("systemctl", "stop", sandbox.UnitPrefix+"*")
+		h.Run("systemctl", "stop", "tripcoil-run-*")
 		removed, err := h.remove(UnitPath)
 		if err != nil || !removed {
 			return false, err
@@ -140,7 +135,6 @@ func (h Host) removeService(m Manager) (bool, error) {
 	return removed, nil
 }
 
-// deleteTable deletes the agent's nftables table, if it is there.
 func (h Host) deleteTable() (bool, error) {
 	if _, err := h.Run("nft", "list", "table", "inet", "tripcoil"); err != nil {
 		return false, nil
@@ -152,7 +146,6 @@ func (h Host) deleteTable() (bool, error) {
 	return false, fmt.Errorf("nft delete table inet tripcoil: %v: %s", err, bytes.TrimSpace(out))
 }
 
-// markedNodeSource are the NodeSource files that carry setup's marker.
 func (h Host) markedNodeSource() []string {
 	var marked []string
 	for _, p := range NodeSourceFiles {
@@ -163,8 +156,6 @@ func (h Host) markedNodeSource() []string {
 	return marked
 }
 
-// removeNodeSource removes the marked NodeSource files, and the key along with the file that
-// marks it as setup's. The host's own files stay.
 func (h Host) removeNodeSource() ([]string, error) {
 	var removed []string
 	for _, p := range h.markedNodeSource() {
@@ -188,7 +179,6 @@ func (h Host) removeNodeSource() ([]string, error) {
 	return removed, nil
 }
 
-// removeDir removes a folder and everything in it.
 func (h Host) removeDir(dir string) (bool, error) {
 	if !h.exists(dir) {
 		return false, nil
@@ -200,7 +190,6 @@ func (h Host) removeDir(dir string) (bool, error) {
 	return err == nil, err
 }
 
-// removeAgentUser deletes the agent's user and its group.
 func (h Host) removeAgentUser() (bool, error) {
 	delUser, delGroup := "userdel", "groupdel"
 	if _, err := h.LookPath("userdel"); err != nil { // BusyBox, as on Alpine
@@ -218,14 +207,13 @@ func (h Host) removeAgentUser() (bool, error) {
 		switch {
 		case err == nil:
 			removed = true
-		case !bytes.Contains(out, []byte("does not exist")): // otherwise it went with the user
+		case !bytes.Contains(out, []byte("does not exist")):
 			return removed, fmt.Errorf("%s %s: %v: %s", delGroup, run.AgentGroup, err, bytes.TrimSpace(out))
 		}
 	}
 	return removed, nil
 }
 
-// remove removes one file and reports whether it was there.
 func (h Host) remove(p string) (bool, error) {
 	err := os.Remove(h.path(p))
 	if errors.Is(err, os.ErrNotExist) {

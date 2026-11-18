@@ -1,4 +1,3 @@
-// Package report renders report.md from what a run produced (spec section 11.3).
 package report
 
 import (
@@ -18,34 +17,25 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// Input is what a run produced. Inventory, Audit, Facts and Review are nil when their stage wrote
-// nothing.
 type Input struct {
 	Run       *run.Record
 	Inventory *inventory.Inventory
 	Audit     *audit.Audit
 	Facts     *facts.Index
-	// Review is the run's review, or the one it carries forward (Run.CarriedFrom). Without it, the
-	// report is audit-only, and NoReview says why.
-	Review   *review.Review
-	NoReview string
-	// Agent names the agent CLI, its version and the model, for the host line.
-	Agent string
+	Review    *review.Review
+	NoReview  string
+	Agent     string
 }
 
 // maxItems is how many items a finding names; the C library belongs to nearly every process.
 const maxItems = 5
 
-// Gap is one coverage gap: something Tripcoil could not audit, by design or because it could not
-// identify it (spec section 12).
 type Gap struct {
 	Code    string
 	Subject string
 	Detail  string
 }
 
-// Gaps lists the coverage gaps of a run: unresolved and unidentified origins, items without an
-// app directory, containers audited by their image only, and facts that could not be collected.
 func Gaps(inv *inventory.Inventory, aud *audit.Audit, idx *facts.Index) []Gap {
 	var gaps []Gap
 	if idx != nil {
@@ -83,7 +73,6 @@ func Gaps(inv *inventory.Inventory, aud *audit.Audit, idx *facts.Index) []Gap {
 	return gaps
 }
 
-// Render writes report.md. It always renders, whatever the run produced.
 func Render(in Input) string {
 	if in.Review != nil && in.Audit != nil && in.Run.Status != run.Interrupted && in.Run.Stages["audit"] != run.StageFailed {
 		return renderReviewed(in)
@@ -132,9 +121,6 @@ func verdict(in Input, gaps int) string {
 	return fmt.Sprintf("⚠️ Audit only (%s): %s findings%s", in.NoReview, strings.Join(parts, ", "), suffixes(r, gaps, true))
 }
 
-// failure is the reason a run has no audit results: the error that fails a whole audit (an
-// unwritable run folder, Grype unavailable, a stale database), else the first error of the audit,
-// or of an earlier stage that stopped it.
 func failure(r *run.Record) string {
 	for _, code := range []string{problem.RunFolderUnwritable, problem.GrypeUnavailable, problem.DBStale} {
 		for _, e := range r.Errors {
@@ -153,8 +139,6 @@ func failure(r *run.Record) string {
 	return "the audit did not run"
 }
 
-// suffixes notes a partial run, and a failed one that still has audit results (otherwise the
-// verdict already gives the failure).
 func suffixes(r *run.Record, gaps int, withAudit bool) string {
 	s := ""
 	if r.Status == run.Partial || r.Status == run.Failed && withAudit {
@@ -215,19 +199,14 @@ func clears(n int) string {
 	return fmt.Sprintf("all %d of its findings", n)
 }
 
-// maxGroups is how many groups the summary of a risk tier names.
 const maxGroups = 25
 
-// severities orders the severities a vulnerability can have in different sources.
 var severities = []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 
-// writeFindings lists critical and high findings in full, grouped by vulnerability, and
-// summarizes medium and low ones by where they are.
 func writeFindings(b *strings.Builder, findings []audit.Finding, inv *inventory.Inventory) {
 	writeFindingsAt(b, "##", findings, inv)
 }
 
-// writeFindingsAt is writeFindings with the tiers' headings at level (## or ###).
 func writeFindingsAt(b *strings.Builder, level string, findings []audit.Finding, inv *inventory.Inventory) {
 	byTier := map[string][]audit.Finding{}
 	for _, f := range findings {
@@ -285,7 +264,6 @@ func writeByVulnerability(b *strings.Builder, fs []audit.Finding, names map[stri
 	}
 }
 
-// itemList names the items of a finding.
 func itemList(f audit.Finding, names map[string]string) string {
 	var items []string
 	for _, id := range f.Items {
@@ -299,8 +277,6 @@ func itemList(f audit.Finding, names map[string]string) string {
 	return strings.Join(items, ", ")
 }
 
-// merge is the vulnerability of a group of findings: every severity its sources give, KEV and the
-// highest EPSS of any of them, and their links in order.
 func merge(fs []audit.Finding) audit.Vulnerability {
 	v := audit.Vulnerability{ID: fs[0].Vulnerability.ID}
 	var sevs []string
@@ -331,14 +307,11 @@ func signals(v audit.Vulnerability) string {
 	return strings.Join(s, ", ")
 }
 
-// writeSummary counts the findings of a tier per image, binary, app directory, jar and kernel,
-// and those of the host's packages together. The host's packages and the kernel come first, so the
-// limit never hides them.
 func writeSummary(b *strings.Builder, tier string, fs []audit.Finding, inv *inventory.Inventory) {
 	type group struct {
-		id       string // the origin; "" for the host's packages
+		id       string
 		name     string
-		rank     int // 0 for the host's packages, 1 for the kernel, 2 for the rest
+		rank     int
 		count    int
 		packages map[string]int
 	}
@@ -395,7 +368,6 @@ func writeSummary(b *strings.Builder, tier string, fs []audit.Finding, inv *inve
 	fmt.Fprintf(b, "\nEvery %s risk finding, with its remediation, is in audit.json.\n", tier)
 }
 
-// groupName names an origin in a summary, with its items.
 func groupName(o inventory.Origin, items []string, kernel bool) string {
 	if len(items) > maxItems {
 		items = append(items[:maxItems:maxItems], fmt.Sprintf("and %d more", len(items)-maxItems))
@@ -431,7 +403,6 @@ func groupName(o inventory.Origin, items []string, kernel bool) string {
 	return what + " (" + names + ")"
 }
 
-// topPackages names the three packages with the most findings in a group.
 func topPackages(counts map[string]int) string {
 	pkgs := slices.Collect(maps.Keys(counts))
 	slices.SortFunc(pkgs, func(x, y string) int { return cmp.Or(cmp.Compare(counts[y], counts[x]), cmp.Compare(x, y)) })
@@ -479,7 +450,7 @@ func systemUnits(units []string) []string {
 
 func writeGaps(b *strings.Builder, gaps []Gap, aud *audit.Audit, inv *inventory.Inventory) {
 	var failed []Gap
-	if aud != nil && inv != nil && aud.Status != audit.Failed { // a failed audit's verdict says why
+	if aud != nil && inv != nil && aud.Status != audit.Failed {
 		names := itemNames(inv)
 		origins := originsByID(inv)
 		for _, o := range aud.Origins {
@@ -509,7 +480,6 @@ func writeGaps(b *strings.Builder, gaps []Gap, aud *audit.Audit, inv *inventory.
 	b.WriteString("\n")
 }
 
-// examples names the first three gaps of a group, and how many more there are.
 func examples(g []Gap) string {
 	var s []string
 	for _, x := range g[:min(3, len(g))] {
@@ -521,7 +491,6 @@ func examples(g []Gap) string {
 	return strings.Join(s, "; ")
 }
 
-// groupGaps groups gaps by code and reason, the largest group first.
 func groupGaps(gaps []Gap) [][]Gap {
 	var groups [][]Gap
 	at := map[[2]string]int{}
@@ -557,7 +526,6 @@ func writeFreshness(b *strings.Builder, aud *audit.Audit) {
 
 func stamp(t time.Time) string { return t.UTC().Format("2006-01-02 15:04 UTC") }
 
-// describe names an origin for the report, with the items it belongs to.
 func describe(o inventory.Origin, items []string) string {
 	var what string
 	switch o.Kind {
@@ -592,7 +560,6 @@ func originsByID(inv *inventory.Inventory) map[string]inventory.Origin {
 	return m
 }
 
-// itemNames lists, for each origin, the names of its items.
 func itemNames(inv *inventory.Inventory) map[string][]string {
 	m := map[string][]string{}
 	for _, it := range inv.Items {
@@ -632,7 +599,6 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// vulnLink links a vulnerability's ID to the first safe URL that names it, else to the first safe one.
 func vulnLink(v audit.Vulnerability) string {
 	id := md(v.ID)
 	var first, named string
@@ -651,8 +617,6 @@ func vulnLink(v audit.Vulnerability) string {
 	return escapeBlockStart(id)
 }
 
-// namesID reports whether a URL contains an ID, ignoring case, and not as the start of a longer
-// one (CVE-2026-1000 in CVE-2026-10001).
 func namesID(u, id string) bool {
 	u, id = strings.ToLower(u), strings.ToLower(id)
 	for id != "" {
@@ -693,8 +657,6 @@ func unsafeURLRune(r rune) bool {
 	return r <= ' ' || r >= 0x7f || strings.ContainsRune("()<>\"'|\\`[]", r)
 }
 
-// clean replaces control and Unicode format characters (bidi controls, zero-width characters), so
-// untrusted text can neither drive the terminal nor spoof a name.
 func clean(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
@@ -706,5 +668,4 @@ func clean(s string) string {
 
 var mdEscaper = strings.NewReplacer(`\`, `\\`, "|", `\|`, "*", `\*`, "_", `\_`, "`", "\\`", "~", `\~`, "[", `\[`, "]", `\]`, "<", "&lt;", ">", "&gt;")
 
-// md escapes untrusted text for Markdown.
 func md(s string) string { return mdEscaper.Replace(clean(s)) }

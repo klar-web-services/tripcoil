@@ -70,8 +70,6 @@ func TestRemediation(t *testing.T) {
 	}
 }
 
-// A remediation line names the smallest fix version above the installed one. Grype lists the fixes
-// of every branch, some below the installed version.
 func TestRemediationSuggestsTheSmallestFixAboveTheInstalled(t *testing.T) {
 	inv := &inventory.Inventory{
 		Items: []inventory.Item{{ID: "proc:api", Kind: inventory.KindProcess, Name: "api", Origins: []string{apiID}}},
@@ -191,8 +189,6 @@ func TestRemediationKernelUpstreamAndArch(t *testing.T) {
 	if got, want := r.line(Finding{Origin: "pkg:alpm/cachyos/openssl@3.6.0-1?arch=x86_64&distro=cachyos", Package: Package{Name: "openssl"}, Fix: Fix{State: "fixed", Versions: []string{"3.6.1-1"}}}), "Upgrade openssl to 3.6.1-1 (pacman -Syu), then restart sshd.service."; got != want {
 		t.Errorf("got %s\nwant %s", got, want)
 	}
-	// A custom kernel without a package is not upgraded with the package tool. Its running version
-	// is the release itself.
 	inv.Items[0].RunningVersion = inv.Items[0].Release
 	r = newRemediation(osrel.Arch, inv)
 	if got, want := r.line(Finding{Origin: up, Fix: Fix{State: "fixed", Versions: []string{"7.3.5"}}}), "Upgrade the kernel to Linux 7.3.5 or later, then reboot."; got != want {
@@ -200,8 +196,6 @@ func TestRemediationKernelUpstreamAndArch(t *testing.T) {
 	}
 }
 
-// The Compose labels can come from the image, so a name that breaks Compose's rules never reaches
-// the command, and the container is only named.
 func TestRemediationComposeUntrusted(t *testing.T) {
 	files := []string{"/srv/shop/compose.yml"}
 	cases := []struct {
@@ -284,7 +278,6 @@ func TestRemediationCommands(t *testing.T) {
 	}
 }
 
-// PID 1 is only told to re-execute itself when it is systemd; another init is named.
 func TestRemediationRestartsPID1(t *testing.T) {
 	cases := []struct {
 		name    string

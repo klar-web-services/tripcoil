@@ -31,7 +31,6 @@ func TestSBOMPackages(t *testing.T) {
 			t.Errorf("Syft's package type: %+v", p)
 		}
 	}
-	// An Arch Linux SBOM: its operating system has no version, so matching the SBOM finds nothing.
 	arch := `{"bomFormat":"CycloneDX","components":[{"type":"operating-system","name":"cachyos"},{"type":"library","name":"openssl","version":"4.1.0-1","purl":"pkg:alpm/cachyos/openssl@4.1.0-1"}]}`
 	if ok, err := Matchable([]byte(arch)); ok || err != nil {
 		t.Errorf("an SBOM without a distribution version is matchable: %v", err)
@@ -41,8 +40,6 @@ func TestSBOMPackages(t *testing.T) {
 	}
 }
 
-// The package database's and images' SBOMs are read without their vulnerabilities, which repeat the
-// report's matches: tens of thousands on hosts with Ubuntu's kernel headers. The rest is capped.
 func TestReadSBOMReadsPastVulnerabilities(t *testing.T) {
 	vuln := `{"bom-ref":"urn:uuid:1","id":"CVE-2026-1","description":"` + strings.Repeat("x", 5000) + `","affects":[{"ref":"pkg:deb/ubuntu/linux-modules"}]}`
 	sbom := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"metadata":{"component":{"type":"file","name":"/stage"}},` +
@@ -127,8 +124,6 @@ func TestStripSBOM(t *testing.T) {
 	}
 }
 
-// Pop!_OS's purls name the distribution pop-22.04, which Grype does not know: matching the SBOM
-// with them finds nothing, while the scan matches Ubuntu 22.04's data.
 func TestStripSBOMDropsDistro(t *testing.T) {
 	data := load(t, "pop22-staging.cdx.json")
 	stripped, err := StripSBOM(data)
@@ -224,7 +219,6 @@ func TestSetKernel(t *testing.T) {
 	if got.Components[0].Version != want.Version || g["syft:metadata:source"] != w["syft:metadata:source"] || g["syft:metadata:sourceVersion"] != w["syft:metadata:sourceVersion"] {
 		t.Fatalf("got %s %v, want %s %v", got.Components[0].Version, g, want.Version, w)
 	}
-	// Without a source to set, only the versions change.
 	out, _, _ = SetKernel(data, "linux-image-6.1.0-54-amd64", "6.1.190-1", "6.1.76-1", "")
 	json.Unmarshal(out, &got)
 	if g := source(got.Components[0].Properties); g["syft:metadata:source"] != "linux-signed-amd64" || g["syft:metadata:sourceVersion"] != "6.1.76-1" {
@@ -233,7 +227,6 @@ func TestSetKernel(t *testing.T) {
 	if _, n, _ := SetKernel(data, "linux-image-6.1.0-54-amd64", "6.1.189-1", "6.1.76-1", "linux"); n != 0 {
 		t.Fatal("another version was changed")
 	}
-	// A package without a source property gets one, and a source version, once.
 	for _, props := range []string{`[{"name":"syft:package:type","value":"deb"}]`,
 		`[{"name":"syft:metadata:sourceVersion","value":"6.1.190+1"}]`} {
 		in := `{"bomFormat":"CycloneDX","components":[{"type":"library","name":"linux-image-6.1.0-54-amd64","version":"6.1.190-1","properties":` + props + `}]}`

@@ -1,4 +1,3 @@
-// Package config loads and validates /etc/tripcoil/tripcoil.yaml (spec section 10).
 package config
 
 import (
@@ -18,12 +17,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// DefaultPath is where Tripcoil reads its configuration.
 const DefaultPath = "/etc/tripcoil/tripcoil.yaml"
 
 const docsURL = "https://github.com/klar-web-services/tripcoil#configuration"
 
-// Config is a validated tripcoil.yaml.
 type Config struct {
 	Version   WholeNumber `yaml:"version"`
 	Interval  Duration    `yaml:"interval"`
@@ -31,11 +28,10 @@ type Config struct {
 	Audit     Audit       `yaml:"audit"`
 	Retention Retention   `yaml:"retention"`
 
-	Path    string `yaml:"-"` // the file it was read from
-	Missing bool   `yaml:"-"` // there was no file; these are the defaults
+	Path    string `yaml:"-"`
+	Missing bool   `yaml:"-"`
 }
 
-// Review configures the AI Review (spec section 8).
 type Review struct {
 	Agent          string   `yaml:"agent"`
 	Command        string   `yaml:"command"`
@@ -49,17 +45,14 @@ type Review struct {
 	AllowAddresses []string `yaml:"allowAddresses"`
 }
 
-// Audit configures the Audit (spec section 6).
 type Audit struct {
 	MaxDatabaseAgeHours WholeNumber `yaml:"maxDatabaseAgeHours"`
 }
 
-// Retention configures how many run folders are kept (spec section 11.4).
 type Retention struct {
 	KeepRuns WholeNumber `yaml:"keepRuns"`
 }
 
-// Default returns the built-in configuration.
 func Default() Config {
 	return Config{
 		Version:  1,
@@ -76,7 +69,6 @@ func Default() Config {
 	}
 }
 
-// FileError is a config file that cannot be read, is not valid YAML, or fails validation.
 type FileError struct {
 	Path     string
 	Problems []string
@@ -87,14 +79,12 @@ func (e *FileError) Error() string {
 		e.Path, strings.Join(e.Problems, "\n  - "), docsURL)
 }
 
-// FileInfo is what validation needs to know about review.envFile.
 type FileInfo struct {
 	UID     uint32
-	Mode    fs.FileMode // permission bits
+	Mode    fs.FileMode
 	Regular bool
 }
 
-// StatFunc reports on a file. Tests replace it.
 type StatFunc func(path string) (FileInfo, error)
 
 func osStat(path string) (FileInfo, error) {
@@ -109,10 +99,8 @@ func osStat(path string) (FileInfo, error) {
 	return FileInfo{UID: st.Uid, Mode: fi.Mode().Perm(), Regular: fi.Mode().IsRegular()}, nil
 }
 
-// OSStat is the StatFunc Load uses.
 func OSStat(path string) (FileInfo, error) { return osStat(path) }
 
-// Load reads the config at path. A missing file gives the defaults with Missing set.
 func Load(path string) (Config, error) {
 	return load(path, os.ReadFile, osStat)
 }
@@ -130,8 +118,6 @@ func load(path string, read func(string) ([]byte, error), stat StatFunc) (Config
 	return Parse(path, data, stat)
 }
 
-// Parse decodes and validates a config file's content. Fields the file leaves out keep their
-// defaults; version must be given.
 func Parse(path string, data []byte, stat StatFunc) (Config, error) {
 	c := Default()
 	c.Version = 0
@@ -150,7 +136,7 @@ func Parse(path string, data []byte, stat StatFunc) (Config, error) {
 		return Config{}, &FileError{Path: path, Problems: []string{"the file holds more than one YAML document; keep only one"}}
 	}
 	var root yaml.Node
-	_ = yaml.Unmarshal(data, &root) // it decoded above, so this cannot fail; it is only for line numbers
+	_ = yaml.Unmarshal(data, &root)
 	if problems := validate(c, &root, stat); len(problems) > 0 {
 		return Config{}, &FileError{Path: path, Problems: problems}
 	}
@@ -240,8 +226,6 @@ func checkEnvFile(path, at string, stat StatFunc) []string {
 	return p
 }
 
-// lineOf returns the line of the key at keys (such as "review", "agent"), or of its deepest
-// existing parent, or 0.
 func lineOf(root *yaml.Node, keys ...string) int {
 	n := root
 	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
@@ -266,13 +250,10 @@ func lineOf(root *yaml.Node, keys ...string) int {
 	return line
 }
 
-// Duration is a duration written like 6h, 30m or 90s.
 type Duration time.Duration
 
-// Std returns the time.Duration.
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
-// UnmarshalYAML accepts only positive Go durations written as text.
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!str" {
 		if v, err := time.ParseDuration(n.Value); err == nil && v > 0 {
@@ -283,10 +264,8 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: expected a duration such as 6h or 30m, found %s", n.Line, describe(n))}}
 }
 
-// WholeNumber is an int the YAML must give as a whole number: yaml.v3 alone would truncate 1.5.
 type WholeNumber int
 
-// UnmarshalYAML accepts only YAML integers.
 func (w *WholeNumber) UnmarshalYAML(n *yaml.Node) error {
 	var i int
 	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!int" && n.Decode(&i) == nil {

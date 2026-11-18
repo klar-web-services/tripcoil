@@ -1,11 +1,4 @@
 #!/bin/sh
-# Installer for tripcoil: curl -fsSL https://tools.klar.ws/tripcoil/install.sh | sudo sh
-# Follows the tools.klar.ws installer contract, with a wget fallback, and runs as root: the
-# service and sudo need the binary on a system path, owned by root.
-# Optional environment variables:
-#   TRIPCOIL_VERSION      version to install, e.g. 1.2.3 (default: latest)
-#   TRIPCOIL_INSTALL_DIR  target directory (default: /usr/local/bin)
-#   TRIPCOIL_BASE_URL     download location (default: https://tools.klar.ws/tripcoil)
 set -eu
 
 say() { printf '%s\n' "$*"; }

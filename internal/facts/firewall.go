@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// firewall is facts/firewall.txt: the stateless nftables ruleset, or iptables' rules when there is
-// no nft, plus the iptables-legacy rules when there are any (spec section 7.1). Each part starts
-// with a "### <command>" line. Tripcoil's own table, inet tripcoil, is left out.
 func (c collector) firewall() (string, error) {
 	var b strings.Builder
 	part := func(cmd, out string) {
@@ -24,8 +21,6 @@ func (c collector) firewall() (string, error) {
 		part("nft -s list ruleset", out)
 		rules = strings.TrimSpace(out) != ""
 	} else {
-		// No nft, or nft failed (no nf_tables in the kernel, a netlink error): iptables' own tools
-		// may still read the rules.
 		if !errors.Is(nftErr, errNotFound) {
 			b.WriteString("# nft -s list ruleset failed: " + oneLine(nftErr.Error()) + "\n")
 		}
@@ -46,13 +41,13 @@ func (c collector) firewall() (string, error) {
 			rules = rules || hasIptablesRules(out)
 		}
 		if !saved && !errors.Is(nftErr, errNotFound) {
-			return "", nftErr // nothing could read the rules nft holds
+			return "", nftErr
 		}
 	}
 	for _, cmd := range []string{"iptables-legacy-save", "ip6tables-legacy-save"} {
 		out, err := c.d.Run(c.ctx, cmd)
 		if err != nil || !hasIptablesRules(out) {
-			continue // no legacy tool, or no legacy rules
+			continue
 		}
 		part(cmd, string(out))
 		rules = true
@@ -66,7 +61,6 @@ func (c collector) firewall() (string, error) {
 	return b.String(), nil
 }
 
-// oneLine keeps a tool's message on one line of firewall.txt.
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func hasIptablesRules(out []byte) bool {
@@ -78,8 +72,6 @@ func hasIptablesRules(out []byte) bool {
 	return false
 }
 
-// WithoutNftTable removes one table from `nft list ruleset` output. nft prints each table from a
-// "table <family> <name> {" line at the start of a line to its closing "}" at the start of a line.
 func WithoutNftTable(out []byte, family, name string) []byte {
 	var b strings.Builder
 	skip := false

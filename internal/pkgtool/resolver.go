@@ -7,14 +7,11 @@ import (
 	"strings"
 )
 
-// Alias is a top-level directory that is a symlink into /usr on a merged-/usr system, such as
-// /lib -> usr/lib. /proc shows the canonical path; some package databases (dpkg) hold the other.
 type Alias struct {
-	Canonical string // "/usr/lib/"
-	Alt       string // "/lib/"
+	Canonical string
+	Alt       string
 }
 
-// DetectAliases finds the merged-/usr symlinks below root, in a fixed order.
 func DetectAliases(root string) []Alias {
 	var out []Alias
 	for _, name := range []string{"bin", "lib", "lib32", "lib64", "libx32", "sbin"} {
@@ -29,7 +26,6 @@ func DetectAliases(root string) []Alias {
 	return out
 }
 
-// Resolver asks a Tool for owners and, for paths it does not know, asks again under their aliases.
 type Resolver struct {
 	Tool    Tool
 	Aliases []Alias
@@ -77,7 +73,6 @@ func (r *Resolver) Owners(ctx context.Context, paths []string) (map[string]Packa
 	return found, nil
 }
 
-// Owned reports whether an installed package owns path (used for directories).
 func (r *Resolver) Owned(ctx context.Context, path string) bool {
 	m, err := r.Owners(ctx, []string{path})
 	return err == nil && len(m) > 0

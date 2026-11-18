@@ -18,7 +18,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// origin scans a binary, app directory, jar or image (spec section 6.2).
 func (au *auditor) origin(ctx context.Context, o inventory.Origin) {
 	res := OriginResult{ID: o.ID, Kind: o.Kind, Status: Scanned, Raw: rawFiles(o.ID)}
 	rep, n, err := au.scanOrigin(ctx, o, res.Raw)
@@ -34,22 +33,16 @@ func (au *auditor) origin(ctx context.Context, o inventory.Origin) {
 	case n.packages == 0:
 		res.Status = Unidentified
 	case rep.Distro == "" && n.os > 0:
-		// As for the package database, never clean: no distribution data applies to its packages.
-		// Its other packages are matched all the same.
 		res.Status, res.Reason = Unidentified, fmt.Sprintf("Grype did not recognise the distribution, so its vulnerability data does not apply to its %d operating system packages", n.os)
 	}
 	au.a.Origins = append(au.a.Origins, res)
 	au.addFindings(rep.Matches, res.Raw.Grype, func(grype.Match) (string, bool) { return o.ID, true })
 }
 
-// rawFiles names an origin's files in the run folder: the first 8 hex digits of the SHA-256 of
-// its ID, as raw/<hash>.grype.json and raw/<hash>.cdx.json.
 func rawFiles(id string) *Raw {
 	return &Raw{Grype: "raw/" + rawName(id, ".grype.json"), SBOM: "raw/" + rawName(id, ".cdx.json")}
 }
 
-// removeRaw removes what a failed scan left in the run folder: Grype empties its output files
-// when it fails.
 func (au *auditor) removeRaw(raw *Raw) {
 	os.Remove(filepath.Join(au.d.RunDir, raw.Grype))
 	os.Remove(filepath.Join(au.d.RunDir, raw.SBOM))
@@ -57,12 +50,6 @@ func (au *auditor) removeRaw(raw *Raw) {
 
 func (au *auditor) scanDir() string { return filepath.Join(au.d.CacheDir, "scan") }
 
-// scanOrigin returns an origin's matches and how many packages it holds, and leaves Grype's
-// report and the SBOM in the run folder. Cataloging is the slow part of a scan, so an origin's
-// SBOM is cached under a content key, and later runs only match it; an origin whose SBOM does not
-// match like the origin itself (see cacheIfVerified) is scanned directly every run instead. A
-// cached SBOM that is itself at fault (see badSBOM) is dropped and the origin scanned again; on
-// any other failure the origin fails, and the entry is kept.
 func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw) (*grype.Report, counts, error) {
 	if o.Kind == inventory.OriginImage && au.d.Images != nil {
 		// For an image the daemon does not have, it would try a pull from Docker Hub.
@@ -79,7 +66,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 		if err != nil {
 			return nil, counts{}, err
 		}
-		o.SHA256 = sha // a jar is keyed and copied like a binary
+		o.SHA256 = sha
 	}
 	// The copy and the cache key take one name: which path's file root owns can change meanwhile.
 	name := au.fileName(o)
@@ -87,7 +74,7 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 	if err != nil {
 		return nil, counts{}, err
 	}
-	users := o.Kind != inventory.OriginImage // a binary's or jar's copy, or an app directory
+	users := o.Kind != inventory.OriginImage
 	if key != "" {
 		if sbom, ok := au.cache.get(key); ok {
 			rep, n, err := au.matchCached(ctx, sbom, raw, users)
@@ -135,7 +122,6 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 		return nil, counts{}, err
 	}
 	if key != "" {
-		// The SBOM of an app directory that changed while Grype read it is of neither key.
 		if again, _, err := au.cacheKey(ctx, o, name); err != nil || again != key {
 			key = ""
 		}
@@ -149,10 +135,8 @@ func (au *auditor) scanOrigin(ctx context.Context, o inventory.Origin, raw *Raw)
 // of 50,000 packages gives a 72 MB SBOM. The largest real SBOMs are about 15 MB, of a 5 GB image.
 // The package database's and images' SBOMs are capped without their vulnerabilities (see
 // grype.ReadSBOM): they repeat the report's matches, 28,000 on an Ubuntu host with two kernels.
-var maxSBOMSize int64 = 32 << 20 // lowered by tests
+var maxSBOMSize int64 = 32 << 20
 
-// writeRaw writes an SBOM to the run folder as name, leaving the run folder's file system the floor
-// that copies leave the cache.
 func (au *auditor) writeRaw(name string, data []byte) error {
 	path := filepath.Join(au.d.RunDir, name)
 	if err := aboveFloor(filepath.Dir(path), int64(len(data)), errRunFolderFull); err != nil {
@@ -161,12 +145,8 @@ func (au *auditor) writeRaw(name string, data []byte) error {
 	return run.WriteFile(path, data, 0o640)
 }
 
-// counts is how many packages an SBOM holds, and how many of them Syft read from a distribution's
-// package database: only that distribution's vulnerability data matches those.
 type counts struct{ packages, os int }
 
-// osPackageTypes are Syft's types of the packages it reads from a distribution's package database:
-// dpkg's, RPM's, apk's, pacman's, Gentoo's portage and the Nix store, as Syft 1.57 names them.
 var osPackageTypes = []string{"deb", "rpm", "apk", "alpm", "portage", "nix"}
 
 func countPackages(data []byte) (counts, error) {
@@ -183,7 +163,6 @@ func countPackages(data []byte) (counts, error) {
 	return n, nil
 }
 
-// matchCached matches a cached SBOM; users says that users control what it holds.
 func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw, users bool) (*grype.Report, counts, error) {
 	data, n, err := readCached(sbom)
 	if err != nil {
@@ -193,14 +172,10 @@ func (au *auditor) matchCached(ctx context.Context, sbom string, raw *Raw, users
 	return rep, n, err
 }
 
-// badSBOM is the failure of a cached SBOM itself: it cannot be read or decoded, or Grype cannot
-// decode it. Only then is the entry dropped. Any other failure, such as a full run folder, a
-// timeout or an interruption, keeps it for the next run.
 type badSBOM struct{ error }
 
 func (e badSBOM) Unwrap() error { return e.error }
 
-// readCached reads and decodes a cached SBOM.
 func readCached(path string) ([]byte, counts, error) {
 	data, err := grype.ReadOutput(path, "the cached SBOM", maxSBOMSize)
 	if err != nil {
@@ -213,7 +188,6 @@ func readCached(path string) ([]byte, counts, error) {
 	return data, n, nil
 }
 
-// rejected marks Grype's failure to decode an SBOM as badSBOM.
 func rejected(err error) error {
 	if err != nil && strings.Contains(err.Error(), "unable to decode sbom") {
 		return badSBOM{err}
@@ -245,7 +219,7 @@ func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []stri
 		}
 		for _, pkg := range locations {
 			if len(pkg) == 0 {
-				return false // a package without a file it came from
+				return false
 			}
 			for _, l := range pkg {
 				if !slices.Contains(files, l) {
@@ -272,9 +246,6 @@ func (au *auditor) cacheIfVerified(ctx context.Context, key string, files []stri
 	return true
 }
 
-// sameMatches reports whether two reports name the same distribution and hold the same set of
-// matches, each by vulnerability, package, the location its finding names (which the finding ID
-// hashes), namespace and fix.
 func sameMatches(a, b *grype.Report) bool {
 	if a.Distro != b.Distro || a.DistroVersion != b.DistroVersion {
 		return false
@@ -290,11 +261,6 @@ func sameMatches(a, b *grype.Report) bool {
 	return maps.Equal(set(a), set(b))
 }
 
-// cacheKey is an origin's SBOM cache key (spec section 6.2), or "" when it is cataloged every
-// run, such as an app directory without a lockfile (see appDirKey) or with a mount below it (see
-// mountBelow). For an app directory it also returns the files the key hashes, as Grype names its
-// locations. A binary's or jar's key holds name too, the name of its copy (see fileName), because
-// the SBOM depends on it (see source).
 func (au *auditor) cacheKey(ctx context.Context, o inventory.Origin, name string) (string, []string, error) {
 	switch o.Kind {
 	case inventory.OriginBinary:
@@ -332,7 +298,6 @@ func (au *auditor) fileName(o inventory.Origin) string {
 	return o.SHA256
 }
 
-// rootOwned reports whether path is a regular file that root owns, as lstat sees it.
 func rootOwned(path string) bool {
 	fi, err := os.Lstat(path)
 	if err != nil || !fi.Mode().IsRegular() {
@@ -349,8 +314,6 @@ func rootOwned(path string) bool {
 // and .rar anywhere in the name.
 var archiveName = regexp.MustCompile(`(?i)\.(tar|zip|7z|rar)|\.(tgz|tbz2|txz|tzst|tlz|` + javaArchives + `)$`)
 
-// javaArchives are the extensions of the Java archives that Syft's Java cataloger reads, other
-// than .zip and .rar.
 const javaArchives = `jar|war|ear|par|sar|nar|kar|hpi|jpi|far|zap|lpkg`
 
 var javaExtension = regexp.MustCompile(`(?i)\.(` + javaArchives + `)$`)
@@ -433,9 +396,6 @@ func (au *auditor) binaryFile(ctx context.Context, o inventory.Origin, path stri
 	return fmt.Errorf("cannot read the file that ran: %w", err)
 }
 
-// eachOpener offers try the ways to open an unpackaged file, with its path, until try returns
-// true: through each process of the origin's items that runs or maps it, then at each of its paths
-// on the host.
 func (au *auditor) eachOpener(o inventory.Origin, try func(string, func() (*os.File, error)) bool) {
 	if au.d.Proc != nil {
 		for _, it := range au.rem.users[o.ID] {
@@ -455,9 +415,6 @@ func (au *auditor) eachOpener(o inventory.Origin, try func(string, func() (*os.F
 	}
 }
 
-// procOpener opens a file that process pid runs (exe) or maps, or is nil when it does neither. A
-// process's mappings are read once per Audit: a library is shared by many processes. A mapping of
-// a file replaced since the Inventory (deleted) is read too: the copy is verified by its SHA-256.
 func (au *auditor) procOpener(pid int, exe, path string) func() (*os.File, error) {
 	if path == exe {
 		return func() (*os.File, error) { return asFile(au.d.Proc.OpenExe(pid)) }
@@ -475,7 +432,6 @@ func (au *auditor) procOpener(pid int, exe, path string) func() (*os.File, error
 	return nil
 }
 
-// asFile takes the file procfs opened.
 func asFile(rc io.ReadCloser, err error) (*os.File, error) {
 	if err != nil {
 		return nil, err
@@ -488,8 +444,6 @@ func asFile(rc io.ReadCloser, err error) (*os.File, error) {
 	return f, nil
 }
 
-// matchSBOM keeps a copy of an SBOM in the run folder and matches it; users says that users
-// control what it holds.
 func (au *auditor) matchSBOM(ctx context.Context, sbom string, data []byte, raw *Raw, users bool) (*grype.Report, error) {
 	if err := au.writeRaw(raw.SBOM, data); err != nil {
 		return nil, err

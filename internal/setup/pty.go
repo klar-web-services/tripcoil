@@ -15,9 +15,6 @@ import (
 
 const maxCapture = 1 << 20
 
-// runInPTY runs cmd on a new pseudo-terminal, passing in to it and what it prints to out. When
-// in is a terminal, it takes its window size and is in raw mode meanwhile. It returns what cmd
-// printed (the last MiB) and cmd's exit error.
 func runInPTY(in *os.File, out io.Writer, cmd *exec.Cmd) ([]byte, error) {
 	master, mfd, slave, err := openPTY()
 	if err != nil {
@@ -115,7 +112,7 @@ func runInPTY(in *os.File, out io.Writer, cmd *exec.Cmd) ([]byte, error) {
 					capture = capture[len(capture)-maxCapture:]
 				}
 			}
-			if err != nil { // EIO once cmd has exited and closed the pseudo-terminal
+			if err != nil {
 				return
 			}
 		}
@@ -130,7 +127,7 @@ func runInPTY(in *os.File, out io.Writer, cmd *exec.Cmd) ([]byte, error) {
 	}
 	<-copiedOut
 	if terminal {
-		io.WriteString(out, "\x1b[?2004l\x1b[?25h") // bracketed paste off, cursor on, whatever cmd left
+		io.WriteString(out, "\x1b[?2004l\x1b[?25h")
 	}
 	return capture, err
 }

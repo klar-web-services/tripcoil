@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// openrcImage is Alpine with OpenRC as its init system, as on an Alpine server.
 const openrcImage = `FROM alpine:3.21
 RUN apk add -q openrc >/dev/null && \
     sed -i 's/^#rc_sys=""/rc_sys="docker"/; s/^#rc_cgroup_mode=.*/rc_cgroup_mode="unified"/' /etc/rc.conf && \
@@ -23,10 +22,6 @@ RUN apk add -q openrc >/dev/null && \
 CMD ["/sbin/init"]
 `
 
-// serviceScript installs Tripcoil with setup and the stub CLI as claude, with a token in place so
-// that setup runs doctor before the service starts, lets the daemon make its first run, and
-// checks status, doctor, a second setup, a reload with a broken config, a manual run's scope and
-// stopping the service during a review. It prints "CHECK <name> <detail>" lines.
 const serviceScript = `set -u
 B=/opt/tripcoil
 S=/var/lib/tripcoil
@@ -83,8 +78,6 @@ I=$S/runs/$(ls -1 $S/runs | grep '^[0-9]' | tail -1)
 echo "CHECK stop $(grep -o '"status": "[a-z]*"' $I/run.json) leftovers $(leftovers) home $(ls -d $S/agent-home 2>/dev/null | wc -l)"
 `
 
-// TestService installs Tripcoil as a service with tripcoil setup on systemd 247 and 257 and on
-// Alpine with OpenRC, and lets the daemon run (spec sections 9 and 13, AC-6, AC-15).
 func TestService(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not installed")
@@ -151,7 +144,7 @@ func TestService(t *testing.T) {
 			}
 			setupLines := "3 1"
 			if tc.manager == "openrc" {
-				setupLines = "4 1" // and bubblewrap
+				setupLines = "4 1"
 			}
 			for k, parts := range map[string][]string{
 				"setup":  {"0 " + setupLines + " 0 1 ✓ Started the tripcoil service."},

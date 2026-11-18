@@ -77,8 +77,6 @@ func TestParseWithoutDistro(t *testing.T) {
 	}
 }
 
-// reportWithIgnored is a report of one match and n matches that Grype's rules ignore, each of about
-// 5 KB, as Grype lists Debian's and Ubuntu's kernel headers. It is read as it is generated.
 func reportWithIgnored(n int) io.Reader {
 	ignored := `{"vulnerability":{"id":"CVE-2026-1","description":"` + strings.Repeat("x", 5000) + `"},"artifact":{"name":"linux-headers-6.1.0-54-amd64"},` +
 		`"appliedIgnoreRules":[{"package":{"name":"linux(-.*)?-headers-.*","upstream-name":"linux.*"}}]}`
@@ -94,7 +92,6 @@ func reportWithIgnored(n int) io.Reader {
 	return io.MultiReader(parts...)
 }
 
-// heapWatch reads r and keeps the most heap in use while it is read, sampled at every 256th read.
 type heapWatch struct {
 	r     io.Reader
 	reads int
@@ -110,10 +107,8 @@ func (h *heapWatch) Read(p []byte) (int, error) {
 	return h.r.Read(p)
 }
 
-// Parse reads past the matches that Grype's rules ignore without holding them: hosts with Debian's
-// or Ubuntu's kernel headers give tens of thousands, in reports of hundreds of MB.
 func TestParseReadsPastIgnoredMatches(t *testing.T) {
-	const n = 8000 // 40 MB
+	const n = 8000
 	var base runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&base)

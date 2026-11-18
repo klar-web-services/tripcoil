@@ -13,14 +13,12 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// Input is what the fingerprint covers. Each fact is nil when it is missing (sshd.txt also when
-// sshd is not installed).
 type Input struct {
 	Inventory     *inventory.Inventory
 	Audit         *audit.Audit
 	Network       *facts.Network
-	Firewall      *string // facts/firewall.txt
-	SSHD          *string // facts/sshd.txt
+	Firewall      *string
+	SSHD          *string
 	Users         *[]facts.User
 	Containers    *[]facts.Container
 	Kernel        *facts.Kernel
@@ -29,24 +27,22 @@ type Input struct {
 	Model         string
 }
 
-// canonical is what gets hashed, with every list sorted.
 type canonical struct {
-	Findings      []string `json:"findings"`      // ID, risk tier, fix state
-	RestartNeeded []string `json:"restartNeeded"` // item IDs
+	Findings      []string `json:"findings"`
+	RestartNeeded []string `json:"restartNeeded"`
 	RebootPending []string `json:"rebootPending"`
-	Sockets       []string `json:"sockets"` // protocol, address, port (or "ephemeral"), items; or "missing"
+	Sockets       []string `json:"sockets"`
 	Firewall      string   `json:"firewall"`
-	Containers    []string `json:"containers"` // published ports and privileged mode
+	Containers    []string `json:"containers"`
 	SSHD          string   `json:"sshd"`
-	Users         []string `json:"users"`             // name, UID, shell, password state, number of keys; or "missing"
-	ContainerSec  []string `json:"containerSecurity"` // added capabilities, Docker socket, host network, PID mode; or "missing"
-	Sysctls       []string `json:"sysctls"`           // or "missing"
+	Users         []string `json:"users"`
+	ContainerSec  []string `json:"containerSecurity"`
+	Sysctls       []string `json:"sysctls"`
 	Prompt        string   `json:"prompt"`
 	Agent         string   `json:"agent"`
 	Model         string   `json:"model"`
 }
 
-// Compute returns the fingerprint, the SHA-256 of the canonical JSON in hex.
 func Compute(in Input) string {
 	c := canonical{Findings: []string{}, RestartNeeded: []string{}, RebootPending: []string{}, Sockets: []string{}, Containers: []string{},
 		Users: []string{}, ContainerSec: []string{}, Sysctls: []string{}, Prompt: in.PromptVersion, Agent: in.Agent, Model: in.Model}
@@ -89,9 +85,6 @@ func Compute(in Input) string {
 	} else {
 		c.Firewall = NormalizeFirewall(*in.Firewall)
 	}
-	// What limits or widens an attack once a service is reached: who can log in, how sshd lets them,
-	// what a container may do on the host, and the kernel's hardening. A change to any of them can
-	// turn a review's judgement, so it asks for a new review.
 	c.SSHD = "missing"
 	if in.SSHD != nil {
 		c.SSHD = *in.SSHD
@@ -122,7 +115,6 @@ func Compute(in Input) string {
 	for _, l := range [][]string{c.Findings, c.RestartNeeded, c.RebootPending, c.Containers, c.Users, c.ContainerSec, c.Sysctls} {
 		slices.Sort(l)
 	}
-	// One line per exposure: an IDE's language servers on ephemeral ports are one line however many run.
 	slices.Sort(c.Sockets)
 	c.Sockets = slices.Compact(c.Sockets)
 	data, _ := json.Marshal(c)
@@ -130,9 +122,6 @@ func Compute(in Input) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Exposed are the sockets the fingerprint covers: listening TCP sockets, and bound UDP sockets that
-// are not connected and not on a port the kernel hands to clients (Ephemeral), whose ports change
-// with every query a client makes.
 func Exposed(n facts.Network) []facts.Socket {
 	var out []facts.Socket
 	for _, s := range n.Sockets {

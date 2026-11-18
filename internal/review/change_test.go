@@ -64,7 +64,6 @@ func TestLastReviewedAndNeedsReview(t *testing.T) {
 		}
 	}
 
-	// A reviewed run that lost its review.json, or a link out of runs/, cannot be carried forward.
 	reviewedRun(t, state, "20261115T060000Z-0002", "fp1", at, false)
 	run.UpdateLatest(state, "latest-reviewed", "20261115T060000Z-0002")
 	if LastReviewed(state) != nil {

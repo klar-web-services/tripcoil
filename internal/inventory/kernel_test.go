@@ -46,11 +46,11 @@ func TestKernel(t *testing.T) {
 		name            string
 		release         osrel.Release
 		root            func(t *testing.T) string
-		tool            *fakeTool // nil: no package tool
+		tool            *fakeTool
 		running         string
 		upstream        string
-		pendingContains string // "" means not pending
-		origin          string // expected origin ID; "unresolved" checks the kind only
+		pendingContains string
+		origin          string
 	}{
 		{
 			name: "debian current", release: debianRel,
@@ -225,7 +225,6 @@ func TestKernel(t *testing.T) {
 			origin: KernelUpstreamOriginID("7.4-rc2"),
 		},
 		{
-			// The kernel CNA matching rejects -rc0, so the Audit says it cannot match this kernel.
 			name: "fedora rawhide merge-window snapshot", release: osrel.Release{ID: "fedora", VersionID: "42"},
 			root: func(t *testing.T) string {
 				return kernelRoot(t, "6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64", "Linux version 6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64", "", "usr/lib/modules/6.14.0-0.rc0.20250121gitab18b8fff1d7.12.fc42.x86_64")
@@ -312,7 +311,7 @@ func TestKernel(t *testing.T) {
 			tool: &fakeTool{typ: "deb", owners: map[string]pkgtool.Package{
 				"/usr/lib/modules/6.8.12-4-pve/modules.builtin": deb("proxmox-kernel-6.8.12-4-pve-signed", "6.8.12-4")}},
 			running: "6.8.12-4", upstream: "6.8.12",
-			origin: KernelUpstreamOriginID("6.8.12"), // Debian's advisories do not cover Proxmox kernels
+			origin: KernelUpstreamOriginID("6.8.12"),
 		},
 		{
 			name: "proxmox kernel with a newer one installed", release: debianRel,
@@ -497,8 +496,8 @@ func TestKernelPackageToolFailures(t *testing.T) {
 		release osrel.Release
 		root    func(t *testing.T) string
 		tool    pkgtool.Tool
-		origin  string // expected origin ID; "unresolved" checks the kind and reason
-		message string // part of the PACKAGE_TOOL_FAILED error's message
+		origin  string
+		message string
 	}{
 		{
 			name: "rocky ownership", release: rockyRel, root: rockyRoot,
@@ -516,7 +515,7 @@ func TestKernelPackageToolFailures(t *testing.T) {
 				return kernelRoot(t, "7.3.3-1-cachyos", "Linux version 7.3.3-1-cachyos", "", "usr/lib/modules/7.3.3-1-cachyos")
 			},
 			tool:   fakeTool{typ: "alpm", ownersErr: errors.New("error: could not open database")},
-			origin: KernelUpstreamOriginID("7.3.3"), message: "kernel's package", // matched by upstream version anyway
+			origin: KernelUpstreamOriginID("7.3.3"), message: "kernel's package",
 		},
 		{
 			name: "debian installed kernels", release: debianRel, root: debianRoot,

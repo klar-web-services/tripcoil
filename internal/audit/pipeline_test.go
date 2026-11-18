@@ -17,13 +17,10 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// On Debian the running kernel's package is changed in the package SBOM at every run. When matching
-// the SBOM does not give what the scan gave, the findings are still the scan's, except the kernel
-// package's: only matching the changed SBOM gives its matches at the running version.
 func TestAuditDebianSBOMThatDoesNotVerify(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
-	g.matching = func(r *grype.Report) { // matching an SBOM loses a match of the scan
+	g.matching = func(r *grype.Report) {
 		r.Matches = slices.DeleteFunc(r.Matches, func(m grype.Match) bool { return m.Artifact.Name == "libssl3" })
 	}
 	a := Run(context.Background(), deps(root, cache, t.TempDir(), g, fakeKernel{}), inv)
@@ -42,8 +39,6 @@ func TestAuditDebianSBOMThatDoesNotVerify(t *testing.T) {
 	}
 }
 
-// The kernel package's findings and origin then name the report of matching the changed SBOM, kept
-// in the run folder as the others: the scan's report holds the package at its installed version.
 func TestAuditDebianKernelEvidenceWhenTheSBOMDoesNotVerify(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -64,7 +59,6 @@ func TestAuditDebianKernelEvidenceWhenTheSBOMDoesNotVerify(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(runDir, matched)); err != nil || fi.Mode().Perm() != 0o640 {
 		t.Fatalf("the kernel's report in the run folder: %v %v", fi, err)
 	}
-	// When the SBOM verifies, every finding is of the one report that matched it.
 	root, cache, inv = host(t)
 	a = Run(context.Background(), deps(root, cache, t.TempDir(), hostScanner(root, cache), fakeKernel{}), inv)
 	if k := byVuln(a)["CVE-2026-2000"]; k.Raw != scanned {
@@ -72,9 +66,6 @@ func TestAuditDebianKernelEvidenceWhenTheSBOMDoesNotVerify(t *testing.T) {
 	}
 }
 
-// When matching the kernel package alone fails, only the kernel's origin fails: the other packages
-// keep the scan's results. So it does when the run folder, where the match's report is kept, is at
-// its floor.
 func TestAuditKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
 	old := cacheSpace
 	defer func() { cacheSpace = old }()
@@ -87,7 +78,7 @@ func TestAuditKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
 			g.matchErr = map[string]error{"packages-match.cdx.json": errors.New("Grype failed: boom")}
 		}, "Grype failed: boom"},
 		{"run folder at its floor", func(_ *fakeScanner, runDir string) {
-			first := true // the kernel's report is the first file written to the run folder
+			first := true
 			cacheSpace = func(dir string) (uint64, uint64, error) {
 				if strings.HasPrefix(dir, runDir) && first {
 					first = false
@@ -127,9 +118,6 @@ func TestAuditKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
 	}
 }
 
-// So it does when the SBOM verifies, as long as the scan's report is in hand: the scan's report
-// stays in the run folder as the others' evidence. Matched from the cache, with no scan, every
-// package origin fails.
 func TestAuditVerifiedKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -165,9 +153,6 @@ func TestAuditVerifiedKernelMatchThatFailsFailsOnlyTheKernel(t *testing.T) {
 	}
 }
 
-// When matching the changed SBOM loses the distribution the scan recognised, the other packages are
-// still the scan's, and the kernel's package, which nothing else matches at its running version, is
-// a coverage gap.
 func TestAuditDebianSBOMMatchedWithoutTheDistribution(t *testing.T) {
 	root, cache, inv := host(t)
 	g := hostScanner(root, cache)
@@ -190,11 +175,9 @@ func TestAuditDebianSBOMMatchedWithoutTheDistribution(t *testing.T) {
 	}
 }
 
-// A finding's purl is the same whether the SBOM was cataloged or matched from the cache, where
-// StripSBOM dropped its distro qualifier: audit.json changes only when the host does.
 func TestAuditPURLWithoutTheDistroQualifier(t *testing.T) {
 	root, cache, inv := host(t)
-	inv.Items[0].RunningVersion = "6.1.123-1" // no package SBOM is changed: the scan's report is used
+	inv.Items[0].RunningVersion = "6.1.123-1"
 	g := hostScanner(root, cache)
 	d := deps(root, cache, t.TempDir(), g, fakeKernel{})
 	d.Family = osrel.Ubuntu
@@ -221,9 +204,6 @@ func TestAuditPURLWithoutTheDistroQualifier(t *testing.T) {
 	}
 }
 
-// A package upgraded or removed between the Inventory and the Audit fails its origin, as the
-// kernel's does: it is audited at the next run. Only a package that Grype holds by name but does
-// not tell apart, here without its architecture, is unidentified.
 func TestAuditPackageChangedSinceTheInventory(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -265,8 +245,6 @@ func TestAuditPackageChangedSinceTheInventory(t *testing.T) {
 	}
 }
 
-// A package of one architecture removed since the Inventory fails its origin, also while the same
-// package of another architecture stays: libssl3:i386 next to libssl3:amd64.
 func TestAuditMultiarchPackageRemovedSinceTheInventory(t *testing.T) {
 	root, cache, inv := host(t)
 	i386 := pkgtool.Package{Name: "libssl3", Version: "3.0.15-1~deb12u1", Arch: "i386", Type: "deb"}
@@ -281,8 +259,6 @@ func TestAuditMultiarchPackageRemovedSinceTheInventory(t *testing.T) {
 	}
 }
 
-// What a killed run left in the scan folder, such as the copy of a user's file, is removed when the
-// next run starts, even when that run then fails.
 func TestAuditRemovesWhatAKilledRunLeft(t *testing.T) {
 	root, cache, inv := host(t)
 	left := filepath.Join(cache, "scan", sumOf("killed"), "copy")
@@ -311,8 +287,6 @@ func TestAuditRemovesWhatAKilledRunLeft(t *testing.T) {
 	}
 }
 
-// A failed check of the kernel CNA data while the data is still within maxAge is a warning, as for
-// Grype's database: the kernel is audited with the data there is.
 func TestAuditKernelDataUpdateFailed(t *testing.T) {
 	up := inventory.KernelUpstreamOriginID("6.1.119")
 	root := files(t, map[string]string{"etc/os-release": "ID=arch\n"})
@@ -339,10 +313,6 @@ func TestAuditKernelDataUpdateFailed(t *testing.T) {
 	}
 }
 
-// Readers change some files of an RPM database that no reader needs: SQLite's shared-memory index,
-// which SQLite rebuilds from the write-ahead log, and Berkeley DB's environment regions, which
-// every rpm query rewrites on RHEL 8. They are neither staged nor keyed, so that an SBOM is
-// reused. The write-ahead log can hold committed data, and is both.
 func TestStagePackageDBRPMLeavesOutWhatReadersChange(t *testing.T) {
 	for _, tc := range []struct {
 		name               string

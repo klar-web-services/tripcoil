@@ -29,7 +29,7 @@ const runID = "20261114T061500Z-3fa2"
 
 func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 	old := run.AgentGID
-	run.AgentGID = func() (int, bool) { return 0, false } // independent of a tripcoil-agent group on this machine
+	run.AgentGID = func() (int, bool) { return 0, false }
 	t.Cleanup(func() { run.AgentGID = old })
 	return deps{
 		euid:       func() int { return 0 },
@@ -60,7 +60,6 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 	}
 }
 
-// sampleAudit is an audit of sampleInventory with one finding.
 func sampleAudit(status string, errs ...problem.Problem) *audit.Audit {
 	a := &audit.Audit{SchemaVersion: "1", Status: status,
 		Grype:    audit.GrypeInfo{Version: "0.121.2", DBBuilt: time.Date(2026, 11, 14, 3, 0, 0, 0, time.UTC)},
@@ -77,7 +76,7 @@ func TestRunInterrupted(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	d.interrupts = func() (context.Context, context.CancelFunc) {
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Ctrl-C arrives while the inventory runs
+		cancel()
 		return ctx, func() {}
 	}
 	var out, errb bytes.Buffer
@@ -103,7 +102,7 @@ func TestRunInterruptedInventoryWriteFailed(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	d.collect = func(context.Context, string) (*inventory.Inventory, error) {
 		blocker := filepath.Join(d.stateDir, "runs", runID, "inventory.json", "x")
-		if err := os.MkdirAll(blocker, 0o750); err != nil { // a directory where inventory.json goes
+		if err := os.MkdirAll(blocker, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		return sampleInventory(), nil
@@ -252,7 +251,7 @@ func TestRunInterruptedDuringAudit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.interrupts = func() (context.Context, context.CancelFunc) { return ctx, cancel }
 	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
-		cancel() // Ctrl-C arrives while Grype runs
+		cancel()
 		return sampleAudit(audit.Partial)
 	}
 	var out, errb bytes.Buffer
@@ -311,7 +310,7 @@ func TestRunLowersItsPriority(t *testing.T) {
 func TestRunReportWriteFailed(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
-		if err := os.MkdirAll(filepath.Join(d.stateDir, "runs", runID, "report.md", "x"), 0o750); err != nil { // a directory where report.md goes
+		if err := os.MkdirAll(filepath.Join(d.stateDir, "runs", runID, "report.md", "x"), 0o750); err != nil {
 			t.Fatal(err)
 		}
 		return sampleAudit(audit.Complete)
@@ -367,7 +366,7 @@ func TestRunInventoryWriteFailed(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	d.collect = func(context.Context, string) (*inventory.Inventory, error) {
 		blocker := filepath.Join(d.stateDir, "runs", runID, "inventory.json", "x")
-		if err := os.MkdirAll(blocker, 0o750); err != nil { // a directory where inventory.json goes
+		if err := os.MkdirAll(blocker, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		return sampleInventory(), nil
@@ -391,7 +390,7 @@ func TestRunLatestUpdateFailed(t *testing.T) {
 		d := testDeps(t, sampleInventory(), nil)
 		d.collect = func(context.Context, string) (*inventory.Inventory, error) {
 			blocker := filepath.Join(d.stateDir, "runs", "latest", "x")
-			if err := os.MkdirAll(blocker, 0o750); err != nil { // a directory where latest goes
+			if err := os.MkdirAll(blocker, 0o750); err != nil {
 				t.Fatal(err)
 			}
 			return sampleInventory(), nil
@@ -499,7 +498,6 @@ func TestRunInterruptedKeepsStageProblems(t *testing.T) {
 	}
 }
 
-// The Audit checks images at the Docker socket the Inventory reads.
 func TestDockerImages(t *testing.T) {
 	if dockerImages("tcp://10.0.0.5:2375") != nil {
 		t.Fatal("DOCKER_HOST is not a unix socket, so the Inventory found no containers")
@@ -507,7 +505,7 @@ func TestDockerImages(t *testing.T) {
 	if dockerImages("") == nil {
 		t.Fatal("the default socket")
 	}
-	dir, err := os.MkdirTemp("", "tc-docker") // short path: unix socket paths are limited to 108 bytes
+	dir, err := os.MkdirTemp("", "tc-docker")
 	if err != nil {
 		t.Fatal(err)
 	}

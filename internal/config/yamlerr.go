@@ -17,7 +17,6 @@ var (
 	yamlGoType       = regexp.MustCompile(` (?:into|in type) \S+`)
 )
 
-// yamlProblems translates a YAML decoding error into problems in the user's terms, never Go types.
 func yamlProblems(err error) []string {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
@@ -44,7 +43,6 @@ func yamlProblem(e string) string {
 	return yamlGoType.ReplaceAllString(e, "")
 }
 
-// expectedKind names what a Go type accepts in YAML terms.
 func expectedKind(goType string) string {
 	switch {
 	case strings.HasPrefix(goType, "[]"):
@@ -63,7 +61,6 @@ func expectedKind(goType string) string {
 	return "a different kind of value"
 }
 
-// foundKind names what the YAML held.
 func foundKind(tag, value string) string {
 	switch {
 	case tag == "seq":
@@ -76,7 +73,6 @@ func foundKind(tag, value string) string {
 	return strconv.Quote(value)
 }
 
-// describe names a YAML node for the custom types' messages.
 func describe(n *yaml.Node) string {
 	switch n.Kind {
 	case yaml.MappingNode:

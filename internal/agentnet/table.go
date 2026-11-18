@@ -10,7 +10,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// build queues the table: deleted and added again in the same batch, so Apply replaces it.
 func build(c *nftables.Conn, p Policy) {
 	t := &nftables.Table{Family: nftables.TableFamilyINet, Name: Name}
 	c.AddTable(t) // so that the delete cannot fail on a missing table
@@ -29,7 +28,7 @@ func build(c *nftables.Conn, p Policy) {
 			kt = nftables.TypeIP6Addr
 		}
 		s := &nftables.Set{Table: t, Name: name, KeyType: kt, Interval: true}
-		c.AddSet(s, elems(ps)) // its error is kept by the Conn and returned by Flush
+		c.AddSet(s, elems(ps))
 		return s
 	}
 	sets := [2]map[string]*nftables.Set{

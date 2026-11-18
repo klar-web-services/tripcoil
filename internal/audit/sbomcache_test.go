@@ -38,10 +38,10 @@ func TestSBOMCache(t *testing.T) {
 	used := c.path("binary-used")
 	write(t, used, "{}")
 	os.Chtimes(used, now.Add(-8*24*time.Hour), now.Add(-8*24*time.Hour))
-	if _, ok := c.get("binary-used"); !ok { // using an entry keeps it
+	if _, ok := c.get("binary-used"); !ok {
 		t.Fatal("miss")
 	}
-	older := filepath.Join(root, "0.120.0", "binary-ab.cdx.json") // an earlier Grype's catalog
+	older := filepath.Join(root, "0.120.0", "binary-ab.cdx.json")
 	write(t, older, "{}")
 	c.prune()
 	for path, want := range map[string]bool{p: true, used: true, old: false, older: false} {
@@ -77,7 +77,6 @@ func TestAppDirKey(t *testing.T) {
 	if k3, _, _ := appDirKey(context.Background(), budget(), other, "2026-11-14", noMounts); k3 == k2 {
 		t.Fatal("two directories with the same files share a key")
 	}
-	// A user's FIFO or link to /dev/zero as a lockfile: no key (Grype skips them), and no hang.
 	for _, odd := range []func(string) error{
 		func(p string) error { return syscall.Mkfifo(p, 0o600) },
 		func(p string) error { return os.Symlink("/dev/zero", p) },
@@ -93,8 +92,6 @@ func TestAppDirKey(t *testing.T) {
 	}
 }
 
-// An app directory's key changes with any change below it, also with one that keeps the size and
-// the mtime, and each day.
 func TestAppDirKeyCoversTheTree(t *testing.T) {
 	dir := files(t, map[string]string{"package.json": `{}`, "package-lock.json": `{"lockfileVersion":3}`, "worker/index.js": "v1"})
 	key := func() string {
@@ -114,11 +111,10 @@ func TestAppDirKeyCoversTheTree(t *testing.T) {
 	if k2 == k1 {
 		t.Fatal("a nested lockfile keeps the key")
 	}
-	// As npm does: the same size, and the mtime set back.
 	js := filepath.Join(dir, "worker/index.js")
 	fi, _ := os.Stat(js)
 	before := fi.Sys().(*syscall.Stat_t).Ctim
-	for fi.Sys().(*syscall.Stat_t).Ctim == before { // a coarse file system clock
+	for fi.Sys().(*syscall.Stat_t).Ctim == before {
 		write(t, js, "v2")
 		os.Chtimes(js, fi.ModTime(), fi.ModTime())
 		fi, _ = os.Stat(js)
@@ -134,7 +130,7 @@ func TestAppDirKeyWithoutKey(t *testing.T) {
 	dir := files(t, map[string]string{"package-lock.json": lock, "a/b": "", "a/c": ""})
 	old := maxTreeEntries
 	defer func() { maxTreeEntries = old }()
-	maxTreeEntries = 5 // ., package-lock.json, a, a/b, a/c
+	maxTreeEntries = 5
 	if k, _, err := appDirKey(context.Background(), budget(), dir, "2026-11-14", noMounts); k == "" || err != nil {
 		t.Fatalf("at the cap: %q %v", k, err)
 	}
@@ -143,19 +139,16 @@ func TestAppDirKeyWithoutKey(t *testing.T) {
 		t.Fatalf("above the cap: %q %v", k, err)
 	}
 	maxTreeEntries = old
-	// A walk that fails gives no key, and no error.
 	os.Chmod(filepath.Join(dir, "a"), 0)
 	defer os.Chmod(filepath.Join(dir, "a"), 0o755)
 	if k, _, err := appDirKey(context.Background(), budget(), dir, "2026-11-14", noMounts); (k != "" && os.Geteuid() != 0) || err != nil {
 		t.Fatalf("an unreadable directory: %q %v", k, err)
 	}
-	// Nor has a directory with a lockfile too large to hash.
 	big := files(t, map[string]string{"package-lock.json": ""})
 	os.Truncate(filepath.Join(big, "package-lock.json"), maxLockfile+1)
 	if k, _, err := appDirKey(context.Background(), budget(), big, "2026-11-14", noMounts); k != "" || err != nil {
 		t.Fatalf("a lockfile above maxLockfile: %q %v", k, err)
 	}
-	// Nor has a link to a directory, which the walk would not follow.
 	link := filepath.Join(t.TempDir(), "app")
 	os.Symlink(files(t, map[string]string{"package-lock.json": lock}), link)
 	if k, _, err := appDirKey(context.Background(), budget(), link, "2026-11-14", noMounts); k != "" || err != nil {
@@ -163,7 +156,6 @@ func TestAppDirKeyWithoutKey(t *testing.T) {
 	}
 }
 
-// A directory is read in chunks, and the walk stops at the cap: a huge one is never read whole.
 func TestTreeFingerprintStopsAtTheCap(t *testing.T) {
 	dir := t.TempDir()
 	os.Mkdir(filepath.Join(dir, "a"), 0o755)
@@ -187,7 +179,6 @@ func TestTreeFingerprintStopsAtTheCap(t *testing.T) {
 	}
 }
 
-// A stopped run stops the walk: an app directory then has no key.
 func TestTreeFingerprintStopsWithTheRun(t *testing.T) {
 	dir := files(t, map[string]string{"package-lock.json": `{"lockfileVersion":3}`, "a/b": ""})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -200,8 +191,6 @@ func TestTreeFingerprintStopsWithTheRun(t *testing.T) {
 	}
 }
 
-// The walk does not go into a mount below the app directory, which may hang: the directory then has
-// no key. The test mounts a tmpfs in a user and mount namespace of its own.
 func TestTreeFingerprintStaysOnOneFileSystem(t *testing.T) {
 	if dir := os.Getenv("TRIPCOIL_TEST_MOUNT"); dir != "" {
 		if err := syscall.Mount("tripcoil-test", filepath.Join(dir, "data"), "tmpfs", 0, ""); errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
@@ -244,8 +233,6 @@ func TestTreeFingerprintStaysOnOneFileSystem(t *testing.T) {
 	}
 }
 
-// A mount point strictly below an app directory, as mountinfo lists it, gives the directory no key
-// without a walk, which would lstat the mount: it may hang.
 func TestAppDirMountBelow(t *testing.T) {
 	lock := `{"lockfileVersion":3}`
 	root := files(t, map[string]string{"srv/shop/package-lock.json": lock, "srv/shop/data/x": "", "srv/shopping/package-lock.json": lock,
@@ -269,8 +256,6 @@ func TestAppDirMountBelow(t *testing.T) {
 		}
 		return k
 	}
-	// The app directory itself may be a mount point; /srv/shop is not below /srv/shopping, nor
-	// /srv/app below /srv/application.
 	for dir, keyed := range map[string]bool{"/srv/shop": false, "/srv/my shop": false, "/srv/shopping": true, "/srv/app": true} {
 		if k := key(dir); (k != "") != keyed {
 			t.Errorf("%s: key %q", dir, k)
@@ -289,10 +274,8 @@ func TestAppDirMountBelow(t *testing.T) {
 	}
 }
 
-// noMounts is a mount check that finds no mount below any directory.
 func noMounts(string) bool { return false }
 
-// fingerprintPath fingerprints the tree below dir, opened as appDirKey opens it.
 func fingerprintPath(ctx context.Context, dir string) (string, error) {
 	d, err := openDir(dir)
 	if err != nil {

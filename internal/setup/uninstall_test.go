@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// installed is a fake host that setup has set up, with userdel and nft, and a state folder.
-// Removing the user, the group, the service or the table makes it absent.
 func installed(t *testing.T, m Manager) (*fakeHost, UninstallOptions) {
 	t.Helper()
 	f := newFake(t, m)
@@ -168,7 +166,6 @@ func TestUninstallNodeSource(t *testing.T) {
 		t.Error("ran apt-get update")
 	}
 
-	// The host's own sources file keeps its key.
 	f, o = installed(t, Systemd)
 	write(NodeSourceKeyPath, armoredKey+"\n")
 	write(NodeSourceSourcesPath, "Types: deb\n")
@@ -180,7 +177,6 @@ func TestUninstallNodeSource(t *testing.T) {
 	f.read(t, NodeSourceKeyPath)
 	f.read(t, NodeSourceSourcesPath)
 
-	// A key that was there before setup wrote its sources file has no mark, and stays.
 	f, o = installed(t, Systemd)
 	write(NodeSourceKeyPath, armoredKey+"\n")
 	write(NodeSourceSourcesPath, AddedMarker+"\nTypes: deb\n")
@@ -248,14 +244,12 @@ func TestUninstallKeepsABinaryUnderHome(t *testing.T) {
 }
 
 func TestUninstallGroupdel(t *testing.T) {
-	// The group outlives userdel.
 	f, o := installed(t, Systemd)
 	f.users["group"] = true
 	if err := f.Uninstall(o); err != nil || !slices.Contains(f.cmds, "groupdel tripcoil-agent") {
 		t.Errorf("%v, commands %q\n%s", err, f.cmds, f.out.String())
 	}
 
-	// The group was gone by the time groupdel ran.
 	f, o = installed(t, Systemd)
 	f.users["group"] = true
 	f.replies["groupdel tripcoil-agent"] = "groupdel: group 'tripcoil-agent' does not exist\n"
@@ -278,7 +272,7 @@ func TestUninstallReportsNodeSourceFilesBeforeAFailure(t *testing.T) {
 		t.Skip("root removes files from a read-only folder")
 	}
 	pins := filepath.Dir(filepath.Join(f.Root, NodeSourcePinPath))
-	os.Chmod(pins, 0o555) // the pin cannot be removed
+	os.Chmod(pins, 0o555)
 	t.Cleanup(func() { os.Chmod(pins, 0o755) })
 	if err := f.Uninstall(o); err == nil {
 		t.Fatal("no error")

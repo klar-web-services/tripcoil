@@ -12,21 +12,18 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// Deps is everything Collect reads from the host.
 type Deps struct {
-	Root       string        // host root, "/" in production
-	Proc       Source        // /proc
-	Release    osrel.Release // /etc/os-release
-	Tool       pkgtool.Tool  // nil when the distribution has no supported package tool
-	DockerHost string        // DOCKER_HOST
+	Root       string
+	Proc       Source
+	Release    osrel.Release
+	Tool       pkgtool.Tool
+	DockerHost string
 	Connect    func(socket string) DockerAPI
-	CacheDir   string // where copies of replaced running files go
+	CacheDir   string
 	Hostname   string
 	Arch       string
 }
 
-// Collect inventories the host. Only an unreadable process list is an error; everything else is
-// recorded in the Inventory's problems.
 func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 	family := d.Release.Family()
 	distro := Distro{ID: d.Release.ID, VersionID: d.Release.VersionID, IDLike: append([]string{}, d.Release.IDLike...), Family: string(family)}
@@ -49,8 +46,6 @@ func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 		}
 	}
 
-	// Without a resolver the kernel collector asks no package tool, so a failed Check is not
-	// recorded twice.
 	kernel, kernelOrigin, kernelProblems := kernelCollector{root: d.Root, release: d.Release, resolver: resolver, distro: distro}.collect(ctx)
 	problems = append(problems, kernelProblems...)
 	pc := &processCollector{src: d.Proc, root: d.Root, resolver: resolver, distro: distro, cacheDir: d.CacheDir}
@@ -68,13 +63,10 @@ func Collect(ctx context.Context, d Deps) (*Inventory, error) {
 	return inv, nil
 }
 
-// interrupted reports whether err comes from the end of the run's context (Ctrl-C, SIGTERM),
-// which run.json records as INTERRUPTED: it is no failure of the package tool or of Docker.
 func interrupted(ctx context.Context, err error) bool {
 	return ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
-// mergeOrigins joins origin lists, keeping the first of each ID, sorted by ID.
 func mergeOrigins(lists ...[]Origin) []Origin {
 	seen := map[string]bool{}
 	var out []Origin

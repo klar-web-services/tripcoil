@@ -13,7 +13,6 @@ import (
 	"syscall"
 )
 
-// Setup is what root prepared for one probe. Close removes it.
 type Setup struct {
 	Args      Args
 	agentUID  int
@@ -21,16 +20,10 @@ type Setup struct {
 	files     []string
 }
 
-// Prepare writes files the agent could read without the sandbox (in the config folder, the cache
-// and a decoy run folder shared with the agent's group), makes a decoy folder the agent's group
-// could write to, listens on every address on a free port, and returns the probe's arguments.
-// The cache folder is root's alone (0700), so its check holds even without the sandbox; the
-// others do not.
 func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, own, nameservers []netip.Addr) (*Setup, error) {
 	b := make([]byte, 6)
 	rand.Read(b)
 	tok := ".probe-" + hex.EncodeToString(b)
-	// What a killed Tripcoil left of an earlier probe (the run lock keeps probes apart).
 	for _, dir := range []string{configDir, filepath.Join(stateDir, "cache"), stateDir, filepath.Join(stateDir, "runs")} {
 		stale, _ := filepath.Glob(filepath.Join(dir, ".probe-*"))
 		for _, p := range stale {
@@ -59,7 +52,7 @@ func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, o
 	}
 	for _, dir := range []string{configDir, filepath.Join(stateDir, "cache")} {
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-			continue // nothing there to hide
+			continue
 		}
 		if err := plant(filepath.Join(dir, tok), 0o644); err != nil {
 			return nil, err
@@ -92,8 +85,6 @@ func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, o
 	}
 	s.Args.Writes = []string{filepath.Join(writable, "file")}
 	s.files = append(s.files, s.Args.Writes...)
-	// Folders any user may write to: inside the sandbox they are private or read-only, so
-	// nothing written there may show on the host afterwards (Leaked).
 	for _, dir := range []string{"/tmp", "/var/tmp", "/dev/shm", "/run/lock"} {
 		if _, err := os.Stat(dir); err == nil {
 			s.Args.Private = append(s.Args.Private, filepath.Join(dir, tok))
@@ -108,7 +99,7 @@ func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, o
 	s.listen(l4)
 	port := l4.Addr().(*net.TCPAddr).Port
 	v6 := false
-	if l6, err := net.Listen("tcp6", "[::]:"+strconv.Itoa(port)); err == nil { // no IPv6 on the host: no IPv6 targets
+	if l6, err := net.Listen("tcp6", "[::]:"+strconv.Itoa(port)); err == nil {
 		s.listen(l6)
 		v6 = true
 	}
@@ -127,7 +118,7 @@ func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, o
 		}
 	}
 	var udpOnly []netip.Addr
-	for _, a := range nameservers { // DNS is allowed; another port on a local resolver must not be
+	for _, a := range nameservers {
 		switch {
 		case a.IsLoopback() || mine[a]:
 			if a.Is4() || v6 {
@@ -154,14 +145,12 @@ func Prepare(stateDir, configDir, runDir, home string, agentUID, agentGID int, o
 	for _, a := range udpOnly {
 		add(a, false)
 	}
-	// The cloud metadata address: nothing of root's listens there.
 	s.Args.TCP = append(s.Args.TCP, "169.254.169.254:80")
 	s.Args.UDP = append(s.Args.UDP, "169.254.169.254:80")
 	ok = true
 	return s, nil
 }
 
-// listen accepts and closes connections until the listener is closed.
 func (s *Setup) listen(l net.Listener) {
 	s.listeners = append(s.listeners, l)
 	go func() {
@@ -188,7 +177,6 @@ func (s *Setup) Leaked() []string {
 	return out
 }
 
-// Close stops the listeners and removes the files.
 func (s *Setup) Close() {
 	for _, l := range s.listeners {
 		l.Close()

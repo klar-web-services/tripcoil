@@ -20,14 +20,10 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/grype"
 )
 
-// sbomMaxAge is how long a cached SBOM is kept after its last use (spec section 6.2).
 const sbomMaxAge = 7 * 24 * time.Hour
 
-// sbomCache keeps each origin's SBOM under a content key, as dir/<key>.cdx.json, where dir is
-// cache/sbom/<Grype version>: a newer Grype catalogs anew, with its own catalogers and fixes.
-// Cataloging is the slow part of a scan, so later runs only match the cached SBOM.
 type sbomCache struct {
-	root string // cache/sbom
+	root string
 	now  func() time.Time
 }
 
@@ -35,7 +31,6 @@ func (c sbomCache) dir() string { return filepath.Join(c.root, grype.Version) }
 
 func (c sbomCache) path(key string) string { return filepath.Join(c.dir(), key+".cdx.json") }
 
-// get returns the cached SBOM of key and marks it used.
 func (c sbomCache) get(key string) (string, bool) {
 	p := c.path(key)
 	if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() {
@@ -45,7 +40,6 @@ func (c sbomCache) get(key string) (string, bool) {
 	return p, true
 }
 
-// put stores an SBOM in the cache as key, leaving the cache file system its floor.
 func (c sbomCache) put(key string, data []byte) error {
 	if err := os.MkdirAll(c.dir(), 0o700); err != nil {
 		return err
@@ -57,7 +51,7 @@ func (c sbomCache) put(key string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
+	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
@@ -72,10 +66,8 @@ func (c sbomCache) put(key string, data []byte) error {
 	return os.Rename(tmp.Name(), c.path(key))
 }
 
-// remove drops an entry that is at fault, so it is built again.
 func (c sbomCache) remove(key string) { os.Remove(c.path(key)) }
 
-// prune removes SBOMs that no run used for sbomMaxAge, and those of other Grype versions.
 func (c sbomCache) prune() {
 	versions, _ := os.ReadDir(c.root)
 	for _, v := range versions {
@@ -91,26 +83,20 @@ func (c sbomCache) prune() {
 	}
 }
 
-// keyOf hashes parts into a cache key with a kind prefix, such as "image-<sha256>".
 func keyOf(kind string, parts ...string) string {
 	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return kind + "-" + hex.EncodeToString(h[:])
 }
 
-// appLockfiles are the lockfiles that pin an app directory's packages; appManifests are hashed
-// with them. Both are names Grype reads (the Inventory's app directory markers).
 var (
 	appLockfiles = []string{"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock",
 		"poetry.lock", "Pipfile.lock", "uv.lock", "Gemfile.lock", "composer.lock"}
 	appManifests = []string{"package.json", "pyproject.toml", "requirements.txt", "pom.xml", "build.gradle", "build.gradle.kts"}
 )
 
-// maxLockfile is the largest lockfile or manifest hashed for a key; a package-lock.json of a big
-// app is a few MB.
 const maxLockfile = 64 << 20
 
-// maxTreeEntries is the most entries of an app directory that its key covers.
-var maxTreeEntries = 200_000 // lowered by tests
+var maxTreeEntries = 200_000
 
 // appDirKey is the cache key of an app directory: its path, the UTC day, the fingerprint of its
 // tree (see treeFingerprint) and the hashes of the lockfiles and manifests in it, which it returns
@@ -172,8 +158,6 @@ func openDir(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path), nil
 }
 
-// openDirAt opens the directory name in d as openDir does, and only when it is still the entry
-// that st describes: otherwise the tree changed since.
 func openDirAt(d *os.File, name string, st *syscall.Stat_t) (*os.File, error) {
 	path := filepath.Join(d.Name(), name)
 	fd, err := syscall.Openat(int(d.Fd()), name, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
@@ -208,7 +192,6 @@ func lstatAt(d *os.File, name string) (syscall.Stat_t, error) {
 	return st, nil
 }
 
-// readSmallAt reads the file name in d as readSmall reads a path, but never through a link.
 func readSmallAt(reads *readBudget, d *os.File, name string, limit int64) ([]byte, error) {
 	fd, err := syscall.Openat(int(d.Fd()), name, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
@@ -218,8 +201,7 @@ func readSmallAt(reads *readBudget, d *os.File, name string, limit int64) ([]byt
 	return readSmall(reads, "/proc/self/fd/"+strconv.Itoa(fd), limit)
 }
 
-// mountInfo lists the mount points of Tripcoil's mount namespace.
-var mountInfo = "/proc/self/mountinfo" // replaced by tests
+var mountInfo = "/proc/self/mountinfo"
 
 // mountBelow reports whether a mount point lies strictly below dir, which then has no key: the tree
 // walk must never lstat a mount point, which may hang, such as an NFS mount whose server is gone.
@@ -293,15 +275,13 @@ func treeFingerprint(ctx context.Context, d *os.File) (string, error) {
 	return hex.EncodeToString(w.h.Sum(nil)), nil
 }
 
-// treeWalk is one walk of treeFingerprint.
 type treeWalk struct {
 	ctx context.Context
-	dev uint64 // the device of the directory
+	dev uint64
 	h   hash.Hash
-	n   int // the entries read so far
+	n   int
 }
 
-// walk hashes the directory d, whose entry st is, then the entries below it, in name order.
 func (w *treeWalk) walk(d *os.File, rel string, st *syscall.Stat_t) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
@@ -343,12 +323,10 @@ func (w *treeWalk) walk(d *os.File, rel string, st *syscall.Stat_t) error {
 	return nil
 }
 
-// hash adds an entry to the fingerprint.
 func (w *treeWalk) hash(rel string, st *syscall.Stat_t) {
 	fmt.Fprintf(w.h, "%s\x00%d\x00%d\x00%d\x00%d\x00", rel, modeType(st.Mode), st.Size, st.Ino, st.Ctim.Nano())
 }
 
-// modeType is the type of a file mode, as fs.FileMode.Type gives it for os.Lstat.
 func modeType(mode uint32) fs.FileMode {
 	switch mode & syscall.S_IFMT {
 	case syscall.S_IFBLK:
@@ -367,8 +345,6 @@ func modeType(mode uint32) fs.FileMode {
 	return 0
 }
 
-// readDir reads a directory's names, sorted, and fails as soon as the walk has read more than
-// maxTreeEntries.
 func (w *treeWalk) readDir(d *os.File) ([]string, error) {
 	var out []string
 	for {

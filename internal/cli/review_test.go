@@ -25,11 +25,10 @@ const validReview = `{"summary":"The kernel CVE needs a local user.","coverageNo
  "evidence":["facts/users.json: alice can log in"],"fix":["pacman -Syu","reboot"],"sources":[],"corrections":[],"item":null,"vulnerability":null}]}`
 
 type fakeAgent struct {
-	out   string
-	err   error
-	calls *int
-	dirs  *[]string
-	// groups gets groups.json as the agent finds it.
+	out    string
+	err    error
+	calls  *int
+	dirs   *[]string
 	groups *review.Groups
 }
 
@@ -45,7 +44,6 @@ func (a fakeAgent) Review(_ context.Context, dir string) (review.Output, error) 
 	return review.Output{Data: []byte(a.out), CLI: "claude 2.1.309"}, a.err
 }
 
-// reviewDeps runs with a fake agent; each run gets its own ID and starts an hour after the last.
 func reviewDeps(t *testing.T, agent fakeAgent) *deps {
 	d := testDeps(t, sampleInventory(), nil)
 	d.random = bytes.NewReader([]byte{0, 1, 0, 2, 0, 3, 0, 4})
@@ -99,7 +97,7 @@ func TestRunWithReviewThenCarryForward(t *testing.T) {
 		t.Errorf("latest-reviewed -> %q", target)
 	}
 
-	code, rec, md = runOnce(t, d) // nothing changed
+	code, rec, md = runOnce(t, d)
 	if code != 0 || rec.Reviewed || rec.CarriedFrom != first || calls != 1 || rec.Stages["review"] != run.StageOK {
 		t.Fatalf("exit %d, calls %d, run.json %+v", code, calls, rec)
 	}
@@ -128,7 +126,7 @@ func TestRunReviewsAgainWhenSomethingChanged(t *testing.T) {
 	runOnce(t, d)
 	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
 		a := sampleAudit(audit.Complete)
-		a.Findings[0].Risk = audit.RiskCritical // now on the KEV list
+		a.Findings[0].Risk = audit.RiskCritical
 		return a
 	}
 	_, rec, _ := runOnce(t, d)
@@ -199,7 +197,7 @@ func TestRunReviewFailures(t *testing.T) {
 			if _, err := os.Lstat(filepath.Join(d.stateDir, "runs", "latest-reviewed")); err == nil {
 				t.Error("a failed review set latest-reviewed")
 			}
-			runOnce(t, d) // the next run tries again
+			runOnce(t, d)
 			if calls != 2 {
 				t.Errorf("calls %d", calls)
 			}
@@ -256,7 +254,7 @@ func TestRunReviewWriteFailed(t *testing.T) {
 	d := reviewDeps(t, fakeAgent{calls: &calls})
 	d.agent = func(config.Config) review.Agent {
 		return agentFunc(func(_ context.Context, dir string) (review.Output, error) {
-			if err := os.MkdirAll(filepath.Join(dir, "review.json", "x"), 0o750); err != nil { // a directory where review.json goes
+			if err := os.MkdirAll(filepath.Join(dir, "review.json", "x"), 0o750); err != nil {
 				t.Fatal(err)
 			}
 			return review.Output{Data: []byte(validReview), CLI: "claude 2.1.309"}, nil
@@ -361,7 +359,6 @@ func TestRunReviewUnsupported(t *testing.T) {
 	}
 }
 
-// Warnings from the review are recorded even when it failed.
 func TestRunReviewWarningsOnFailure(t *testing.T) {
 	calls := 0
 	d := reviewDeps(t, fakeAgent{calls: &calls})
@@ -385,7 +382,7 @@ func TestRunReviewWarningsOnFailure(t *testing.T) {
 func TestSandboxProbeCommand(t *testing.T) {
 	var out, errb bytes.Buffer
 	d := testDeps(t, sampleInventory(), nil)
-	d.euid = func() int { return 990 } // the probe runs as the agent's user
+	d.euid = func() int { return 990 }
 	missing := filepath.Join(t.TempDir(), "missing")
 	if code := dispatch([]string{"sandbox-probe", `{"reads":["` + missing + `"]}`}, &out, &errb, d); code != 0 {
 		t.Fatalf("exit %d %q", code, errb.String())

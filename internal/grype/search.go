@@ -9,12 +9,8 @@ import (
 	"strings"
 )
 
-// searchBatch is how many IDs one `grype db search vuln` call looks up.
 const searchBatch = 1000
 
-// SearchVulnerabilities looks vulnerabilities up in the database by ID and returns their NVD
-// records: severity, CVSS, EPSS and KEV. An ID the database does not hold is missing from the
-// result.
 func (r *Runner) SearchVulnerabilities(ctx context.Context, ids []string) (map[string]Vulnerability, error) {
 	for _, id := range ids {
 		if strings.HasPrefix(id, "-") {
@@ -64,7 +60,6 @@ type searchRecord struct {
 	} `json:"epss"`
 }
 
-// parseSearch reads `grype db search vuln -o json` output.
 func parseSearch(data []byte) (map[string]Vulnerability, error) {
 	var recs []searchRecord
 	if err := json.Unmarshal(data, &recs); err != nil {

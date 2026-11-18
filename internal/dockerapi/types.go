@@ -1,6 +1,5 @@
 package dockerapi
 
-// Summary is one entry of GET /containers/json (running containers only).
 type Summary struct {
 	ID      string            `json:"Id"`
 	Names   []string          `json:"Names"`
@@ -11,7 +10,6 @@ type Summary struct {
 	Ports   []Port            `json:"Ports"`
 }
 
-// Port is a container port; PublicPort is 0 when it is not published.
 type Port struct {
 	IP          string `json:"IP"`
 	PrivatePort int    `json:"PrivatePort"`
@@ -19,8 +17,6 @@ type Port struct {
 	Type        string `json:"Type"`
 }
 
-// Detail is GET /containers/{id}/json, the fields Tripcoil reads (the facts snapshot of Plan 3
-// reads the HostConfig security fields).
 type Detail struct {
 	ID         string     `json:"Id"`
 	Name       string     `json:"Name"`
@@ -31,7 +27,6 @@ type Detail struct {
 	Mounts     []Mount    `json:"Mounts"`
 }
 
-// Image is GET /images/{id}/json, the fields Tripcoil reads.
 type Image struct {
 	ID     string `json:"Id"`
 	Config Config `json:"Config"`

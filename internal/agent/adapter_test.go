@@ -77,8 +77,6 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-// The fixtures in testdata/agent are real outputs of Claude Code 2.1.309 and Codex 0.154.0
-// (session and request IDs removed).
 func TestClaudeParse(t *testing.T) {
 	a := For("claude")
 	data, err := a.Parse(fixture(t, "agent/claude-success.json"), nil, 0)

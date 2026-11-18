@@ -13,26 +13,22 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// Groups is groups.json: the findings in groups the agent can judge once each, so that a host
-// with thousands of findings can still be reviewed in full.
 type Groups struct {
 	SchemaVersion string  `json:"schemaVersion"`
 	Groups        []Group `json:"groups"`
 }
 
-// Group is findings in one kernel subsystem, or in one package version of one origin.
 type Group struct {
 	ID             string     `json:"id"`
 	Label          string     `json:"label"`
 	Risk           RiskCounts `json:"risk"`
-	KnownExploited int        `json:"knownExploited"` // findings on the CISA KEV list
+	KnownExploited int        `json:"knownExploited"`
 	MaxEPSS        float64    `json:"maxEpss"`
 	FixedIn        []string   `json:"fixedIn"`
 	Items          []string   `json:"items"`
-	Findings       []string   `json:"findings"` // by risk tier, then ID
+	Findings       []string   `json:"findings"`
 }
 
-// RiskCounts counts a group's findings by risk tier.
 type RiskCounts struct {
 	Critical int `json:"critical"`
 	High     int `json:"high"`
@@ -42,9 +38,6 @@ type RiskCounts struct {
 
 const kernelPrefix = "In the Linux kernel, the following vulnerability has been resolved:"
 
-// GroupFindings groups the audit's findings: kernel findings by the subsystem their description names,
-// every other finding by origin, package name and version. Groups come highest risk tier first,
-// then largest first.
 func GroupFindings(aud *audit.Audit, inv *inventory.Inventory) Groups {
 	names := map[string]string{}
 	if inv != nil {
@@ -132,8 +125,6 @@ func GroupFindings(aud *audit.Audit, inv *inventory.Inventory) Groups {
 	return out
 }
 
-// subsystem is the lower-cased first path component of the subsystem a kernel CVE description
-// starts with ("drm/amd/display: ..." is drm), or "" when it names none.
 func subsystem(desc string) string {
 	rest, ok := strings.CutPrefix(desc, kernelPrefix)
 	if !ok {
@@ -150,7 +141,6 @@ func subsystem(desc string) string {
 	return strings.ToLower(head)
 }
 
-// itemNames names the items, at most three.
 func itemNames(ids []string, names map[string]string) string {
 	if len(ids) == 0 {
 		return "no item"

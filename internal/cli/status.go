@@ -70,7 +70,7 @@ func runStatus(args []string, stdout, stderr io.Writer, d deps) int {
 		line("Last run", "none yet")
 	} else {
 		line("Last run", fmt.Sprintf("%s, %s, %s", st.LastRun, st.LastStatus, when(st.LastRunAt, now)))
-		last, _ = run.ReadRecord(filepath.Join(d.stateDir, "runs", st.LastRun)) // gone when retention removed it
+		last, _ = run.ReadRecord(filepath.Join(d.stateDir, "runs", st.LastRun))
 	}
 	switch {
 	case !running:
@@ -86,7 +86,6 @@ func runStatus(args []string, stdout, stderr io.Writer, d deps) int {
 		line("Last reviewed", fmt.Sprintf("%s, review made %s", st.LastReviewed, when(st.LastReviewedAt, now)))
 	}
 	line("Failures in a row", fmt.Sprint(st.ConsecutiveFailures))
-	// Runs that cannot start, or are stopped every time, finish nothing and count no failure.
 	if running && !st.LastRunAt.IsZero() && now.Sub(st.LastRunAt) > 2*cfg.Interval.Std() {
 		line("Warning", "no run has finished for more than two intervals; see the service's log")
 	}
@@ -118,7 +117,6 @@ func runStatus(args []string, stdout, stderr io.Writer, d deps) int {
 	return 0
 }
 
-// when is a time with its age, such as "2026-11-16 05:20 UTC (6h ago)".
 func when(t, now time.Time) string {
 	age := now.Sub(t)
 	var a string
@@ -135,7 +133,6 @@ func when(t, now time.Time) string {
 	return fmt.Sprintf("%s (%s)", t.UTC().Format("2006-01-02 15:04 UTC"), a)
 }
 
-// serviceHost is the tripcoil service on this machine.
 func serviceHost() (setup.Service, error) {
 	return setup.NewHost("", os.Stdin, io.Discard).Service()
 }

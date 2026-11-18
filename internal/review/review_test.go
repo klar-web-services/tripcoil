@@ -23,8 +23,6 @@ func fixtureAudit() (*audit.Audit, *inventory.Inventory) {
 	return aud, inv
 }
 
-// The fixtures in testdata/review are real outputs of Claude Code 2.1.309 and Codex 0.154.0, run
-// with Schema on a two-finding audit.json.
 func TestValidateRealOutputs(t *testing.T) {
 	aud, inv := fixtureAudit()
 	for _, name := range []string{"claude-2.1.309.json", "codex-0.154.0.json"} {
@@ -127,12 +125,12 @@ func TestValidateDropsEntries(t *testing.T) {
 	aud, inv := fixtureAudit()
 	data := output(
 		entry(nil),
-		entry(map[string]any{"reasoning": "again"}), // a duplicate
+		entry(map[string]any{"reasoning": "again"}),
 		entry(map[string]any{"findingId": "f:ffffffffffffffff"}),
-		entry(map[string]any{"findingId": "f:0000000000000002", "priority": nil}),        // needs a priority
-		entry(map[string]any{"findingId": "f:0000000000000003", "verdict": "corrected"}), // needs corrections
+		entry(map[string]any{"findingId": "f:0000000000000002", "priority": nil}),
+		entry(map[string]any{"findingId": "f:0000000000000003", "verdict": "corrected"}),
 		entry(map[string]any{"findingId": "added:1", "verdict": "added", "item": "proc:zzzz", "vulnerability": "CVE-2026-1", "sources": []string{"https://x"}}),
-		entry(map[string]any{"findingId": "added:2", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-2"}), // needs a source
+		entry(map[string]any{"findingId": "added:2", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-2"}),
 		entry(map[string]any{"findingId": "f:0000000000000009", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-3", "sources": []string{"https://x"}}),
 		entry(map[string]any{"findingId": "added:3", "verdict": "added", "item": "proc:bbbb", "vulnerability": "CVE-2026-4", "sources": []string{"https://nvd.nist.gov/x"}}),
 	)
@@ -228,13 +226,13 @@ func lines(entries ...map[string]any) []byte {
 func TestValidateMergesTheEntriesFile(t *testing.T) {
 	aud, inv := fixtureAudit()
 	file := append(lines(
-		entry(map[string]any{"reasoning": "from the file"}), // the final output's wins
+		entry(map[string]any{"reasoning": "from the file"}),
 		entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": "from the file"}),
 	), "{not json\n\n"...)
 	file = append(file, lines(
-		entry(map[string]any{"findingId": "f:0000000000000003", "cvss": 9.8}),          // wrong keys
-		entry(map[string]any{"findingId": "f:ffffffffffffffff"}),                       // unknown finding
-		entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": "again"}), // a duplicate in the file
+		entry(map[string]any{"findingId": "f:0000000000000003", "cvss": 9.8}),
+		entry(map[string]any{"findingId": "f:ffffffffffffffff"}),
+		entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": "again"}),
 	)...)
 	r, warns, err := Validate(output(entry(nil)), file, aud, inv)
 	if err != nil {
@@ -322,7 +320,7 @@ func TestValidateEntryLimits(t *testing.T) {
 	hundred := many[:100]
 	data := output(
 		entry(nil),
-		entry(map[string]any{"findingId": "f:0000000000000002", "evidence": hundred, "fix": hundred, "sources": hundred, "reasoning": strings.Repeat("r", 16<<10)}), // at the limits
+		entry(map[string]any{"findingId": "f:0000000000000002", "evidence": hundred, "fix": hundred, "sources": hundred, "reasoning": strings.Repeat("r", 16<<10)}),
 		entry(map[string]any{"findingId": "f:0000000000000003", "reasoning": strings.Repeat("r", 16<<10+1)}),
 	)
 	r, warns, err := Validate(data, nil, aud, inv)

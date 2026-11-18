@@ -11,9 +11,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// The rulesets in testdata/fingerprint were captured from real tools in throwaway containers:
-// Docker 29.9.3 with two published ports, fail2ban 1.1.0 with its nftables and iptables actions,
-// and nft 1.1.3 with CrowdSec's documented table layout and a dynamic set.
 func load(t *testing.T, name, cmd string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("../../testdata/fingerprint", name))
@@ -39,11 +36,10 @@ func differ(t *testing.T, what, a, b string) {
 
 func TestNormalizeDocker(t *testing.T) {
 	nft := load(t, "docker-nft.txt", "nft -s list ruleset")
-	recreated := strings.ReplaceAll(nft, "172.18.0.2", "172.18.0.3") // a recreated container gets a new address
+	recreated := strings.ReplaceAll(nft, "172.18.0.2", "172.18.0.3")
 	same(t, "nft, container recreated", nft, recreated)
 	moved := strings.Replace(nft, "tcp dport 8080 counter", "tcp dport 8081 counter", 1)
 	same(t, "nft, published port changed (covered by the containers' ports)", nft, moved)
-	// docker compose down && up: a new bridge, often with a new subnet.
 	compose := strings.ReplaceAll(strings.ReplaceAll(nft, "docker0", "br-0123456789ab"), "172.18.", "172.19.")
 	recompose := strings.ReplaceAll(strings.ReplaceAll(nft, "docker0", "br-fedcba987654"), "172.18.", "172.20.")
 	same(t, "nft, Compose network recreated", compose, recompose)

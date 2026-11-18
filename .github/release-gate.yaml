@@ -1,5 +1,4 @@
-# Gate for Tripcoil's release candidates (spec section 14), run by Shearbolt's pinned release in
-# release.yml. CANDIDATE_DIR holds <triple>/tripcoil for each build; unset, it is a config error
+# CANDIDATE_DIR holds <triple>/tripcoil for each build; unset, it is a config error
 # (exit 2), so the gate fails closed. Paths are relative to this file.
 version: 1
 project: tripcoil-release

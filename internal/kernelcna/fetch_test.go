@@ -27,8 +27,6 @@ type file struct {
 	body []byte
 }
 
-// snapshotOf packs the test records as kernel.org's snapshot of commit, with the files a real
-// snapshot also holds around them, and the extra files.
 func snapshotOf(t *testing.T, commit string, extra ...file) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -80,8 +78,6 @@ func unpack(t *testing.T, snapshot []byte) []byte {
 	return raw
 }
 
-// cutBefore packs a snapshot again without its entries from the nth on: a download cut at a file
-// boundary, with a valid gzip stream around it.
 func cutBefore(t *testing.T, snapshot []byte, n int) []byte {
 	t.Helper()
 	raw := unpack(t, snapshot)
@@ -92,7 +88,7 @@ func cutBefore(t *testing.T, snapshot []byte, n int) []byte {
 			t.Fatal(err)
 		}
 	}
-	cut := len(raw) - br.Len() - 512 // the nth header's block; the names need no PAX header
+	cut := len(raw) - br.Len() - 512
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	gz.Write(raw[:cut])
@@ -102,7 +98,7 @@ func cutBefore(t *testing.T, snapshot []byte, n int) []byte {
 
 type fakeKernelOrg struct {
 	commit   atomic.Value
-	snapshot atomic.Value // []byte
+	snapshot atomic.Value
 	refs     atomic.Int32
 	snaps    atomic.Int32
 	down     atomic.Bool
@@ -155,16 +151,13 @@ func TestLoadFetchesAndCaches(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(s.CacheDir, "kernel-cna.json")); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("cache file %v %v", fi, err)
 	}
-	// Within a day the cache is used as it is.
 	if _, err := s.Load(context.Background(), t0.Add(23*time.Hour), 48*time.Hour); err != nil || k.refs.Load() != 1 {
 		t.Fatalf("refs %d, %v", k.refs.Load(), err)
 	}
-	// A day later the commit is checked; the same commit is not downloaded again.
 	d, err = s.Load(context.Background(), t0.Add(25*time.Hour), 48*time.Hour)
 	if err != nil || k.refs.Load() != 2 || k.snaps.Load() != 1 || !d.Checked.Equal(t0.Add(25*time.Hour)) {
 		t.Fatalf("refs %d snapshots %d checked %v: %v", k.refs.Load(), k.snaps.Load(), d.Checked, err)
 	}
-	// A new commit is.
 	k.commit.Store(commitB)
 	k.snapshot.Store(snapshotOf(t, commitB))
 	if d, err = s.Load(context.Background(), t0.Add(50*time.Hour), 48*time.Hour); err != nil || d.Commit != commitB || k.snaps.Load() != 2 {
@@ -173,7 +166,6 @@ func TestLoadFetchesAndCaches(t *testing.T) {
 }
 
 func TestLoadChecksWithinMaxAge(t *testing.T) {
-	// With audit.maxDatabaseAgeHours below a day, data is checked before it gets that old.
 	s, k := newSource(t)
 	if _, err := s.Load(context.Background(), t0, 12*time.Hour); err != nil {
 		t.Fatal(err)
@@ -206,7 +198,6 @@ func TestLoadWhenKernelOrgFails(t *testing.T) {
 }
 
 func TestLoadDistrustsCheckTimeInFuture(t *testing.T) {
-	// Data checked while the clock was a year ahead is not fresh once the clock is right.
 	s, k := newSource(t)
 	if _, err := s.Load(context.Background(), t0.AddDate(1, 0, 0), 48*time.Hour); err != nil {
 		t.Fatal(err)
@@ -256,7 +247,6 @@ func TestLoadCancelled(t *testing.T) {
 }
 
 func TestLoadWhenCacheUnwritable(t *testing.T) {
-	// The cache only saves work: what was checked or downloaded is used even when it cannot be saved.
 	if os.Geteuid() == 0 {
 		t.Skip("root writes anyway")
 	}
@@ -279,7 +269,6 @@ func TestLoadWhenCacheUnwritable(t *testing.T) {
 }
 
 func TestSaveRemovesLeftovers(t *testing.T) {
-	// A run killed between creating and renaming its temporary file leaves it behind.
 	s, _ := newSource(t)
 	leftover := filepath.Join(s.CacheDir, ".kernel-cna-123")
 	if err := os.MkdirAll(s.CacheDir, 0o700); err != nil {
@@ -306,10 +295,10 @@ func TestLoadRejectsBrokenSnapshots(t *testing.T) {
 		body []byte
 		want string
 	}{
-		"empty body":             {[]byte{}, "not a gzip archive"}, // what kernel.org's cache once served for a snapshot
+		"empty body":             {[]byte{}, "not a gzip archive"},
 		"not gzip":               {[]byte("<html>"), "not a gzip archive"},
 		"cut short":              {good[:2000], "damaged: unexpected EOF"},
-		"cut at a file boundary": {cutBefore(t, good, 45), "ends early"}, // 22 of the 29 records
+		"cut at a file boundary": {cutBefore(t, good, 45), "ends early"},
 		"gzip checksum wrong":    {badCRC, "damaged: gzip: invalid checksum"},
 		"gzip trailer missing":   {good[:len(good)-8], "damaged: unexpected EOF"},
 		"other commit":           {snapshotOf(t, commitB), "holds 0 published records"},
@@ -318,7 +307,7 @@ func TestLoadRejectsBrokenSnapshots(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, k := newSource(t)
-			s.MinRecords = 1 // rejected for what is wrong, not for the count
+			s.MinRecords = 1
 			k.snapshot.Store(c.body)
 			if _, err := s.Load(context.Background(), t0, 48*time.Hour); err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("got %v, want %q", err, c.want)
@@ -336,8 +325,6 @@ func TestLoadRejectsBrokenSnapshots(t *testing.T) {
 }
 
 func TestLoadKeepsOldDataWhenSnapshotMalformed(t *testing.T) {
-	// A snapshot with a malformed record is rejected whole, and the old data stays in use until it
-	// is too old.
 	s, k := newSource(t)
 	if _, err := s.Load(context.Background(), t0, 48*time.Hour); err != nil {
 		t.Fatal(err)
@@ -413,7 +400,6 @@ func TestLoadLimits(t *testing.T) {
 }
 
 func TestLoadReportsAFailedRefresh(t *testing.T) {
-	// Data still within maxAge is used when checking it again fails, and the failure comes with it.
 	s, k := newSource(t)
 	brief := func(d *Data) string {
 		if d == nil {
@@ -421,7 +407,7 @@ func TestLoadReportsAFailedRefresh(t *testing.T) {
 		}
 		return d.Commit + " checked " + d.Checked.Format(time.RFC3339) + ", refresh error: " + fmt.Sprint(d.RefreshErr)
 	}
-	for _, at := range []time.Duration{0, 23 * time.Hour} { // fetched, then used as it is
+	for _, at := range []time.Duration{0, 23 * time.Hour} {
 		if d, err := s.Load(context.Background(), t0.Add(at), 48*time.Hour); err != nil || d.RefreshErr != nil {
 			t.Fatalf("at %v: %s, %v", at, brief(d), err)
 		}

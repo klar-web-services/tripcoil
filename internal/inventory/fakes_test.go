@@ -18,29 +18,28 @@ import (
 )
 
 type fakeProc struct {
-	cmdline   []string
-	exe       string
-	deleted   bool
-	exeErr    error
-	exeID     procfs.FileID // device and inode of the running executable; zero means unknown
-	cwd       string
-	uid       int
-	cgroup    string // /proc/<pid>/cgroup content
-	maps      []procfs.Mapping
-	otherRoot bool
-	root      string                   // what /proc/<pid>/root reads; "" is "/"
-	rootID    procfs.FileID            // device and inode of its root directory; zero means unknown
-	exeData   string                   // what /proc/<pid>/exe reads
-	mapData   map[string]string        // path -> what map_files reads
-	mapIDs    map[string]procfs.FileID // path -> device and inode of the mapped file
-	size      int64                    // the size an opened running file reports, if not its length
-	openErr   error                    // what opening a running file returns
-	onRead    func()                   // called on every read of a running file
-	read      int                      // bytes read from running files
-	reused    bool                     // the PID belongs to another process after the first read
-	started   int                      // StartTime calls
-	ticked    int                      // StartTicks calls
-	// clockStepped moves the wall clock, and so the start time, after the first read.
+	cmdline      []string
+	exe          string
+	deleted      bool
+	exeErr       error
+	exeID        procfs.FileID
+	cwd          string
+	uid          int
+	cgroup       string
+	maps         []procfs.Mapping
+	otherRoot    bool
+	root         string
+	rootID       procfs.FileID
+	exeData      string
+	mapData      map[string]string
+	mapIDs       map[string]procfs.FileID
+	size         int64
+	openErr      error
+	onRead       func()
+	read         int
+	reused       bool
+	started      int
+	ticked       int
 	clockStepped bool
 }
 
@@ -97,7 +96,7 @@ func (s fakeSource) StartTicks(pid int) (uint64, error) {
 	return t, nil
 }
 func (s fakeSource) Cgroup(pid int) (string, error) {
-	if s[pid] == nil { // it ended
+	if s[pid] == nil {
 		return "", fs.ErrNotExist
 	}
 	return s[pid].cgroup, nil
@@ -134,7 +133,6 @@ func (p *fakeProc) open(data string, id procfs.FileID) (io.ReadCloser, error) {
 	return &fakeFile{p: p, r: strings.NewReader(data), info: fakeInfo{size: size, id: id}}, nil
 }
 
-// fakeFile is a running file opened through /proc.
 type fakeFile struct {
 	p    *fakeProc
 	r    io.Reader
@@ -172,7 +170,7 @@ type fakeTool struct {
 	ownersErr    error
 	installedErr error
 	compareErr   error
-	asked        *[]string // the paths Owners was asked about
+	asked        *[]string
 }
 
 func (f fakeTool) Type() string                { return f.typ }
@@ -196,7 +194,6 @@ func (f fakeTool) Installed(_ context.Context, pattern string) ([]pkgtool.Packag
 	return f.installed[pattern], f.installedErr
 }
 
-// Compare orders versions as text; the tests pick versions whose text order is their real order.
 func (f fakeTool) Compare(_ context.Context, a, b string) (int, error) {
 	if f.compareErr != nil {
 		return 0, f.compareErr
@@ -204,7 +201,6 @@ func (f fakeTool) Compare(_ context.Context, a, b string) (int, error) {
 	return strings.Compare(a, b), nil
 }
 
-// files writes content files below a new temp root.
 func files(t *testing.T, content map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -220,7 +216,6 @@ func files(t *testing.T, content map[string]string) string {
 	return root
 }
 
-// fileID returns the device and inode of a file below root.
 func fileID(t *testing.T, root, p string) procfs.FileID {
 	t.Helper()
 	fi, err := os.Stat(filepath.Join(root, p))

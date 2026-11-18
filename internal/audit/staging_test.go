@@ -14,7 +14,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
-// tree lists the regular files below dir.
 func tree(t *testing.T, dir string) []string {
 	t.Helper()
 	var out []string
@@ -46,7 +45,6 @@ func TestStagePackageDBDebian(t *testing.T) {
 	if !strings.HasPrefix(key, "packages-") {
 		t.Fatalf("key %q", key)
 	}
-	// The key follows the database.
 	os.WriteFile(filepath.Join(root, "var/lib/dpkg/status"), []byte("Package: libc6\nVersion: 2\n"), 0o644)
 	if again, _ := stagePackageDB(budget(), root, osrel.Debian, t.TempDir()); again == key {
 		t.Fatal("a changed database keeps its key")
@@ -54,8 +52,6 @@ func TestStagePackageDBDebian(t *testing.T) {
 }
 
 func TestStagePackageDBRPMOnce(t *testing.T) {
-	// Fedora and SUSE: /var/lib/rpm is a link to /usr/lib/sysimage/rpm. Two copies of the database
-	// would double every package.
 	root := files(t, map[string]string{"usr/lib/os-release": "ID=fedora\n", "usr/lib/sysimage/rpm/rpmdb.sqlite": "db"})
 	os.MkdirAll(filepath.Join(root, "var/lib"), 0o755)
 	os.Symlink("../../usr/lib/sysimage/rpm", filepath.Join(root, "var/lib/rpm"))
@@ -67,7 +63,6 @@ func TestStagePackageDBRPMOnce(t *testing.T) {
 	if got, want := tree(t, dst), []string{"etc/os-release", "var/lib/rpm/rpmdb.sqlite"}; !slices.Equal(got, want) {
 		t.Fatalf("staged %v, want %v", got, want)
 	}
-	// Without the link, the database is staged from where it is, as /var/lib/rpm.
 	os.Remove(filepath.Join(root, "var/lib/rpm"))
 	dst = t.TempDir()
 	if _, err := stagePackageDB(budget(), root, osrel.Fedora, dst); err != nil {
@@ -83,15 +78,12 @@ func TestStagePackageDBFailures(t *testing.T) {
 		!strings.Contains(err.Error(), "no package database") {
 		t.Fatalf("no database: %v", err)
 	}
-	// Without os-release Grype would match nothing, and say nothing.
 	if _, err := stagePackageDB(budget(), files(t, map[string]string{"lib/apk/db/installed": "P:musl\n"}), osrel.Alpine, t.TempDir()); err == nil {
 		t.Fatal("staged without os-release")
 	}
 	if _, err := stagePackageDB(budget(), t.TempDir(), osrel.Unknown, t.TempDir()); err == nil {
 		t.Fatal("staged an unknown distribution")
 	}
-	// Nor with an os-release that is not a regular file: only such a package database file is
-	// left out.
 	root := files(t, map[string]string{"var/lib/dpkg/status": "Package: libc6\n"})
 	os.MkdirAll(filepath.Join(root, "etc"), 0o755)
 	syscall.Mkfifo(filepath.Join(root, "etc/os-release"), 0o600)
@@ -100,14 +92,12 @@ func TestStagePackageDBFailures(t *testing.T) {
 	}
 }
 
-// The copies leave the cache file system its floor, as copyVerified's do, and too large a file
-// is named.
 func TestStagePackageDBLimits(t *testing.T) {
 	root := files(t, map[string]string{"etc/os-release": "ID=debian\n", "var/lib/dpkg/status": "Package: libc6\n"})
 	size := uint64(len("ID=debian\n") + len("Package: libc6\n"))
 	old := cacheSpace
 	defer func() { cacheSpace = old }()
-	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + size - 1, 10000, nil } // floor 1000
+	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + size - 1, 10000, nil }
 	dst := t.TempDir()
 	if _, err := stagePackageDB(budget(), root, osrel.Debian, dst); !errors.Is(err, errCacheFull) {
 		t.Fatalf("staged into a full cache: %v", err)

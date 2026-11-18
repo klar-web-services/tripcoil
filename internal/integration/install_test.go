@@ -17,8 +17,6 @@ import (
 	"testing"
 )
 
-// release lays out version as tools.klar.ws serves it: latest, v<version>/checksums.txt and the
-// linux-amd64 archive holding bin. bad gives the archive a wrong checksum.
 func release(t *testing.T, bin, version string, bad bool) string {
 	t.Helper()
 	site := t.TempDir()
@@ -50,8 +48,6 @@ func release(t *testing.T, bin, version string, bad bool) string {
 	return site
 }
 
-// TestInstall runs install.sh in Alpine against a local copy of a release: with BusyBox wget and
-// with curl, as root and not, with a pinned version and with a wrong checksum (spec section 15).
 func TestInstall(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not installed")

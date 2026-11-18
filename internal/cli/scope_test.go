@@ -22,7 +22,6 @@ func TestScopeArgs(t *testing.T) {
 	}
 }
 
-// script writes an executable shell script.
 func script(t *testing.T, body string) string {
 	p := filepath.Join(t.TempDir(), "s")
 	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
@@ -32,7 +31,6 @@ func script(t *testing.T, body string) string {
 }
 
 func TestRunScoped(t *testing.T) {
-	// A systemd-run that runs the command after "--", and a run that reports its start on fd 3.
 	systemdRun := script(t, `while [ "$1" != "--" ]; do shift; done; shift; exec "$@"`)
 	run := script(t, `[ "$TRIPCOIL_SCOPE" = 1 ] && printf x >&3; exit 5`)
 	if code, ran, err := runScoped([]string{systemdRun, "--scope", "--", run}); code != 5 || !ran || err != nil {
@@ -46,7 +44,6 @@ func TestRunScoped(t *testing.T) {
 	if code, ran, _ := runScoped([]string{systemdRun, "--", killed}); code != 2 || !ran {
 		t.Fatalf("a killed run: code %d, ran %v", code, ran)
 	}
-	// Stopped before the run began: interrupted, never a fallback to an unscoped run.
 	killedEarly := script(t, `kill -KILL $$`)
 	if code, ran, _ := runScoped([]string{killedEarly, "--", run}); code != 2 || !ran {
 		t.Fatalf("systemd-run killed: code %d, ran %v", code, ran)

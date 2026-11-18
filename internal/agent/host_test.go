@@ -22,8 +22,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
-// fakeSandbox answers the probe (every check blocked unless notBlocked names it; leak writes its
-// first private file for real), the CLI's --version (exit version) and the review, which agent runs.
 type fakeSandbox struct {
 	mu         sync.Mutex
 	specs      []sandbox.Spec
@@ -66,7 +64,7 @@ type fakeNet struct {
 	mu       sync.Mutex
 	applied  []agentnet.Policy
 	removed  int
-	present  []bool // answers of Present, one per call; true when used up
+	present  []bool
 	applyErr []error
 }
 
@@ -142,7 +140,6 @@ func newEnv(t *testing.T, agent string, run func(ctx context.Context, s sandbox.
 	return &env{h: h, sb: sb, net: n, runDir: runDir}
 }
 
-// print returns an agent run that prints stdout and exits with code.
 func print(stdout []byte, code int) func(context.Context, sandbox.Spec) (sandbox.Result, error) {
 	return func(_ context.Context, s sandbox.Spec) (sandbox.Result, error) {
 		s.Stdout.Write(stdout)
@@ -211,7 +208,7 @@ func TestReviewCodexGetsItsSchema(t *testing.T) {
 	if err != nil || string(schema) != string(review.Schema) || string(out.Data) != strings.TrimSpace(string(final)) {
 		t.Fatalf("%v schema %d bytes", err, len(schema))
 	}
-	if out.CLI != "codex 2.1.309" { // the fake answers --version like Claude Code
+	if out.CLI != "codex 2.1.309" {
 		t.Errorf("cli %q", out.CLI)
 	}
 }
@@ -253,7 +250,7 @@ func TestReviewReadsTheEntriesFile(t *testing.T) {
 		s.Stdout.Write(final)
 		return sandbox.Result{}, nil
 	})
-	os.MkdirAll(filepath.Join(e.runDir, "agent", "entries.jsonl"), 0o700) // in the copy's way
+	os.MkdirAll(filepath.Join(e.runDir, "agent", "entries.jsonl"), 0o700)
 	out, err = e.h.Review(context.Background(), e.runDir)
 	if err != nil || string(out.Entries) != "{}\n" || len(out.Warnings) != 1 || out.Warnings[0].Code != problem.RunFolderUnwritable ||
 		out.Warnings[0].Kind != problem.Warning || !strings.Contains(out.Warnings[0].Message, "cannot keep a copy of the agent's entries.jsonl") {
@@ -267,7 +264,7 @@ func TestReviewFailures(t *testing.T) {
 		setup func(e *env)
 		code  string
 		msg   string
-		runs  int // sandbox runs made
+		runs  int
 	}{
 		{"unsupported", func(e *env) {
 			e.h.d.platform = func() (sandbox.Sandbox, func() error, error) {
@@ -338,7 +335,6 @@ func TestReviewFailures(t *testing.T) {
 	}
 }
 
-// The adapter's files are written before anything runs as the agent, and never through a link.
 func TestReviewWritesFilesFirst(t *testing.T) {
 	var seen []byte
 	e := newEnv(t, "codex", print(fixture(t, "review/codex-0.154.0.json"), 0))
@@ -354,10 +350,9 @@ func TestReviewWritesFilesFirst(t *testing.T) {
 	if _, err := e.h.Review(context.Background(), e.runDir); err != nil {
 		t.Fatal(err)
 	}
-	if string(seen) != string(review.Schema) || stops != 2 { // leftovers are stopped before and after
+	if string(seen) != string(review.Schema) || stops != 2 {
 		t.Errorf("schema %d bytes, %d stops", len(seen), stops)
 	}
-	// A template that already holds the file's name fails the review instead of being followed.
 	tmpl := filepath.Join(e.h.configDir, "agent-home")
 	os.MkdirAll(tmpl, 0o700)
 	os.Symlink("/etc/passwd", filepath.Join(tmpl, "tripcoil-schema.json"))
@@ -366,8 +361,6 @@ func TestReviewWritesFilesFirst(t *testing.T) {
 	}
 }
 
-// The home is a tmpfs, mounted before the template is copied and gone after the review, also
-// when a killed Tripcoil left one.
 func TestReviewMountsHome(t *testing.T) {
 	e := newEnv(t, "claude", print(fixture(t, "agent/claude-success.json"), 0))
 	var calls []string
@@ -388,7 +381,6 @@ func TestReviewMountsHome(t *testing.T) {
 	}
 }
 
-// A unit that cannot be stopped keeps the network table, and says so.
 func TestReviewKeepsNetworkWhenUnitsStay(t *testing.T) {
 	e := newEnv(t, "claude", print(fixture(t, "agent/claude-success.json"), 0))
 	calls := 0
@@ -406,8 +398,6 @@ func TestReviewKeepsNetworkWhenUnitsStay(t *testing.T) {
 	}
 }
 
-// A firewall reload removes the table during the review: it is restored and a warning recorded,
-// also when the review then fails.
 func TestReviewRestoresNetwork(t *testing.T) {
 	e := newEnv(t, "claude", func(ctx context.Context, s sandbox.Spec) (sandbox.Result, error) {
 		time.Sleep(100 * time.Millisecond)
@@ -423,7 +413,6 @@ func TestReviewRestoresNetwork(t *testing.T) {
 	}
 }
 
-// When the table cannot be restored, the review is stopped.
 func TestReviewStopsWhenNetworkLost(t *testing.T) {
 	e := newEnv(t, "claude", func(ctx context.Context, s sandbox.Spec) (sandbox.Result, error) {
 		<-ctx.Done()

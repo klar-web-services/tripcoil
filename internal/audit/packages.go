@@ -16,15 +16,10 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// packagesID names the one scan of the package database, for its raw files and messages.
 const packagesID = "packages"
 
-// kernelRaw names the report of matching the package SBOM in which the running kernel's package was
-// changed, in the run folder, when the kernel package's findings come from it alone (see
-// scanPackages).
 var kernelRaw = "raw/" + rawName(packagesID, ".kernel.grype.json")
 
-// packages scans the package database once and keeps the matches of packages that are origins.
 func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	raw := rawFiles(packagesID)
 	rep, comps, err := au.scanPackages(ctx, raw)
@@ -63,11 +58,8 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 		}
 		switch {
 		case rep.Distro == "":
-			// Without a distribution, no distribution data applies, and no match would come.
 			res.Status, res.Reason = Unidentified, "Grype did not recognise the distribution, so its vulnerability data does not apply"
 		case res.Packages == 0 && kernel:
-			// It is counted at its running version only when runningKernel found it at the
-			// version the Inventory saw, and changed it.
 			au.failOrigin(o, errors.New("the kernel package changed since the inventory, so the kernel is audited at the next run"))
 			continue
 		case res.Packages == 0:
@@ -97,10 +89,6 @@ func (au *auditor) packages(ctx context.Context, origins []inventory.Origin) {
 	au.addFindings(matched, kernelRaw, owns)
 }
 
-// packageChanged says how a package origin changed since the Inventory when the package database
-// no longer holds it as the Inventory saw it: at another version with its name and architecture,
-// or not at all. A package without an architecture on either side may be of any. It returns nil
-// for a package Grype holds by name but does not tell apart.
 func packageChanged(o inventory.Origin, version string, comps []grype.Component) error {
 	named := false
 	for _, c := range comps {
@@ -118,11 +106,6 @@ func packageChanged(o inventory.Origin, version string, comps []grype.Component)
 	return nil
 }
 
-// scanPackages stages the package database and returns its matches and packages: from its cached
-// SBOM, or from a scan of the staging root when the database changed, its SBOM does not match
-// like the staging root (see cacheIfVerified), or the cached one is at fault (see badSBOM). The
-// running kernel's package is matched at its running version. The SBOM is verified against the
-// scan and cached before that change, which a cached SBOM gets as it is matched.
 func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, []grype.Component, error) {
 	stage := filepath.Join(au.d.CacheDir, "staging")
 	os.RemoveAll(stage)
@@ -169,12 +152,8 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 	case kernel == "":
 		return au.keepPackages(rep, data, raw)
 	}
-	// The kernel package's matches come from matching the changed SBOM. When that fails, only the
-	// kernel package's origin fails, and the others keep the scan's results.
 	matched, err := au.matchKernel(ctx, running)
 	if verified && err == nil {
-		// Matching the SBOM gives what the scan gave, so the match gives every package's findings,
-		// and its report replaces the scan's once it is in hand.
 		if err = os.Rename(filepath.Join(au.d.RunDir, kernelRaw), filepath.Join(au.d.RunDir, raw.Grype)); err == nil {
 			return au.keepPackages(matched, running, raw)
 		}
@@ -189,15 +168,10 @@ func (au *auditor) scanPackages(ctx context.Context, raw *Raw) (*grype.Report, [
 		out.Matches = slices.DeleteFunc(slices.Clone(rep.Matches), func(m grype.Match) bool { return m.Artifact.Name == kernel })
 		return au.keepPackages(&out, data, raw)
 	}
-	// Matching the SBOM does not give what the scan gave, so only the kernel package's matches come
-	// from the match. The scan's report stays in the run folder, and so does the match's, as the
-	// kernel package's findings' evidence: the scan's holds the package at its installed version.
 	au.kernelMatched = kernel
 	return au.keepPackages(au.withKernel(rep, matched, kernel), running, raw)
 }
 
-// matchKernel matches a package SBOM in which runningKernel changed the running kernel's package,
-// and writes Grype's report to kernelRaw in the run folder, above its floor, shared as the others.
 func (au *auditor) matchKernel(ctx context.Context, running []byte) (*grype.Report, error) {
 	path := filepath.Join(au.d.RunDir, kernelRaw)
 	if err := aboveFloor(filepath.Dir(path), 0, errRunFolderFull); err != nil {
@@ -210,10 +184,6 @@ func (au *auditor) matchKernel(ctx context.Context, running []byte) (*grype.Repo
 	return rep, err
 }
 
-// withKernel is the scan's report with the matches of the running kernel's package, by name,
-// taken from matched instead: the report of matching the SBOM in which runningKernel changed that
-// package. When matched names another distribution than the scan, no data applies to them, and
-// the package is unidentified (see kernelGap).
 func (au *auditor) withKernel(scan, matched *grype.Report, kernel string) *grype.Report {
 	out := *scan
 	out.Matches = slices.DeleteFunc(slices.Clone(scan.Matches), func(m grype.Match) bool { return m.Artifact.Name == kernel })
@@ -236,8 +206,6 @@ func distroName(r *grype.Report) string {
 	return strings.TrimSpace(r.Distro + " " + r.DistroVersion)
 }
 
-// matchPackages matches a package SBOM in which runningKernel changed the running kernel's
-// package, and leaves Grype's report and the SBOM in the run folder.
 func (au *auditor) matchPackages(ctx context.Context, data []byte, raw *Raw) (*grype.Report, []grype.Component, error) {
 	rep, err := au.match(ctx, data, filepath.Join(au.d.RunDir, raw.Grype))
 	if err != nil {
@@ -246,7 +214,6 @@ func (au *auditor) matchPackages(ctx context.Context, data []byte, raw *Raw) (*g
 	return au.keepPackages(rep, data, raw)
 }
 
-// match matches a package SBOM, writing Grype's report to rawPath.
 func (au *auditor) match(ctx context.Context, data []byte, rawPath string) (*grype.Report, error) {
 	sbom := filepath.Join(au.scanDir(), "packages-match.cdx.json")
 	if err := os.WriteFile(sbom, data, 0o600); err != nil {
@@ -259,7 +226,6 @@ func (au *auditor) match(ctx context.Context, data []byte, rawPath string) (*gry
 	return rep, nil
 }
 
-// keepPackages leaves the report and the matched SBOM in the run folder and lists its packages.
 func (au *auditor) keepPackages(rep *grype.Report, data []byte, raw *Raw) (*grype.Report, []grype.Component, error) {
 	if err := run.Share(filepath.Join(au.d.RunDir, raw.Grype), 0o640); err != nil {
 		return nil, nil, err
@@ -282,14 +248,10 @@ func (au *auditor) failPackages(ctx context.Context, origins []inventory.Origin,
 	au.a.Status = Partial
 }
 
-// packageKey identifies a package across the package tool and Grype: name, the version with its
-// epoch, and the architecture when both name one.
 func packageKey(name, version, arch string) string {
 	return name + "\x00" + version + "\x00" + arch
 }
 
-// originVersion is a package origin's version as Grype spells it: with the epoch, and for the
-// running kernel's package, the running version (see runningKernel).
 func (au *auditor) originVersion(o inventory.Origin) string {
 	if running, _, ok := au.kernelPackage(o); ok {
 		return running
@@ -307,14 +269,14 @@ func purlArch(purl string) string {
 }
 
 // kernelPackage reports whether o is the package of the running kernel on Debian or Ubuntu, whose
-// SBOM entry must change before matching (spec section 6.2), with the running version and the
+// SBOM entry must change before matching, with the running version and the
 // source to set. A kernel package there can be upgraded in place under the same release name, and
 // the findings must be for what runs. Debian's kernel packages also name linux-signed-<arch> as
 // their source, while Debian's vulnerability data is filed under linux, so without the change no
 // kernel vulnerability would ever match.
 func (au *auditor) kernelPackage(o inventory.Origin) (running, source string, ok bool) {
 	if o.Kind != inventory.OriginPackage {
-		return "", "", false // a kernel matched by its upstream version
+		return "", "", false
 	}
 	for _, it := range au.inv.Items {
 		if it.Kind != inventory.KindKernel || it.RunningVersion == "" || len(it.Origins) != 1 || it.Origins[0] != o.ID {
@@ -330,10 +292,6 @@ func (au *auditor) kernelPackage(o inventory.Origin) (running, source string, ok
 	return "", "", false
 }
 
-// runningKernel changes the running kernel's package in an SBOM as kernelPackage says, and returns
-// the package's name when it changed it. When the SBOM does not hold the package at the version
-// the Inventory saw, because it was upgraded in place since, the SBOM stays as it is: packages()
-// then fails the kernel's origin alone.
 func (au *auditor) runningKernel(data []byte) ([]byte, string, error) {
 	for _, o := range au.inv.Origins {
 		running, source, ok := au.kernelPackage(o)

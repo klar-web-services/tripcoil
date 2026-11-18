@@ -193,8 +193,6 @@ func TestCancelWhileGrypeRuns(t *testing.T) {
 	noWorkDirs(t, r)
 }
 
-// Grype is stopped when the cache file system runs low on space while it runs: what it unpacks
-// into its temporary directory depends on what it scans.
 func TestGrypeStopsWhenTheCacheRunsLow(t *testing.T) {
 	old := spaceCheckEvery
 	spaceCheckEvery = 20 * time.Millisecond
@@ -229,8 +227,6 @@ func TestGrypeStopsWhenTheCacheRunsLow(t *testing.T) {
 	}
 }
 
-// The free-space check is asked every 50 ms while Grype runs: a nested-jar bomb unpacks about
-// 0.9 GB in 500 ms, and filled a 2 GB file system between two checks 500 ms apart.
 func TestSpaceIsCheckedOften(t *testing.T) {
 	r, dir, _ := newRunner(t, "FAKE_GRYPE_SLEEP=1")
 	var asked atomic.Int32
@@ -248,8 +244,6 @@ func TestSpaceIsCheckedOften(t *testing.T) {
 	}
 }
 
-// A database update runs without the free-space check: it briefly needs about 3.4 GB of the cache
-// file system, which the floor does not leave on a small disk that has room for every scan.
 func TestUpdateDBDoesNotAskAboutSpace(t *testing.T) {
 	old := spaceCheckEvery
 	spaceCheckEvery = 5 * time.Millisecond
@@ -268,7 +262,6 @@ func TestUpdateDBDoesNotAskAboutSpace(t *testing.T) {
 	}
 }
 
-// The plain file and directory sources are given to Grype by absolute path too.
 func TestScanTakesPlainSourcesByAbsolutePath(t *testing.T) {
 	for _, scheme := range []string{"local-file:", "local-directory:"} {
 		r, dir, log := newRunner(t)
@@ -282,13 +275,11 @@ func TestScanTakesPlainSourcesByAbsolutePath(t *testing.T) {
 	}
 }
 
-// A report of what users control that is larger than the cap is not read: users control how many
-// matches it holds.
 func TestReportsAboveTheCapAreNotRead(t *testing.T) {
 	old := maxReportSize
 	maxReportSize = 100
 	defer func() { maxReportSize = old }()
-	r, dir, _ := newRunner(t) // the fake's report is longer than 100 bytes
+	r, dir, _ := newRunner(t)
 	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
 	for _, source := range []string{"local-file:/x", "local-directory:/srv/shop"} {
 		if _, err := r.Scan(context.Background(), source, a, b); err == nil || err.Error() != "Grype's report is larger than 100 bytes" {
@@ -304,10 +295,6 @@ func TestReportsAboveTheCapAreNotRead(t *testing.T) {
 	}
 }
 
-// The package database's and images' reports are read past the cap on what users control, up to
-// their own: Grype lists every match that its rules ignore, and Debian's and Ubuntu's kernel
-// headers give tens of thousands, about 5 KB each. The report stays in the run folder as Grype
-// wrote it.
 func TestSystemReportsAreReadPastTheUsersCap(t *testing.T) {
 	report, err := io.ReadAll(reportWithIgnored(200))
 	if err != nil {
@@ -345,8 +332,6 @@ func TestSystemReportsAreReadPastTheUsersCap(t *testing.T) {
 	}
 }
 
-// Grype dies with Tripcoil, also when Tripcoil is killed with SIGKILL, which it cannot handle. The
-// test runs Tripcoil's side in a child process, kills it, and watches Grype.
 func TestGrypeDiesWithTripcoil(t *testing.T) {
 	if dir := os.Getenv("TRIPCOIL_TEST_GRYPE_DIR"); dir != "" {
 		r := &Runner{Binary: filepath.Join(dir, "grype"), CacheDir: filepath.Join(dir, "cache"),
@@ -387,12 +372,11 @@ func TestGrypeDiesWithTripcoil(t *testing.T) {
 	t.Fatalf("Grype (PID %d) outlived Tripcoil", pid)
 }
 
-// running reports whether a process exists and is not a zombie.
 func running(pid int) bool {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		return false
 	}
-	i := bytes.LastIndexByte(data, ')') // the state follows the command name
+	i := bytes.LastIndexByte(data, ')')
 	return i+2 < len(data) && data[i+2] != 'Z'
 }

@@ -19,49 +19,42 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is the kernel CNA's vulns repository on kernel.org.
 const DefaultBaseURL = "https://git.kernel.org/pub/scm/linux/security/vulns.git"
 
 const (
-	refreshAfter        = 24 * time.Hour // the data is checked for news at most daily (spec section 6.3)
-	minRecords          = 15000          // a snapshot holds about 18,000; fewer means a broken download
+	refreshAfter        = 24 * time.Hour
+	minRecords          = 15000 // a snapshot holds about 18,000; fewer means a broken download
 	maxRecords          = 100000
-	maxSnapshotBytes    = 256 << 20 // compressed; about 35 MB in 2026
-	maxSnapshotTarBytes = 2 << 30   // unpacked; about 364 MB in 2026
+	maxSnapshotBytes    = 256 << 20
+	maxSnapshotTarBytes = 2 << 30
 	maxRecordBytes      = 4 << 20
-	maxRanges           = 2000000  // version ranges kept across all records; 138,933 in November 2026
-	maxTextBytes        = 64 << 20 // bytes of the strings kept across all records; 4.56 MB in November 2026
+	maxRanges           = 2000000
+	maxTextBytes        = 64 << 20
 )
 
 var (
-	snapshotCap    int64 = maxSnapshotBytes    // lowered by tests
-	snapshotTarCap int64 = maxSnapshotTarBytes // lowered by tests
-	recordsCap           = maxRecords          // lowered by tests
-	rangesCap            = maxRanges           // lowered by tests
-	textCap              = maxTextBytes        // lowered by tests
+	snapshotCap    int64 = maxSnapshotBytes
+	snapshotTarCap int64 = maxSnapshotTarBytes
+	recordsCap           = maxRecords
+	rangesCap            = maxRanges
+	textCap              = maxTextBytes
 )
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// Source fetches the kernel CNA data into the cache.
 type Source struct {
-	CacheDir   string // the data is CacheDir/kernel-cna.json
+	CacheDir   string
 	BaseURL    string
 	Client     *http.Client
 	MinRecords int
 }
 
-// NewSource returns a Source for the real vulns repository.
 func NewSource(cacheDir string) *Source {
 	return &Source{CacheDir: cacheDir, BaseURL: DefaultBaseURL, Client: &http.Client{Timeout: 10 * time.Minute}, MinRecords: minRecords}
 }
 
 func (s *Source) path() string { return filepath.Join(s.CacheDir, "kernel-cna.json") }
 
-// Load returns the data in the cache, first checking for newer data when it was last checked a
-// day ago, or maxAge ago when that is shorter. When the check fails, data checked within maxAge is
-// still used, with the failure as its RefreshErr; older data, data checked at a time still to
-// come, or none, is an error.
 func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) (*Data, error) {
 	old := s.read()
 	if old != nil && now.Sub(old.Checked) < min(refreshAfter, maxAge) && !old.Checked.After(now) {
@@ -87,7 +80,6 @@ func (s *Source) Load(ctx context.Context, now time.Time, maxAge time.Duration) 
 		math.Ceil(now.Sub(old.Checked).Hours()*10)/10, maxAge.Hours(), err)
 }
 
-// read returns the cached data, or nil when there is none or it cannot be read.
 func (s *Source) read() *Data {
 	data, err := os.ReadFile(s.path())
 	if err != nil {
@@ -100,9 +92,6 @@ func (s *Source) read() *Data {
 	return &d
 }
 
-// refresh asks which commit the repository is at, and downloads that commit's snapshot unless
-// the cache already holds it. A cache that cannot be written only costs a check or a download
-// next time, so it is not an error.
 func (s *Source) refresh(ctx context.Context, old *Data, now time.Time) (*Data, error) {
 	commit, err := s.masterCommit(ctx)
 	if err != nil {
@@ -141,7 +130,6 @@ func (s *Source) get(ctx context.Context, url string) (*http.Response, error) {
 	return resp, nil
 }
 
-// masterCommit reads the master branch's commit from info/refs.
 func (s *Source) masterCommit(ctx context.Context) (string, error) {
 	resp, err := s.get(ctx, s.BaseURL+"/info/refs")
 	if err != nil {
@@ -161,7 +149,6 @@ func (s *Source) masterCommit(ctx context.Context) (string, error) {
 	return "", errors.New("the vulns repository lists no master commit")
 }
 
-// snapshot downloads a commit's snapshot and parses the published CVE records in it.
 func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) {
 	resp, err := s.get(ctx, s.BaseURL+"/snapshot/vulns-"+commit+".tar.gz")
 	if err != nil {
@@ -186,7 +173,7 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 			return nil, damaged(err)
 		}
 		if hdr.Typeflag != tar.TypeReg || !published.MatchString(hdr.Name) {
-			continue // also symbolic links, rejected records and the repository's test fixtures
+			continue
 		}
 		if hdr.Size > maxRecordBytes {
 			return nil, fmt.Errorf("%s is unexpectedly large", hdr.Name)
@@ -228,7 +215,6 @@ func (s *Source) snapshot(ctx context.Context, commit string) ([]Record, error) 
 	return records, nil
 }
 
-// textBytes is the length of the strings a record keeps.
 func textBytes(r Record) int {
 	n := len(r.ID)
 	for _, e := range r.Affected {
@@ -243,7 +229,6 @@ func textBytes(r Record) int {
 	return n
 }
 
-// limited fails a read that goes past max bytes, and counts the zero bytes the read ended on.
 type limited struct {
 	r     io.Reader
 	n     int64
@@ -268,7 +253,6 @@ func (l *limited) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// tooLarge is the error of a read that went past its limit.
 type tooLarge struct {
 	what string
 	max  int64
@@ -276,7 +260,6 @@ type tooLarge struct {
 
 func (e *tooLarge) Error() string { return fmt.Sprintf("%s is larger than %d bytes", e.what, e.max) }
 
-// damaged describes an error reading the snapshot.
 func damaged(err error) error {
 	var big *tooLarge
 	if errors.As(err, &big) {
@@ -285,8 +268,6 @@ func damaged(err error) error {
 	return fmt.Errorf("the snapshot is damaged: %w", err)
 }
 
-// save writes the data into the cache atomically. It first removes what a run killed before its
-// rename left; callers hold the run lock.
 func (s *Source) save(d *Data) error {
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -303,7 +284,7 @@ func (s *Source) save(d *Data) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
+	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err

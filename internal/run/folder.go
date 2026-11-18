@@ -13,11 +13,8 @@ import (
 	"time"
 )
 
-// AgentGroup may read run folders: the review agent's user is its only member (Plan 3).
 const AgentGroup = "tripcoil-agent"
 
-// AgentGID returns the agent group's ID when the group exists (tripcoil setup creates it in
-// Plan 4). Tests replace it, so they do not depend on the machine they run on.
 var AgentGID = func() (int, bool) {
 	g, err := user.LookupGroup(AgentGroup)
 	if err != nil {
@@ -34,17 +31,12 @@ func shareWithAgent(path string) error {
 	return nil
 }
 
-// Lock takes the exclusive run lock in stateDir. If another run holds it, waiting is called once
-// and Lock waits until the lock is free.
 func Lock(stateDir string, waiting func()) (unlock func(), err error) {
 	return LockContext(context.Background(), stateDir, waiting)
 }
 
-// lockPoll is how often a waiting LockContext tries the lock again.
 const lockPoll = 250 * time.Millisecond
 
-// LockContext is Lock that stops waiting when ctx is done, so a stopped daemon does not wait for
-// a manual run to end.
 func LockContext(ctx context.Context, stateDir string, waiting func()) (unlock func(), err error) {
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, err
@@ -81,8 +73,6 @@ func LockContext(ctx context.Context, stateDir string, waiting func()) (unlock f
 	}, nil
 }
 
-// CreateFolder makes stateDir/runs/<id> with mode 0750 and the agent group. An existing folder
-// is an error: a run ID is never reused.
 func CreateFolder(stateDir, id string) (string, error) {
 	runs := filepath.Join(stateDir, "runs")
 	if err := os.MkdirAll(runs, 0o750); err != nil {
@@ -103,7 +93,6 @@ func CreateFolder(stateDir, id string) (string, error) {
 	return dir, nil
 }
 
-// CreateSubfolder makes dir/name, such as a run's raw/, with mode 0750 and the agent group.
 func CreateSubfolder(dir, name string) (string, error) {
 	p := filepath.Join(dir, name)
 	if err := os.Mkdir(p, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
@@ -112,8 +101,6 @@ func CreateSubfolder(dir, name string) (string, error) {
 	return p, Share(p, 0o750)
 }
 
-// Share gives a file in a run folder its mode and the agent group, for files that another
-// program wrote, such as Grype's raw output.
 func Share(path string, mode fs.FileMode) error {
 	if err := os.Chmod(path, mode); err != nil {
 		return err
@@ -121,7 +108,6 @@ func Share(path string, mode fs.FileMode) error {
 	return shareWithAgent(path)
 }
 
-// WriteJSON writes v as indented JSON with the given mode and the agent group, atomically.
 func WriteJSON(path string, v any, mode fs.FileMode) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -130,18 +116,16 @@ func WriteJSON(path string, v any, mode fs.FileMode) error {
 	return WriteFile(path, append(data, '\n'), mode)
 }
 
-// WriteFile writes data with the given mode and the agent group, atomically.
 func WriteFile(path string, data []byte, mode fs.FileMode) error {
 	return writeAtomic(path, data, mode, true)
 }
 
-// writeAtomic writes data through a temporary file and a rename; share gives it the agent group.
 func writeAtomic(path string, data []byte, mode fs.FileMode, share bool) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name()) // nothing left to remove after the rename
+	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
@@ -168,7 +152,6 @@ func writeAtomic(path string, data []byte, mode fs.FileMode, share bool) error {
 	return syncDir(filepath.Dir(path))
 }
 
-// syncDir flushes a directory so a rename inside it survives a power loss.
 func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -181,8 +164,6 @@ func syncDir(dir string) error {
 	return d.Close()
 }
 
-// UpdateLatest points stateDir/runs/<name> (latest, latest-reviewed) at the run folder id,
-// atomically.
 func UpdateLatest(stateDir, name, id string) error {
 	runs := filepath.Join(stateDir, "runs")
 	tmp := filepath.Join(runs, "."+name+"-"+id)
@@ -196,7 +177,6 @@ func UpdateLatest(stateDir, name, id string) error {
 	return syncDir(runs)
 }
 
-// ReadRecord reads a run folder's run.json.
 func ReadRecord(dir string) (*Record, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
 	if err != nil {

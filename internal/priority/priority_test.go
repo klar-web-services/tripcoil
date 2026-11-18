@@ -12,7 +12,6 @@ import (
 	"testing"
 )
 
-// The checks run in a child process, because a test cannot undo a lower priority.
 const childEnv = "TRIPCOIL_PRIORITY_CHILD"
 
 func niceOf(t *testing.T, statPath string) int {
@@ -21,8 +20,8 @@ func niceOf(t *testing.T, statPath string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fields := strings.Fields(string(data[bytes.LastIndexByte(data, ')')+1:])) // fields[0] is field 3
-	n, err := strconv.Atoi(fields[16])                                        // field 19: nice
+	fields := strings.Fields(string(data[bytes.LastIndexByte(data, ')')+1:]))
+	n, err := strconv.Atoi(fields[16])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +47,6 @@ func runChild(t *testing.T, mode string) {
 	}
 }
 
-// startOf reads the nice and IO class of the calling thread, which must be locked.
 func startOf(t *testing.T) (nice, class int) {
 	t.Helper()
 	return niceOf(t, "/proc/thread-self/stat"), ioClassOf(t, syscall.Gettid())
@@ -61,7 +59,7 @@ func TestLower(t *testing.T) {
 		defer runtime.UnlockOSThread()
 	}
 	start, class := startOf(t)
-	want := max(start, Nice) // a thread that is already nicer keeps its own value
+	want := max(start, Nice)
 	if mode == "" {
 		if start >= Nice && class == ioprioClassIdle {
 			t.Skipf("the test process already has nice %d and the idle IO class, so the test cannot see Lower change anything", start)

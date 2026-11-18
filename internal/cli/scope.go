@@ -13,17 +13,12 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
-// scopeEnv marks a run that runs in its transient scope; it reports on fd 3, a pipe, that it
-// started.
 const scopeEnv = "TRIPCOIL_SCOPE"
 
 // oomScopeSystemd is the first systemd version (of those tested: 247, 249, 252, 257) whose scopes
 // take OOMPolicy=.
 const oomScopeSystemd = 252
 
-// scopeArgs is the command line that runs "tripcoil run <args>" again in a transient scope with
-// the service unit's CPU weight and memory cap. systemd-run --scope executes the command in place.
-// oom keeps the run going when the kernel kills a Grype process for memory: that origin fails.
 func scopeArgs(systemdRun, exe string, pid int, oom bool, args []string) []string {
 	a := []string{systemdRun, "--scope", "--quiet", "--collect", fmt.Sprintf("--unit=tripcoil-run-%d", pid),
 		"-p", fmt.Sprintf("CPUWeight=%d", priority.CPUWeight), "-p", "MemoryMax=" + priority.MemoryMax}
@@ -33,12 +28,9 @@ func scopeArgs(systemdRun, exe string, pid int, oom bool, args []string) []strin
 	return append(append(a, "--", exe, "run"), args...)
 }
 
-// enterScope runs a manual run on a systemd host again in its transient scope (spec section 13)
-// and returns its exit code with ran set. ran is false when the run should go on here: not
-// systemd, already in the scope, or the scope could not be started (err says why).
 func enterScope(args []string) (code int, ran bool, err error) {
 	if os.Getenv(scopeEnv) != "" {
-		os.Unsetenv(scopeEnv) // not for the run's own children
+		os.Unsetenv(scopeEnv)
 		// Only the pipe runScoped gave: a stray variable must not write into, or close, any other fd 3.
 		var st syscall.Stat_t
 		if syscall.Fstat(3, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFIFO {
@@ -88,10 +80,10 @@ func runScoped(argv []string) (code int, ran bool, err error) {
 	cmd.ExtraFiles = []*os.File{w}
 	cmd.Env = append(os.Environ(), scopeEnv+"=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	signal.Ignore(syscall.SIGTTOU) // inherited by the run across exec
+	signal.Ignore(syscall.SIGTTOU)
 	sigs := make(chan os.Signal, 4)
 	stops := []os.Signal{os.Interrupt, syscall.SIGTERM}
-	if !signal.Ignored(syscall.SIGHUP) { // under nohup the run must keep ignoring it
+	if !signal.Ignored(syscall.SIGHUP) {
 		stops = append(stops, syscall.SIGHUP)
 	}
 	signal.Notify(sigs, stops...)
@@ -125,7 +117,7 @@ func runScoped(argv []string) (code int, ran bool, err error) {
 			cmd.Process.Signal(sig)
 		case err := <-done:
 			began := <-started
-			select { // a signal that came with the exit
+			select {
 			case <-sigs:
 				stopped = true
 			default:
@@ -137,11 +129,11 @@ func runScoped(argv []string) (code int, ran bool, err error) {
 			}
 			switch {
 			case !began && (stopped || !exited):
-				return 2, true, nil // stopped before the run began: interrupted, not run unscoped
+				return 2, true, nil
 			case !began:
 				return 0, false, fmt.Errorf("systemd-run did not start the scope (%v)", err)
 			case !exited:
-				return 2, true, nil // killed by a signal: interrupted
+				return 2, true, nil
 			}
 			return code, true, nil
 		}

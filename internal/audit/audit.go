@@ -23,76 +23,59 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// Deps is everything the Audit uses from outside.
 type Deps struct {
-	Root     string // host root, "/" in production
-	CacheDir string // Tripcoil's cache: Grype, its database, SBOMs, the kernel CNA data
-	RunDir   string // the run folder; Grype's raw output goes to its raw/
+	Root     string
+	CacheDir string
+	RunDir   string
 	Family   osrel.Family
-	MaxAge   time.Duration // audit.maxDatabaseAgeHours
+	MaxAge   time.Duration
 	Now      func() time.Time
 	Grype    Scanner
 	Kernel   KernelSource
-	Proc     ProcFiles // nil: unpackaged files are read at their paths only
-	Images   Images    // nil: an image is scanned without checking that the daemon still has it
+	Proc     ProcFiles
+	Images   Images
 }
 
-// Images is what the Audit asks the local Docker daemon (dockerapi.Client in production).
 type Images interface {
-	// ImageExists reports whether the daemon still has an image, by ID.
 	ImageExists(ctx context.Context, id string) (bool, error)
 }
 
-// ProcFiles opens the files of running processes through /proc (procfs.FS in production).
 type ProcFiles interface {
 	OpenExe(pid int) (io.ReadCloser, error)
 	Maps(pid int) ([]procfs.Mapping, error)
 	OpenMapFile(pid int, m procfs.Mapping) (io.ReadCloser, error)
 }
 
-// Scanner is what the Audit uses of Grype.
 type Scanner interface {
-	// Prepare installs the pinned Grype and updates its database, then reports the database's
-	// status. updateErr is set when the update failed but a database is there.
 	Prepare(ctx context.Context) (st grype.DBStatus, updateErr, err error)
-	// Scan catalogs and matches a source, writing Grype's report to raw and the SBOM to sbom.
 	Scan(ctx context.Context, source, raw, sbom string) (*grype.Report, error)
-	// Match matches an SBOM, writing Grype's report to raw. users says that users control what the
-	// SBOM holds, which caps the report (see grype.Runner.Match).
 	Match(ctx context.Context, sbom, raw string, users bool) (*grype.Report, error)
-	// Lookup returns what the database holds about vulnerabilities, by ID.
 	Lookup(ctx context.Context, ids []string) (map[string]grype.Vulnerability, error)
 }
 
-// KernelSource is the kernel CNA data, fetched at most daily.
 type KernelSource interface {
-	// Load returns the data, refreshing it when it is a day old. An error means there is no data
-	// younger than maxAge; the data's RefreshErr says why refreshing failed when it is used anyway.
 	Load(ctx context.Context, now time.Time, maxAge time.Duration) (*kernelcna.Data, error)
 }
 
-// auditor holds one Audit's state.
 type auditor struct {
 	d     Deps
 	inv   *inventory.Inventory
 	a     *Audit
 	rem   remediation
 	cache sbomCache
-	maps  map[int][]procfs.Mapping // the mappings of processes, read once
-	seen  map[string]bool          // the IDs of the findings so far
-	reads *readBudget              // what the Audit may still read from files
+	maps  map[int][]procfs.Mapping
+	seen  map[string]bool
+	reads *readBudget
 
-	kernelGap     string // why the running kernel's package is unidentified, when withKernel says so
-	kernelMatched string // the running kernel's package, when its matches are kernelRaw's (see scanPackages)
-	kernelErr     error  // why matching the running kernel's package alone failed (see scanPackages)
+	kernelGap     string
+	kernelMatched string
+	kernelErr     error
 
-	mounts     []string // the mount points, read at the first app directory (see mountBelow)
+	mounts     []string
 	mountsErr  error
 	mountsRead bool
 }
 
-// Run audits every origin of the Inventory. It always returns an Audit: one that could not match
-// anything has status failed and says why.
 func Run(ctx context.Context, d Deps, inv *inventory.Inventory) *Audit {
 	au := &auditor{d: d, inv: inv,
 		a: &Audit{SchemaVersion: "1", Status: Complete, Grype: GrypeInfo{Version: grype.Version},
@@ -110,8 +93,6 @@ func Run(ctx context.Context, d Deps, inv *inventory.Inventory) *Audit {
 	return au.a
 }
 
-// interrupted ends an Audit that a signal stopped: what it did not scan is failed, so audit.json
-// never reads as complete.
 func (au *auditor) interrupted() {
 	a := au.a
 	done := map[string]bool{}
@@ -121,7 +102,7 @@ func (au *auditor) interrupted() {
 	for _, o := range au.inv.Origins {
 		switch {
 		case done[o.ID]:
-		case o.Kind == inventory.OriginUnresolved: // a gap whatever happened
+		case o.Kind == inventory.OriginUnresolved:
 			a.Origins = append(a.Origins, OriginResult{ID: o.ID, Kind: o.Kind, Status: Unresolved, Reason: o.Reason})
 		default:
 			a.Origins = append(a.Origins, OriginResult{ID: o.ID, Kind: o.Kind, Status: ScanFailed, Error: "not scanned: the run was interrupted"})
@@ -136,7 +117,6 @@ func (au *auditor) interrupted() {
 
 func (au *auditor) run(ctx context.Context) {
 	a, d := au.a, au.d
-	// The cache is root's alone (spec section 4.3), and what a killed run or Grype left in it goes.
 	if err := os.MkdirAll(d.CacheDir, 0o700); err == nil {
 		os.Chmod(d.CacheDir, 0o700)
 	}
@@ -167,7 +147,7 @@ func (au *auditor) run(ctx context.Context) {
 		a.Warnings = append(a.Warnings, problem.New(problem.Warning, problem.DBUpdateFailed, "audit",
 			"updating the vulnerability database failed, so the one built %s is used: %v", st.Built.Format(time.RFC3339), updateErr))
 	}
-	defer os.RemoveAll(au.scanDir()) // the verified copies and scratch SBOMs of this run
+	defer os.RemoveAll(au.scanDir())
 	if _, err := run.CreateSubfolder(d.RunDir, "raw"); err != nil {
 		au.fail(problem.RunFolderUnwritable, "cannot create the raw/ folder: %v", err)
 		return
@@ -186,12 +166,12 @@ func (au *auditor) run(ctx context.Context) {
 	}
 	for _, o := range au.inv.Origins {
 		if ctx.Err() != nil {
-			break // interrupted() records what was not scanned
+			break
 		}
 		switch o.Kind {
 		case inventory.OriginUnresolved:
 			a.Origins = append(a.Origins, OriginResult{ID: o.ID, Kind: o.Kind, Status: Unresolved, Reason: o.Reason})
-		case inventory.OriginPackage: // scanned above
+		case inventory.OriginPackage:
 		case inventory.OriginKernelUpstream:
 			au.kernel(ctx, o)
 		default:
@@ -203,17 +183,16 @@ func (au *auditor) run(ctx context.Context) {
 		return cmp.Or(cmp.Compare(slices.Index(Tiers, x.Risk), slices.Index(Tiers, y.Risk)), cmp.Compare(x.Vulnerability.ID, y.Vulnerability.ID), cmp.Compare(x.ID, y.ID))
 	})
 	if ctx.Err() != nil {
-		return // no upgrade lines: they are checked with Grype
+		return
 	}
 	a.Upgrades = au.checkUpgrades(ctx, upgradeCandidates(a.Findings))
 	au.cache.prune()
 }
 
-// fail ends an Audit that cannot match anything: every origin is failed, except the unresolved.
 func (au *auditor) fail(code, format string, args ...any) {
 	stage := "audit"
 	if code == problem.RunFolderUnwritable {
-		stage = "" // of no stage (spec section 12)
+		stage = ""
 	}
 	p := problem.New(problem.Error, code, stage, format, args...)
 	au.a.Status = Failed
@@ -227,20 +206,16 @@ func (au *auditor) fail(code, format string, args ...any) {
 	}
 }
 
-// failOrigin records an origin that could not be scanned; the Audit goes on with the others.
 func (au *auditor) failOrigin(o inventory.Origin, err error) {
 	au.a.Origins = append(au.a.Origins, OriginResult{ID: o.ID, Kind: o.Kind, Status: ScanFailed, Error: err.Error()})
 	au.a.Errors = append(au.a.Errors, problemf(originName(o), "%v", err))
 	au.a.Status = Partial
 }
 
-// problemf is an ORIGIN_SCAN_FAILED error about subject.
 func problemf(subject, format string, args ...any) problem.Problem {
 	return problem.New(problem.Error, problem.OriginScanFailed, "audit", "%s: %s", subject, fmt.Sprintf(format, args...))
 }
 
-// rawName is the run folder file for an origin's Grype output: the first 8 hex digits of the
-// SHA-256 of its ID.
 func rawName(id, ext string) string {
 	h := sha256.Sum256([]byte(id))
 	return hex.EncodeToString(h[:])[:8] + ext
@@ -265,8 +240,6 @@ func (au *auditor) addFindings(matches []grype.Match, raw string, owner func(gry
 	}
 }
 
-// packageDB matches the package databases Syft reads a distribution's packages from, as its
-// catalogers name them: dpkg's status, the RPM database, apk's installed and pacman's local db.
 var packageDB = regexp.MustCompile(`(^|/)(lib/dpkg/(status|status\.d/[^/]+)|(var/lib|usr/share|usr/lib/sysimage)/rpm/(Packages|Packages\.db|rpmdb\.sqlite)|lib/apk/db/installed|var/lib/pacman/local/[^/]+/desc)$`)
 
 // findingLocation is the one of a package's locations that its findings name: the package
@@ -288,7 +261,6 @@ func findingLocation(locations []string) string {
 	})
 }
 
-// add completes a finding with its ID, items, risk and remediation, once per ID.
 func (au *auditor) add(f Finding) {
 	f.ID = FindingID(f.Origin, f.Vulnerability.ID, f.Package)
 	if au.seen[f.ID] {
@@ -301,8 +273,6 @@ func (au *auditor) add(f Finding) {
 	au.a.Findings = append(au.a.Findings, f)
 }
 
-// vulnerability merges a match's vulnerability with its related ones: their IDs become aliases,
-// and KEV and EPSS count from any of them (spec section 6.5).
 func vulnerability(v grype.Vulnerability, related []grype.Vulnerability) Vulnerability {
 	out := Vulnerability{ID: v.ID, Aliases: []string{}, Severity: Severity(v.Severity), CVSS: []CVSS{}, EPSS: v.EPSS,
 		KnownExploited: v.KnownExploited, Description: v.Description, URLs: nonNil(v.URLs)}
@@ -337,7 +307,6 @@ func nonNil(s []string) []string {
 	return s
 }
 
-// originName names an origin in a message.
 func originName(o inventory.Origin) string {
 	switch o.Kind {
 	case inventory.OriginBinary:

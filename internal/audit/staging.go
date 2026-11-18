@@ -19,7 +19,7 @@ import (
 
 // packageDBFiles are the package database files of each package type, as globs below the host
 // root, in alternatives: the first alternative with a file wins. Grype reads every installed
-// package from them (spec section 6.2). Fedora's and SUSE's /var/lib/rpm is a link to
+// package from them. Fedora's and SUSE's /var/lib/rpm is a link to
 // /usr/lib/sysimage/rpm, so their database is staged once, as /var/lib/rpm.
 var packageDBFiles = map[string][][]string{
 	"deb":  {{"var/lib/dpkg/status", "var/lib/dpkg/status.d/*"}},
@@ -38,11 +38,6 @@ var releaseFiles = map[string][]string{"deb": {"etc/debian_version"}}
 // them, the key of RHEL 8's database changed at every run, and its SBOM was never reused.
 var rpmReaderFile = regexp.MustCompile(`/(rpmdb\.sqlite-shm|__db\.[0-9]+)$`)
 
-// stagePackageDB copies os-release and the package database of the host below root into dst, a
-// staging root that holds nothing else, and returns the SBOM cache key: the hash of what it
-// copied. Only regular files are copied: a package database file that is not one is left out,
-// and any other fails the copy. The copies must leave the cache file system its floor, and are
-// charged to reads.
 func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst string) (string, error) {
 	alternatives, ok := packageDBFiles[family.PackageType()]
 	if !ok {
@@ -74,7 +69,6 @@ func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst str
 	for _, f := range files {
 		database[f] = true
 	}
-	// Without os-release Grype matches nothing and says nothing, so a missing one fails the copy.
 	osRelease := "etc/os-release"
 	if _, err := os.Stat(filepath.Join(root, osRelease)); errors.Is(err, fs.ErrNotExist) {
 		osRelease = "usr/lib/os-release"
@@ -92,7 +86,7 @@ func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst str
 		path := filepath.Join(root, rel)
 		f, n, err := openFile(path, openPath(path))
 		if errors.Is(err, procfs.ErrNotRegular) && database[rel] {
-			continue // such as a directory in /var/lib/rpm
+			continue
 		}
 		if err != nil {
 			return "", err
@@ -114,7 +108,7 @@ func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst str
 		target := rel
 		switch {
 		case rel == "usr/lib/os-release":
-			target = "etc/os-release" // Grype looks for /etc/os-release first
+			target = "etc/os-release"
 		case strings.HasPrefix(rel, "usr/lib/sysimage/rpm/"):
 			target = "var/lib/rpm/" + strings.TrimPrefix(rel, "usr/lib/sysimage/rpm/")
 		}
@@ -127,7 +121,6 @@ func stagePackageDB(reads *readBudget, root string, family osrel.Family, dst str
 	return "packages-" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// copyRegular copies the regular file src to dst, also writing its content to h.
 func copyRegular(src, dst string, h io.Writer) (int64, error) {
 	in, err := procfs.OpenRegular(src)
 	if err != nil {

@@ -11,7 +11,6 @@ import (
 )
 
 func TestFindCLI(t *testing.T) {
-	// sh is installed system-wide on every test machine, owned by root.
 	p, err := FindCLI("", "sh")
 	if err != nil || !strings.HasSuffix(p, "/sh") {
 		t.Fatalf("%q %v", p, err)
@@ -22,13 +21,11 @@ func TestFindCLI(t *testing.T) {
 	if _, err := FindCLI("", "tripcoil-no-such-cli"); err == nil || !strings.Contains(err.Error(), "is not installed on /usr/local/sbin:") {
 		t.Errorf("missing: %v", err)
 	}
-	// A CLI the agent's user could replace, such as one in a user's home, is refused.
 	mine := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(mine, []byte("#!/bin/sh\n"), 0o755)
 	if _, err := FindCLI(mine, "claude"); err == nil || !strings.Contains(err.Error(), "must be owned by root") {
 		t.Errorf("own file: %v", err)
 	}
-	// So is a link in such a folder.
 	link := filepath.Join(t.TempDir(), "link")
 	os.Symlink(mine, link)
 	if _, err := FindCLI(link, "claude"); err == nil {
@@ -40,7 +37,6 @@ func TestFindCLI(t *testing.T) {
 }
 
 func TestCheckPathFollowsLinks(t *testing.T) {
-	// /proc/self is a link owned by root; it leads to /proc/<pid>, which is owned by this user.
 	if _, err := checkPath("/proc/self/exe", 0); err == nil {
 		t.Error("followed into a folder this user owns")
 	}
@@ -78,7 +74,6 @@ func TestResetHome(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(home, ".codex", "auth.json")); string(data) != `{"token":"t"}` {
 		t.Errorf("auth.json: %q", data)
 	}
-	// Without a template the home is empty.
 	mounted := ""
 	if err := ResetHome(home, filepath.Join(dir, "none"), uid, gid, func(d string) error { mounted = d; return nil }); err != nil || mounted != home {
 		t.Fatalf("%v, mounted %q", err, mounted)

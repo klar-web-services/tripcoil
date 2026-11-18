@@ -6,24 +6,20 @@ import (
 	"time"
 )
 
-// Data is the kernel CNA data in the cache.
 type Data struct {
-	Commit  string    `json:"commit"`  // the vulns repository commit
-	Checked time.Time `json:"checked"` // when that commit was last confirmed to be the newest
+	Commit  string    `json:"commit"`
+	Checked time.Time `json:"checked"`
 	Records []Record  `json:"records"`
 
-	RefreshErr error `json:"-"` // set by Load when checking for newer data failed, but this data is within maxAge
+	RefreshErr error `json:"-"`
 }
 
-// Match is one CVE that affects a kernel version.
 type Match struct {
 	CVE   string
-	Fixed string // the first fixed version for this kernel, preferring its own stable branch; "" when none is known
+	Fixed string
 	CVSS  *CVSS
 }
 
-// Affected returns the CVEs that affect an upstream kernel version, sorted by ID. A version that
-// does not parse matches nothing.
 func (d *Data) Affected(upstream string) []Match {
 	v, ok := parseVersion(upstream)
 	if !ok {
@@ -39,7 +35,6 @@ func (d *Data) Affected(upstream string) []Match {
 	return out
 }
 
-// IsVersion reports whether an upstream kernel version can be matched.
 func IsVersion(upstream string) bool {
 	_, ok := parseVersion(upstream)
 	return ok
@@ -73,7 +68,6 @@ func (e Entry) status(v version) string {
 	return e.DefaultStatus
 }
 
-// covers reports whether a range covers v. An entry with neither upper bound is one exact version.
 func (rg Range) covers(v version) bool {
 	lower, ok := parseVersion(rg.Version)
 	if !ok {
@@ -113,11 +107,6 @@ func atMost(v version, upper string) bool {
 	return ok && compare(v, u) <= 0
 }
 
-// fixFor is the first version above v where the record says the bug is fixed. Such a fix is the
-// start of an unaffected range that runs to the end of v's branch, the end of an affected range
-// that covers v, or the mainline fix ("X.Y <= *"). A fix that the record still marks affected is
-// skipped. A fix in v's own branch wins over the mainline fix. A fix in another stable branch does
-// not help v and is not considered.
 func (r Record) fixFor(v version) string {
 	var best string
 	var bestV version

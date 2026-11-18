@@ -19,9 +19,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// TestFactsTools collects the facts with the real tools: nftables with a ruleset, a running sshd,
-// a user with an SSH key, and a process started with a password on its command line (AC-12). The
-// container is privileged, so nft can read its own network namespace's ruleset.
 func TestFactsTools(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is not installed")

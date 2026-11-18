@@ -20,15 +20,12 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// The probe runs the binary that runs the review, here this test binary, as "sandbox-probe".
 func init() {
 	if len(os.Args) == 3 && os.Args[1] == "sandbox-probe" {
 		os.Exit(probe.Main(os.Args[2:], os.Stdout, os.Stderr))
 	}
 }
 
-// liveState makes a state folder of its own, owned by root and outside /home and /tmp like the
-// real one, with one run folder that holds a two-finding audit.json.
 func liveState(t *testing.T) (state, runDir string, aud *audit.Audit, inv *inventory.Inventory) {
 	t.Helper()
 	if os.Geteuid() != 0 {
@@ -63,12 +60,6 @@ func liveState(t *testing.T) (state, runDir string, aud *audit.Audit, inv *inven
 	return state, runDir, aud, inv
 }
 
-// TestLiveSandbox runs the stub CLI through the sandbox of the machine it runs on: its systemd
-// or bubblewrap, its nftables with the host's own firewall rules, its resolver. Build the stub
-// next to the test binary first:
-//
-//	go build -o stubcli ./internal/integration/testdata/stubcli
-//	go test -c -tags live -o live.test ./internal/integration/ && sudo ./live.test -test.v -test.run TestLiveSandbox
 func TestLiveSandbox(t *testing.T) {
 	state, runDir, aud, inv := liveState(t)
 	src := filepath.Join(filepath.Dir(os.Args[0]), "stubcli")
@@ -114,10 +105,6 @@ func TestLiveSandbox(t *testing.T) {
 	t.Logf("%s: %s; warnings %v\nprobe: %s", out.CLI, rev.Summary, out.Warnings, probe)
 }
 
-// TestLiveReview runs the agent configured in /etc/tripcoil/tripcoil.yaml, with its credentials,
-// on a two-finding audit. It needs the CLI installed system-wide and costs a little.
-//
-//	go test -c -tags live -o live.test ./internal/integration/ && sudo ./live.test -test.v -test.run TestLiveReview
 func TestLiveReview(t *testing.T) {
 	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {

@@ -10,19 +10,15 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/review"
 )
 
-// maxEntries is how many entries a section of the reviewed report lists in full; review.json holds
-// them all.
 const maxEntries = 200
 
 var priorities = []string{"now", "soon", "scheduled", "none"}
 
-// reviewed is one entry of the report: an audit finding with its review, or a finding the agent added.
 type reviewed struct {
 	entry   review.Entry
-	finding *audit.Finding // nil for an added finding
+	finding *audit.Finding
 }
 
-// renderReviewed writes report.md for a run with a review (spec section 11.3).
 func renderReviewed(in Input) string {
 	var b strings.Builder
 	gaps := Gaps(in.Inventory, in.Audit, in.Facts)
@@ -46,7 +42,6 @@ func renderReviewed(in Input) string {
 		}
 	}
 	unassessed := len(groups[review.Unknown]) + len(notReviewed)
-	// Only conditional findings worth acting on soon count in the verdict and are listed in full.
 	var conditional, lower []reviewed
 	for _, r := range groups[review.Conditional] {
 		if r.entry.Priority == "now" || r.entry.Priority == "soon" {
@@ -91,9 +86,6 @@ func renderReviewed(in Input) string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-// reviewVerdict is the verdict line of a reviewed run: the first rule of spec section 11.3 that applies.
-// conditional counts only conditional findings with priority now or soon; lower counts the other
-// conditional findings, which every line names at its end.
 func reviewVerdict(exploitable, conditional, unassessed, lower int) string {
 	var s string
 	switch {
@@ -118,7 +110,6 @@ func reviewVerdict(exploitable, conditional, unassessed, lower int) string {
 	return s
 }
 
-// reviewHost ends the host line with the agent and, for a carried-forward review, where it is from.
 func reviewHost(in Input) string {
 	s := ""
 	if in.Agent != "" {
@@ -141,7 +132,6 @@ func writeErrors(b *strings.Builder, in Input) {
 	b.WriteString("\n")
 }
 
-// writeReviewWarnings lists the review stage's warnings, such as entries that were dropped.
 func writeReviewWarnings(b *strings.Builder, in Input) {
 	var lines []string
 	for _, w := range in.Run.Warnings {
@@ -154,7 +144,6 @@ func writeReviewWarnings(b *strings.Builder, in Input) {
 	}
 }
 
-// sortEntries orders entries by priority, then by the finding's risk tier (added findings last).
 func sortEntries(rs []reviewed) {
 	tier := func(r reviewed) int {
 		if r.finding == nil {
@@ -181,7 +170,6 @@ func writeEntries(b *strings.Builder, title string, rs []reviewed, names map[str
 	writeList(b, rs, names)
 }
 
-// writeList writes entries in full, at most maxEntries.
 func writeList(b *strings.Builder, rs []reviewed, names map[string]string) {
 	sortEntries(rs)
 	for i, r := range rs {
@@ -207,7 +195,6 @@ func writeList(b *strings.Builder, rs []reviewed, names map[string]string) {
 	b.WriteString("\n")
 }
 
-// entryTitle names an entry: vulnerability, package and version, items, risk tier and priority.
 func entryTitle(r reviewed, names map[string]string) string {
 	e := r.entry
 	var s string
@@ -226,7 +213,6 @@ func entryTitle(r reviewed, names map[string]string) string {
 	return "**" + s + "**"
 }
 
-// writeCollapsed writes the entries the review found harmless here, one line each, collapsed.
 func writeCollapsed(b *strings.Builder, title string, rs []reviewed, names map[string]string) {
 	if len(rs) == 0 {
 		return

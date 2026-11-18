@@ -12,8 +12,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-// TestRunRecordsStateAndPrunes makes three runs with retention.keepRuns 1: each updates
-// state.json, and only the newest run folder stays.
 func TestRunRecordsStateAndPrunes(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	if err := os.WriteFile(d.configPath, []byte("version: 1\nretention:\n  keepRuns: 1\n"), 0o644); err != nil {
@@ -54,7 +52,6 @@ func TestRunRecordsStateAndPrunes(t *testing.T) {
 	}
 }
 
-// TestRunInterruptedLeavesState: an interrupted run is no finished run.
 func TestRunInterruptedLeavesState(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	d.interrupts = func() (context.Context, context.CancelFunc) {

@@ -49,7 +49,6 @@ func runUninstall(args []string, stdout, stderr io.Writer, d deps) int {
 	return 0
 }
 
-// uninstallHost removes Tripcoil from this machine, with the binary that runs now.
 func uninstallHost(o setup.UninstallOptions, stdout io.Writer) error {
 	exe, err := os.Executable()
 	if err == nil {

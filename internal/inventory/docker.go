@@ -15,7 +15,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/procfs"
 )
 
-// DockerAPI is what the container collector needs from the Docker daemon.
 type DockerAPI interface {
 	Ping(ctx context.Context) error
 	Containers(ctx context.Context) ([]dockerapi.Summary, error)
@@ -28,7 +27,6 @@ type DockerAPI interface {
 // policy.
 func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, connect func(string) DockerAPI, containerPIDs map[string][]int, src Source) ([]Item, []Origin, []problem.Problem) {
 	if !dockerdRunning {
-		// dockerd stopped with live-restore keeps its containers running.
 		if len(containerPIDs) > 0 {
 			return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
 				"%d container(s) have running processes, but no Docker daemon (dockerd) is running, so they are not inventoried; start Docker to inventory them",
@@ -46,7 +44,6 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 			"cannot check the Docker socket at %s (%v), so running containers are missing from this run", socket, err)}
 	}
 	if err != nil || fi.Mode()&fs.ModeSocket == 0 {
-		// dockerd runs, but not on this socket (a custom -H).
 		if len(containerPIDs) > 0 {
 			return nil, nil, []problem.Problem{problem.New(problem.Error, problem.DockerUnavailable, "inventory",
 				"%d container(s) have running processes, but dockerd does not listen on %s, so they are not inventoried; set DOCKER_HOST to its socket",
@@ -72,12 +69,12 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	var items []Item
 	var problems []problem.Problem
 	origins := map[string]Origin{}
-	accounted := map[string]bool{} // listed by Docker
+	accounted := map[string]bool{}
 	for _, s := range list {
 		accounted[s.ID] = true
 		d, err := api.Inspect(ctx, s.ID)
 		if errors.Is(err, dockerapi.ErrNotFound) {
-			continue // it was removed between the list and the inspect: it is no longer running
+			continue
 		}
 		if err != nil {
 			if !interrupted(ctx, err) {
@@ -86,12 +83,12 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 			continue
 		}
 		if !d.State.Running {
-			continue // it stopped between the list and the inspect; paused and restarting ones still run
+			continue
 		}
 		name := strings.TrimPrefix(d.Name, "/")
 		ref := s.Image
 		if strings.HasPrefix(ref, "sha256:") && d.Config.Image != "" {
-			ref = d.Config.Image // the tag moved to a newer image; keep the reference the container was started from
+			ref = d.Config.Image
 		}
 		it := Item{
 			ID: ContainerItemID(name), Kind: KindContainer, Name: name, ContainerID: d.ID,
@@ -107,7 +104,6 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 		for _, m := range d.Mounts {
 			it.Mounts = append(it.Mounts, Mount{Type: m.Type, Source: m.Source, Destination: m.Destination, ReadWrite: m.RW})
 		}
-		// Docker builds both lists from maps: sorted, identical runs give identical inventories.
 		slices.SortFunc(it.Ports, func(a, b Port) int {
 			return cmp.Or(cmp.Compare(a.ContainerPort, b.ContainerPort), strings.Compare(a.Protocol, b.Protocol),
 				strings.Compare(a.IP, b.IP), cmp.Compare(a.HostPort, b.HostPort))
@@ -135,10 +131,6 @@ func collectDocker(ctx context.Context, dockerHost string, dockerdRunning bool, 
 	return items, out, problems
 }
 
-// compose reads a container's Compose labels, or nil. A container inherits its image's labels, so
-// an image can name any project, directory or file. When the directory or file label equals the
-// image's own, or the image cannot be read, there is no Compose info. The project and service may
-// equal the image's: Compose writes them onto the images it builds.
 func compose(ctx context.Context, api DockerAPI, imageID string, labels map[string]string) *Compose {
 	project, service := labels["com.docker.compose.project"], labels["com.docker.compose.service"]
 	if project == "" && service == "" {
@@ -161,8 +153,6 @@ func compose(ctx context.Context, api DockerAPI, imageID string, labels map[stri
 	return c
 }
 
-// stillRunning counts the containers outside accounted with a process that still runs in them:
-// a container that ended meanwhile is not missing, and its PIDs may have been reused.
 func stillRunning(src Source, containerPIDs map[string][]int, accounted map[string]bool) int {
 	n := 0
 	for id, pids := range containerPIDs {

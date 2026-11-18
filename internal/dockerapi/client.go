@@ -1,4 +1,3 @@
-// Package dockerapi is a minimal client for the parts of the Docker Engine API that Tripcoil reads.
 package dockerapi
 
 import (
@@ -14,10 +13,8 @@ import (
 	"time"
 )
 
-// ErrNotFound is what a request for a container or image that no longer exists returns.
 var ErrNotFound = errors.New("not found")
 
-// Socket picks the socket from DOCKER_HOST, or the default.
 func Socket(dockerHost string) (string, error) {
 	if dockerHost == "" {
 		return "/var/run/docker.sock", nil
@@ -28,12 +25,9 @@ func Socket(dockerHost string) (string, error) {
 	return "", fmt.Errorf("DOCKER_HOST=%s is not a unix socket; Tripcoil only reads the local Docker daemon through its unix socket", dockerHost)
 }
 
-// Client talks to the Docker daemon over its unix socket.
 type Client struct{ hc *http.Client }
 
-// New returns a client for the unix socket at path.
 func New(socket string) *Client {
-	// Without keep-alives no idle connection outlives a run of the daemon.
 	tr := &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, "unix", socket)
@@ -65,31 +59,26 @@ func (c *Client) get(ctx context.Context, path string, v any) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
-// Ping checks that the daemon answers.
 func (c *Client) Ping(ctx context.Context) error { return c.get(ctx, "/_ping", nil) }
 
-// Containers lists the running containers.
 func (c *Client) Containers(ctx context.Context) ([]Summary, error) {
 	var s []Summary
 	err := c.get(ctx, "/containers/json", &s)
 	return s, err
 }
 
-// Inspect returns one container's details.
 func (c *Client) Inspect(ctx context.Context, id string) (Detail, error) {
 	var d Detail
 	err := c.get(ctx, "/containers/"+url.PathEscape(id)+"/json", &d)
 	return d, err
 }
 
-// InspectImage returns one image's details, by ID. Inspecting an image never pulls it.
 func (c *Client) InspectImage(ctx context.Context, id string) (Image, error) {
 	var img Image
 	err := c.get(ctx, "/images/"+url.PathEscape(id)+"/json", &img)
 	return img, err
 }
 
-// ImageExists reports whether the daemon has an image, by ID. Inspecting an image never pulls it.
 func (c *Client) ImageExists(ctx context.Context, id string) (bool, error) {
 	err := c.get(ctx, "/images/"+url.PathEscape(id)+"/json", nil)
 	if errors.Is(err, ErrNotFound) {

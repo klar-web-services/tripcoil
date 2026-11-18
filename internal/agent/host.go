@@ -29,10 +29,8 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
-// UserName is the agent's system user, which tripcoil setup creates with its own group.
 const UserName = "tripcoil-agent"
 
-// Host reviews runs on this machine. It implements review.Agent.
 type Host struct {
 	cfg       config.Config
 	stateDir  string
@@ -40,10 +38,7 @@ type Host struct {
 	d         deps
 }
 
-// deps is what Host takes from the machine, so tests can replace it.
 type deps struct {
-	// platform returns the sandbox of this machine and, on systemd, the function that stops
-	// units left over from earlier reviews; or a *review.Failure.
 	platform func() (sandbox.Sandbox, func() error, error)
 	user     func() (sandbox.User, error)
 	findCLI  func(command, name string) (string, error)
@@ -51,15 +46,13 @@ type deps struct {
 	present  func() (bool, error)
 	remove   func() error
 	own      func() ([]netip.Addr, error)
-	resolv   string // resolv.conf
+	resolv   string
 	exe      func() (string, error)
-	watch    time.Duration // how often the network table is checked
-	// mount mounts the home's tmpfs, unmount removes it (and every one stacked below it).
-	mount   func(home string, size int64, uid, gid uint32) error
-	unmount func(home string)
+	watch    time.Duration
+	mount    func(home string, size int64, uid, gid uint32) error
+	unmount  func(home string)
 }
 
-// New returns the agent for the config's review settings.
 func New(cfg config.Config, stateDir, configDir string) *Host {
 	return &Host{cfg: cfg, stateDir: stateDir, configDir: configDir, d: deps{
 		platform: hostPlatform, user: LookupUser, findCLI: FindCLI,
@@ -68,24 +61,17 @@ func New(cfg config.Config, stateDir, configDir string) *Host {
 	}}
 }
 
-// probeTimeout bounds the probe and the CLI's --version, which take seconds.
 const probeTimeout = 2 * time.Minute
 
-// Review runs one review of runDir in the sandbox. The output's warnings are set on every return
-// after the network table was written.
 func (h *Host) Review(ctx context.Context, runDir string) (review.Output, error) {
 	return h.session(ctx, runDir, filepath.Base(runDir), review.Prompt, review.Schema)
 }
 
-// checkPrompt and checkSchema are tripcoil doctor's check that the CLI's credentials work: a short
-// prompt that needs no tool (verified with Claude Code 2.1.309 and Codex 0.154.0).
 const (
 	checkPrompt = "This is a connectivity check. Do not use any tools. Reply with ok set to true."
 	checkSchema = `{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}`
 )
 
-// Check proves the sandbox with the probe and runs the CLI once with a short prompt, as a review
-// would, in runDir, an empty folder in runs/ (tripcoil doctor). It returns the CLI and its version.
 func (h *Host) Check(ctx context.Context, runDir string) (string, error) {
 	out, err := h.session(ctx, runDir, "doctor", checkPrompt, []byte(checkSchema))
 	if err != nil {
@@ -100,8 +86,6 @@ func (h *Host) Check(ctx context.Context, runDir string) (string, error) {
 	return out.CLI, nil
 }
 
-// session runs the probe, the CLI's --version and then the CLI with prompt and schema, in the
-// sandbox, for runDir; name goes into the units' names.
 func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema []byte) (out review.Output, _ error) {
 	ad := For(h.cfg.Review.Agent)
 	sb, stopLeftovers, err := h.d.platform()
@@ -134,7 +118,7 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 	if err != nil {
 		return out, fail(problem.AgentSandbox, "%v", err)
 	}
-	h.d.unmount(home) // a mount that a killed Tripcoil left
+	h.d.unmount(home)
 	mount := func(dir string) error { return h.d.mount(dir, size, u.UID, u.GID) }
 	if err := ResetHome(home, filepath.Join(h.configDir, "agent-home"), int(u.UID), int(u.GID), mount); err != nil {
 		h.d.unmount(home)
@@ -176,7 +160,7 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 	warnings := h.watchNetwork(rctx, cancel, policy)
 	var entryWarns []problem.Problem
 	defer func() { out.Warnings = append(warnings(), entryWarns...) }()
-	stopped := func(err error) error { // why a sandbox run ended early
+	stopped := func(err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -212,7 +196,6 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 		return out, &review.Failure{Code: problem.RunFolderUnwritable, Message: err.Error()}
 	}
 	defer stderr.Close()
-	// The agent can write to its CLI's output, so what Tripcoil keeps of it is capped.
 	var outBuf bytes.Buffer
 	var errTail tail
 	outCap := &capped{w: io.MultiWriter(stdout, &outBuf), left: review.MaxOutput}
@@ -224,7 +207,6 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 	}
 	res, err := sb.Run(rctx, rs)
 	if err == nil {
-		// The agent's unit has ended, so nothing changes the file while it is read.
 		data, rerr := readEntries(home, review.EntriesFile, review.MaxEntriesFile)
 		if rerr != nil {
 			entryWarns = append(entryWarns, problem.New(problem.Warning, problem.ReviewEntriesDropped, "review",
@@ -252,7 +234,6 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 	return out, err
 }
 
-// policy is the network table's policy for this review.
 func (h *Host) policy(u sandbox.User) (agentnet.Policy, error) {
 	own, err := h.d.own()
 	if err != nil {
@@ -265,7 +246,6 @@ func (h *Host) policy(u sandbox.User) (agentnet.Policy, error) {
 	return agentnet.Policy{UID: u.UID, Nameservers: agentnet.Nameservers(conf), Allow: agentnet.ParseAllow(h.cfg.Review.AllowAddresses), Own: own}, nil
 }
 
-// probe runs tripcoil sandbox-probe in the sandbox and fails unless every check was blocked.
 func (h *Host) probe(ctx context.Context, sb sandbox.Sandbox, base sandbox.Spec, id, agentDir string, policy agentnet.Policy) error {
 	exe, err := h.d.exe()
 	if err != nil {
@@ -302,9 +282,6 @@ func (h *Host) probe(ctx context.Context, sb sandbox.Sandbox, base sandbox.Spec,
 	return nil
 }
 
-// watchNetwork checks the network table every few seconds and restores it when a firewall reload
-// removed it. When it cannot, it stops the review. The function it returns stops the watch and
-// returns the warnings.
 func (h *Host) watchNetwork(ctx context.Context, stop context.CancelCauseFunc, p agentnet.Policy) func() []problem.Problem {
 	wctx, wcancel := context.WithCancel(ctx)
 	var mu sync.Mutex
@@ -388,7 +365,6 @@ func unmountHome(home string) {
 	}
 }
 
-// LookPath finds a tool on the fixed system path.
 func LookPath(name string) (string, error) {
 	for _, dir := range filepath.SplitList(sandbox.Path) {
 		p := filepath.Join(dir, name)
@@ -399,7 +375,6 @@ func LookPath(name string) (string, error) {
 	return "", fmt.Errorf("%s is not installed on %s", name, sandbox.Path)
 }
 
-// LookupUser finds the agent's user, and its group, which may read run folders.
 func LookupUser() (sandbox.User, error) {
 	hint := "create it with: useradd --system --user-group --no-create-home --shell /usr/sbin/nologin " + UserName
 	u, err := user.Lookup(UserName)
@@ -425,7 +400,6 @@ func copyBinary(src, dst string) error {
 	return os.Chmod(dst, 0o755)
 }
 
-// writeNew creates a file that must not exist yet, following no link.
 func writeNew(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
@@ -438,7 +412,6 @@ func writeNew(path string, data []byte) error {
 	return f.Close()
 }
 
-// capped passes on at most left bytes and drops the rest.
 type capped struct {
 	w    io.Writer
 	left int64
@@ -459,7 +432,6 @@ func (c *capped) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// tail keeps the last 64 KiB written to it.
 type tail struct{ b []byte }
 
 func (t *tail) Write(p []byte) (int, error) {

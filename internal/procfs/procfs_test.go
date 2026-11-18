@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// proc builds root/proc/<pid> with files and symlinks.
 func proc(t *testing.T, root string, pid int, files, links map[string]string) {
 	t.Helper()
 	dir := filepath.Join(root, "proc", strconv.Itoa(pid))
@@ -64,7 +63,7 @@ func fixture(t *testing.T) (FS, string) {
 		"cmdline": "/opt/api/api\x00--port\x0080\x00",
 		"stat":    "43 (my (weird) proc) S 1 43 43 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 200 1000 1\n",
 	}, map[string]string{"exe": "/opt/api/api (deleted)", "root": "../../other-root"})
-	proc(t, root, 2, map[string]string{"cmdline": ""}, nil) // kernel thread: empty cmdline, no exe
+	proc(t, root, 2, map[string]string{"cmdline": ""}, nil)
 	return FS{Root: root}, root
 }
 
@@ -128,7 +127,6 @@ func TestStartTicks(t *testing.T) {
 	if got, err := f.StartTicks(43); err != nil || got != 200 {
 		t.Fatalf("comm with parentheses: %d %v", got, err)
 	}
-	// They count from boot: a stepped wall clock, which moves btime, does not change them.
 	if err := os.WriteFile(filepath.Join(root, "proc/stat"), []byte("btime 1700003600\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +387,7 @@ func TestOpenNeverOpensNonRegularFilesForReading(t *testing.T) {
 
 func TestRootFileID(t *testing.T) {
 	f, root := fixture(t)
-	got, err := f.RootFileID(43) // root links to other-root
+	got, err := f.RootFileID(43)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +409,6 @@ func TestOpenRegularRefusesKernelFiles(t *testing.T) {
 			t.Errorf("%s: %v, want ErrPseudoFile", path, err)
 		}
 	}
-	// A link through /proc to a real file is the file: the Inventory reads running files this way.
 	f, err := OpenRegular("/proc/self/exe")
 	if err != nil {
 		t.Fatalf("/proc/self/exe: %v", err)
@@ -419,12 +416,10 @@ func TestOpenRegularRefusesKernelFiles(t *testing.T) {
 	f.Close()
 }
 
-// fSetLease is F_SETLEASE, which package syscall does not define.
 const fSetLease = 1024
 
 const leaseChildEnv = "PROCFS_LEASE_CHILD"
 
-// TestOpenRegularLeaseChild is the child of TestOpenRegularLease: it opens the leased file.
 func TestOpenRegularLeaseChild(t *testing.T) {
 	path := os.Getenv(leaseChildEnv)
 	if path == "" {
@@ -437,8 +432,6 @@ func TestOpenRegularLeaseChild(t *testing.T) {
 	t.Logf("CHILD DONE: %v", err)
 }
 
-// A write lease makes another process's open wait for the lease break time; OpenRegular must fail
-// at once instead.
 func TestOpenRegularLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "leased")
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {

@@ -168,7 +168,7 @@ func TestRenderEscapesUntrustedText(t *testing.T) {
 	aud.Findings[2].Risk = audit.RiskHigh
 	aud.Findings[3].Package.Name = "a~b~c"
 	aud.Findings[3].Package.Version = "ev\u202eil\u200bx"
-	aud.Findings[3].Vulnerability.ID = "\n# Heading" // clean makes the newline a space
+	aud.Findings[3].Vulnerability.ID = "\n# Heading"
 	aud.Findings[3].Vulnerability.URLs = nil
 	aud.Findings[3].Risk = audit.RiskHigh
 	aud.Findings[4].Package.Name = "# deep"
@@ -249,7 +249,6 @@ func TestGaps(t *testing.T) {
 	if strings.Join(codes, " ") != "ORIGIN_UNRESOLVED ORIGIN_UNIDENTIFIED APPDIR_NOT_FOUND IMAGE_ONLY" {
 		t.Fatalf("gaps %v", gaps)
 	}
-	// Without an audit, the Inventory's unresolved origins are still gaps.
 	if gaps := Gaps(hostInventory(), nil, nil); len(gaps) != 3 || gaps[0].Code != problem.OriginUnresolved {
 		t.Fatalf("gaps without an audit %v", gaps)
 	}
@@ -265,8 +264,6 @@ func TestRenderSaysWhenARunWithAuditResultsFailed(t *testing.T) {
 	}
 }
 
-// The verdict of a run without audit results names the error that failed the audit, whatever else
-// went wrong before or besides it.
 func TestVerdictNamesTheErrorThatFailedTheAudit(t *testing.T) {
 	docker := problem.New(problem.Error, problem.DockerUnavailable, "inventory", "the Docker socket did not answer")
 	kernel := problem.New(problem.Error, problem.KernelDataStale, "audit", "the kernel CNA data is too old")
@@ -339,7 +336,6 @@ func TestRenderGroupsCriticalAndHighByVulnerability(t *testing.T) {
 	}
 }
 
-// The host's packages and the kernel come first in a summary, so the limit never hides them.
 func TestRenderSummarizesMediumAndLow(t *testing.T) {
 	up := inventory.KernelUpstreamOriginID("7.3.3")
 	inv := &inventory.Inventory{
@@ -406,8 +402,6 @@ Every low risk finding, with its remediation, is in audit.json.
 	}
 }
 
-// Groups with the same count and name come in the order of their origins, whatever the order
-// of the map they are collected from.
 func TestRenderSummaryTiesFollowTheOrigin(t *testing.T) {
 	inv := &inventory.Inventory{Origins: []inventory.Origin{
 		{ID: "binary:b", Kind: inventory.OriginBinary, Paths: []string{"/opt/x"}},
@@ -447,7 +441,6 @@ func TestRenderGroupsCoverageGaps(t *testing.T) {
 	}
 }
 
-// An interrupted run fails every origin it did not scan, with one error; they are one line.
 func TestRenderGroupsNotAuditedOrigins(t *testing.T) {
 	inv := &inventory.Inventory{}
 	aud := &audit.Audit{Status: audit.Partial}

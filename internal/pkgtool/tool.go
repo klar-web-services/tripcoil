@@ -1,5 +1,3 @@
-// Package pkgtool asks the distribution's package manager which installed package owns a file,
-// lists installed packages and compares versions.
 package pkgtool
 
 import (
@@ -11,31 +9,22 @@ import (
 	"strings"
 )
 
-// Package is an installed OS package.
 type Package struct {
 	Name    string `json:"name"`
-	Version string `json:"version"`         // the package manager's format, without the epoch
-	Epoch   string `json:"epoch,omitempty"` // rpm only, when not 0
+	Version string `json:"version"`
+	Epoch   string `json:"epoch,omitempty"`
 	Arch    string `json:"arch,omitempty"`
-	Type    string `json:"type"` // deb, rpm, apk or alpm, as Grype names them
+	Type    string `json:"type"`
 }
 
-// Tool is one distribution's package manager.
 type Tool interface {
-	// Type is deb, rpm, apk or alpm.
 	Type() string
-	// Check fails when the package manager cannot be used (missing, or no readable database).
 	Check(ctx context.Context) error
-	// Owners maps each path that an installed package owns to that package; unowned paths are absent.
 	Owners(ctx context.Context, paths []string) (map[string]Package, error)
-	// Installed lists installed packages matching pattern: a glob for dpkg, an exact name for rpm.
-	// apk and pacman keep one version per package and return nil.
 	Installed(ctx context.Context, pattern string) ([]Package, error)
-	// Compare returns -1, 0 or 1 as version a is lower than, equal to or higher than b.
 	Compare(ctx context.Context, a, b string) (int, error)
 }
 
-// New returns the tool for a package type, or nil for an unknown type.
 func New(packageType string, run Runner) Tool {
 	switch packageType {
 	case "deb":
@@ -50,8 +39,6 @@ func New(packageType string, run Runner) Tool {
 	return nil
 }
 
-// versionPattern keeps a version string from carrying anything into a command line or a Lua
-// expression.
 var versionPattern = regexp.MustCompile(`^[A-Za-z0-9._+~^:-]+$`)
 
 func checkVersions(vs ...string) error {
@@ -80,9 +67,6 @@ func firstLine(b []byte) string {
 	return ""
 }
 
-// onlyUnowned reports whether a failed ownership query's stderr is explained by unowned paths: at
-// least one line matches unowned and every other line matches harmless (which may be nil).
-// Otherwise it also returns the first unexplained line.
 func onlyUnowned(stderr []byte, unowned, harmless *regexp.Regexp) (bool, string) {
 	explained := false
 	for _, l := range lines(stderr) {

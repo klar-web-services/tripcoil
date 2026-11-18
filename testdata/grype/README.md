@@ -1,7 +1,7 @@
 # Grype fixtures
 
-Real output of Grype 0.121.2 (database v6.1.10 built 2026-11-14T06:19:25Z), recorded while Plan 2
-was written. Local paths were replaced with `/var/lib/tripcoil/cache/...`; nothing else was changed.
+Real output of Grype 0.121.2 (database v6.1.10 built 2026-11-14T06:19:25Z). Local paths were
+replaced with `/var/lib/tripcoil/cache/...`; nothing else was changed.
 
 - `report.json`: the top level of a `dir:` scan with four real matches put into its `matches`:
   log4j-core 2.14.1 (KEV and EPSS), Debian's libc6 (CVSS only in the related NVD record), Rocky's

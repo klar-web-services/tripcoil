@@ -11,8 +11,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// kernel matches a kernel by its upstream version against the kernel CNA data (spec section
-// 6.3). Severity, CVSS, EPSS and KEV come from the Grype database, as for every other finding.
 func (au *auditor) kernel(ctx context.Context, o inventory.Origin) {
 	data, err := au.d.Kernel.Load(ctx, au.d.Now(), au.d.MaxAge)
 	if err != nil {
@@ -56,7 +54,7 @@ func (au *auditor) kernel(ctx context.Context, o inventory.Origin) {
 			v.ID = m.CVE
 		}
 		vuln := vulnerability(v, nil)
-		if c := m.CVSS; c != nil { // the CNA's own score, when the database has none
+		if c := m.CVSS; c != nil {
 			if vuln.Severity == "Unknown" {
 				vuln.Severity = Severity(c.Severity)
 			}

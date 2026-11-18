@@ -1,4 +1,3 @@
-// Package cli implements the tripcoil command line.
 package cli
 
 import (
@@ -41,42 +40,29 @@ Usage:
 Run "tripcoil <command> -h" for a command's flags.
 `
 
-// StateDir holds run folders, the cache and the run lock (spec section 4.3).
 const StateDir = "/var/lib/tripcoil"
 
-// deps holds everything the commands take from the outside world, so tests can replace it.
 type deps struct {
-	euid       func() int
-	sudo       string // the prefix for a command in a hint (see setup.Sudo)
-	now        func() time.Time
-	random     io.Reader
-	configPath string
-	stateDir   string
-	collect    func(ctx context.Context, cacheDir string) (*inventory.Inventory, error)
-	audit      func(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir string, cfg config.Config) *audit.Audit
-	facts      func(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error)
-	// agent returns the review agent for the config, or nil when this build cannot review.
-	agent func(cfg config.Config) review.Agent
-	// enterScope runs a manual run again in a transient scope with the service's weights, and
-	// returns its exit code with ran set (see enterScope).
-	enterScope func(args []string) (code int, ran bool, err error)
-	// lowerPriority makes the run as light on the host as a scheduled one (spec section 13).
+	euid          func() int
+	sudo          string
+	now           func() time.Time
+	random        io.Reader
+	configPath    string
+	stateDir      string
+	collect       func(ctx context.Context, cacheDir string) (*inventory.Inventory, error)
+	audit         func(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir string, cfg config.Config) *audit.Audit
+	facts         func(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error)
+	agent         func(cfg config.Config) review.Agent
+	enterScope    func(args []string) (code int, ran bool, err error)
 	lowerPriority func() error
-	// interrupts returns a context that is cancelled by Ctrl-C or SIGTERM.
-	interrupts func() (context.Context, context.CancelFunc)
-	// setup sets the host up (tripcoil setup) and reports whether the review is ready; when it
-	// is, start starts the service after the checks (see setup.Host.Setup). service reports the
-	// service's state. holdSignals keeps SIGHUP, SIGINT and SIGTERM from ending the process
-	// until release.
-	setup       func(o setup.Options, stdout io.Writer) (ready bool, start func() error, err error)
-	service     func() (setup.Service, error)
-	holdSignals func() (release func())
-	doctor      doctorHost
-	// uninstall removes what setup and the installer added (tripcoil uninstall).
-	uninstall func(o setup.UninstallOptions, stdout io.Writer) error
-	// hangups delivers each SIGHUP; after is time.After.
-	hangups func() <-chan struct{}
-	after   func(time.Duration) <-chan time.Time
+	interrupts    func() (context.Context, context.CancelFunc)
+	setup         func(o setup.Options, stdout io.Writer) (ready bool, start func() error, err error)
+	service       func() (setup.Service, error)
+	holdSignals   func() (release func())
+	doctor        doctorHost
+	uninstall     func(o setup.UninstallOptions, stdout io.Writer) error
+	hangups       func() <-chan struct{}
+	after         func(time.Duration) <-chan time.Time
 }
 
 func defaultDeps() deps {
@@ -112,7 +98,6 @@ func holdSignals() func() {
 	return func() { signal.Stop(c) }
 }
 
-// hangups turns SIGHUP into a channel that holds at most one pending reload.
 func hangups() <-chan struct{} {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP)
@@ -128,17 +113,14 @@ func hangups() <-chan struct{} {
 	return out
 }
 
-// hostAgent is the review agent of this machine (spec section 8).
 func hostAgent(cfg config.Config) review.Agent {
 	return agent.New(cfg, StateDir, filepath.Dir(config.DefaultPath))
 }
 
-// Run executes the command line and returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	return dispatch(args, stdout, stderr, defaultDeps())
 }
 
-// dispatch is named so that it cannot clash with the internal/run package.
 func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
@@ -159,7 +141,7 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 		return runDoctor(args[1:], stdout, stderr, d)
 	case "uninstall":
 		return runUninstall(args[1:], stdout, stderr, d)
-	case "sandbox-probe": // hidden: run by Tripcoil itself inside the sandbox (spec section 8.2)
+	case "sandbox-probe":
 		return probe.Main(args[1:], stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintf(stdout, "tripcoil %s\ngrype %s\nprompt %s\n", buildinfo.Version, grype.Version, review.PromptVersion)

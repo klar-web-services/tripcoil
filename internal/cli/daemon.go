@@ -17,7 +17,7 @@ import (
 
 const daemonUsage = `Usage: tripcoil daemon [--check-config]
 
-The service's entrypoint, as root: runs once every interval (spec section 13). SIGTERM or SIGINT
+The service's entrypoint, as root: runs once every interval. SIGTERM or SIGINT
 stops the current run and exits; SIGHUP reloads /etc/tripcoil/tripcoil.yaml. An invalid config
 exits 78, which the service does not restart; a crash (exit 2) is restarted.
 
@@ -89,7 +89,7 @@ func runDaemon(args []string, stdout, stderr io.Writer, d deps) int {
 			}
 			defer unlock()
 			if daemon.Wait(last(), time.Time{}, cfg.Interval.Std(), d.now()) > 0 {
-				return // a manual run finished while this one waited for the lock
+				return
 			}
 			rec, dir, err := execute(ctx, d, cfg, "schedule", false, false, stderr)
 			if err != nil {

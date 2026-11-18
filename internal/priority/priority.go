@@ -1,4 +1,3 @@
-// Package priority makes a run light on the host: nice 10 and the idle IO class (spec section 13).
 package priority
 
 import (
@@ -9,11 +8,8 @@ import (
 	"syscall"
 )
 
-// Nice is the CPU priority of a run, as the service unit's Nice=10.
 const Nice = 10
 
-// CPUWeight and MemoryMax are the service's cgroup settings, which a manual run's transient
-// scope takes too: on cgroup v2, nice orders processes only within their own cgroup.
 const (
 	CPUWeight = 20
 	MemoryMax = "4G"
@@ -60,7 +56,6 @@ func Lower() error {
 
 func lowerThread(tid int) []error {
 	var errs []error
-	// The raw getpriority value is 20 minus the nice value.
 	raw, err := syscall.Getpriority(syscall.PRIO_PROCESS, tid)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("read the CPU priority: %w", err))

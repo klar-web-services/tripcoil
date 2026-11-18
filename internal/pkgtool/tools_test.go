@@ -9,7 +9,6 @@ import (
 
 var ctx = context.Background()
 
-// fakeRunner answers commands from a table; an unexpected command fails the test.
 type fakeRunner struct {
 	t    *testing.T
 	resp map[string]Result
@@ -281,7 +280,7 @@ func TestToolFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, typ, cmd string
 		res            Result
-		installed      string // when set, Installed(installed) is called instead of Owners
+		installed      string
 	}{
 		{"dpkg -S killed", "deb", "dpkg-query -S /usr/sbin/sshd", Result{ExitCode: -1}, ""},
 		{"dpkg -W killed", "deb", "dpkg-query -W -f " + dpkgFormat + " linux-image-*", Result{ExitCode: -1}, "linux-image-*"},
@@ -318,7 +317,7 @@ func TestWarningsAreHarmless(t *testing.T) {
 	for _, tc := range []struct {
 		name, typ, cmd string
 		res            Result
-		installed      string // when set, Installed(installed) is called instead of Owners
+		installed      string
 	}{
 		{"pacman", "alpm", "pacman -Qo /opt/x", Result{Stderr: []byte("warning: config file /etc/pacman.conf, line 36: " +
 			"directive 'TotalDownload' in section 'options' not recognized.\nerror: No package owns /opt/x\n"), ExitCode: 1}, ""},
@@ -370,7 +369,6 @@ func TestPacmanResolvesOnlyTheDirectory(t *testing.T) {
 			ExitCode: 1,
 		},
 	}}
-	// /tmp/evil is a symlink to /usr/bin/bash.
 	realpath := func(p string) (string, error) {
 		if p == "/tmp/evil" {
 			return "/usr/bin/bash", nil

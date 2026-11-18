@@ -31,18 +31,15 @@ for the review the agent's user, the CLI, its credentials (a short prompt, which
 and the sandbox probe. Exits 0 when every check passes, 1 otherwise.
 `
 
-// doctorHost is what tripcoil doctor checks on the machine, so tests can replace it.
 type doctorHost struct {
-	packages func(ctx context.Context) error // the package tool can read its database
-	// docker returns absent when there is no Docker socket, or an error when it does not answer.
+	packages  func(ctx context.Context) error
 	docker    func(ctx context.Context) (absent bool, err error)
-	grype     func(ctx context.Context) error // Grype is cached or can be downloaded (run lock held)
+	grype     func(ctx context.Context) error
 	agentUser func() error
 	findCLI   func(command, name string) (string, error)
 	booted    func() bool
 	bwrap     func() error
-	// check runs the probe and a short prompt in runDir (run lock held); see agent.Host.Check.
-	check func(ctx context.Context, cfg config.Config, runDir string) (string, error)
+	check     func(ctx context.Context, cfg config.Config, runDir string) (string, error)
 }
 
 func hostDoctor(stateDir string) doctorHost {
@@ -105,7 +102,6 @@ func runDoctor(args []string, stdout, stderr io.Writer, d deps) int {
 	return doctor(stdout, d, false)
 }
 
-// doctor runs the checks. starting says that setup starts the service after them.
 func doctor(stdout io.Writer, d deps, starting bool) int {
 	failed := false
 	pass := func(msg string) { fmt.Fprintf(stdout, "✓ %s\n", msg) }
@@ -167,7 +163,6 @@ func doctor(stdout io.Writer, d deps, starting bool) int {
 		pass("Docker answers.")
 	}
 
-	// Grype and the review's check change the state folder, so a run must not run meanwhile.
 	unlock, err := run.LockContext(ctx, d.stateDir, func() { fmt.Fprintln(stdout, "Waiting for the current run to finish (Ctrl-C stops waiting)...") })
 	if err != nil {
 		failCheck("Cannot take the run lock: "+err.Error(), "")
@@ -208,7 +203,7 @@ func doctor(stdout io.Writer, d deps, starting bool) int {
 		return verdict()
 	}
 	dir := filepath.Join(d.stateDir, "runs", ".doctor")
-	os.RemoveAll(dir) // what a killed doctor left
+	os.RemoveAll(dir)
 	if _, err := run.CreateFolder(d.stateDir, ".doctor"); err != nil {
 		failCheck("Cannot create "+dir+": "+err.Error(), "")
 		return verdict()

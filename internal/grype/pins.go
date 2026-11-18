@@ -1,11 +1,7 @@
-// Package grype installs, runs and parses the pinned Grype release.
 package grype
 
-// Version is the Grype release this Tripcoil release runs. Change it only together with Checksums.
 const Version = "0.121.2"
 
-// Checksums holds the SHA-256 of each official Grype release archive, keyed by "<os>_<arch>".
-// Source: https://github.com/anchore/grype/releases/download/v0.121.2/grype_0.121.2_checksums.txt
 var Checksums = map[string]string{
 	"linux_amd64": "9c8965ced9df657e5e851c14021bae838802f711edd7a48f9bc3c923a8d28f12",
 	"linux_arm64": "d7d2e160255b0f087280feabf6f213cf4c45d475690f3f1fe5dc336eb1037bf0",

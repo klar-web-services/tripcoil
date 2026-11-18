@@ -13,21 +13,17 @@ import (
 	"syscall"
 )
 
-// User is one entry of facts/users.json: an account with a login shell, whether it has a password,
-// and how many authorized SSH keys it has. Never the hashes or the keys themselves.
 type User struct {
 	Name           string   `json:"name"`
 	UID            int      `json:"uid"`
 	Home           string   `json:"home"`
 	Shell          string   `json:"shell"`
-	Password       string   `json:"password"` // set, locked, none, empty (no password at all) or unknown
+	Password       string   `json:"password"`
 	AuthorizedKeys int      `json:"authorizedKeys"`
-	KeyFiles       []string `json:"keyFiles"` // the authorized-keys files that exist
-	// KeysUnread names the authorized-keys files that were not read, and why.
-	KeysUnread []string `json:"keysUnread,omitempty"`
+	KeyFiles       []string `json:"keyFiles"`
+	KeysUnread     []string `json:"keysUnread,omitempty"`
 }
 
-// maxKeysFile is the most read of one authorized-keys file.
 const maxKeysFile = 1 << 20
 
 func (c collector) users() ([]User, error) {
@@ -84,8 +80,6 @@ func (c collector) users() ([]User, error) {
 	return out, nil
 }
 
-// loginShell reports whether an account can log in: its shell is listed in /etc/shells, or, when
-// that file is missing, is not one of the shells that refuse a login.
 func loginShell(shell string, shells map[string]bool) bool {
 	if shell == "" {
 		return false
@@ -100,8 +94,6 @@ func loginShell(shell string, shells map[string]bool) bool {
 	return true
 }
 
-// passwordState reads the password field of passwd and shadow: "x" in passwd means shadow holds it,
-// and without a shadow entry the state is unknown.
 func passwordState(passwdField, shadowField string, inShadow bool) string {
 	p := passwdField
 	if p == "x" {
@@ -121,7 +113,6 @@ func passwordState(passwdField, shadowField string, inShadow bool) string {
 	return "set"
 }
 
-// authorizedKeysFiles reads AuthorizedKeysFile from sshd -T, or sshd's default.
 func authorizedKeysFiles(sshdT string) []string {
 	for _, l := range strings.Split(sshdT, "\n") {
 		if v, ok := strings.CutPrefix(l, "authorizedkeysfile "); ok {
@@ -131,8 +122,6 @@ func authorizedKeysFiles(sshdT string) []string {
 	return []string{".ssh/authorized_keys", ".ssh/authorized_keys2"}
 }
 
-// expandKeysFile expands sshd's tokens (%h, %u, %U, %%) and makes a relative path relative to the
-// home directory. It is "" for a path it cannot expand, or "none".
 func expandKeysFile(spec string, u User) string {
 	if spec == "none" {
 		return ""
@@ -206,7 +195,7 @@ func (c collector) openKeys(p string, types map[int]string) (*os.File, string) {
 		next, err := syscall.Openat(fd, part, oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 		syscall.Close(fd)
 		if err != nil {
-			return nil, "" // no such file
+			return nil, ""
 		}
 		fd = next
 		// A new mount: read the table again, because the kernel reuses a freed mount's ID, which a
@@ -240,10 +229,8 @@ func (c collector) openKeys(p string, types map[int]string) (*os.File, string) {
 	return f, ""
 }
 
-// oPath is O_PATH: a descriptor that only names a file, whose open never reads it.
 const oPath = 0x200000
 
-// mountCheck says why a descriptor's file system is not read, or is "".
 func mountCheck(fd int, types map[int]string) string {
 	id, ok := mountID(fd)
 	typ := types[id]
@@ -260,7 +247,6 @@ func mountCheck(fd int, types map[int]string) string {
 	return ""
 }
 
-// mountID reads a descriptor's mount ID from /proc/self/fdinfo.
 func mountID(fd int) (int, bool) {
 	data, err := os.ReadFile("/proc/self/fdinfo/" + strconv.Itoa(fd))
 	if err != nil {
@@ -275,8 +261,6 @@ func mountID(fd int) (int, bool) {
 	return 0, false
 }
 
-// mountTypes maps mount IDs to file system types, from mountinfo (Deps.MountInfo, by default
-// /proc/self/mountinfo). It is empty when mountinfo cannot be read, so nothing is read then.
 func (c collector) mountTypes() map[int]string {
 	path := c.d.MountInfo
 	if path == "" {
@@ -300,8 +284,6 @@ func (c collector) mountTypes() map[int]string {
 	return out
 }
 
-// remoteFS reports whether a file system is served by a user's daemon or over the network: a lookup
-// on it can block root's run for as long as the daemon or the server wants.
 func remoteFS(fs string) bool {
 	switch {
 	case fs == "fuse", fs == "fuseblk", strings.HasPrefix(fs, "fuse."):
@@ -314,6 +296,5 @@ func remoteFS(fs string) bool {
 	return false
 }
 
-// pseudoFS are the kernel's file systems, whose files are not users' keys.
 var pseudoFS = map[string]bool{"proc": true, "sysfs": true, "debugfs": true, "tracefs": true, "securityfs": true, "cgroup": true,
 	"cgroup2": true, "configfs": true, "bpf": true, "efivarfs": true, "pstore": true, "devtmpfs": true}

@@ -47,9 +47,6 @@ func TestCopyVerified(t *testing.T) {
 	}
 }
 
-// Root reads files that unprivileged users control. None of these may block or run forever: a
-// FIFO, a device, a link to one, a kernel file that blocks when read (/proc/kmsg, trace_pipe), a
-// directory.
 func TestFileReadsNeverHang(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "fifo")
@@ -100,11 +97,10 @@ func TestCopyVerifiedLimits(t *testing.T) {
 	scanFileCap = old
 	oldSpace := cacheSpace
 	defer func() { cacheSpace = oldSpace }()
-	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + 50, 10000, nil } // floor 1000
+	cacheSpace = func(string) (uint64, uint64, error) { return 1000 + 50, 10000, nil }
 	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); !errors.Is(err, errCacheFull) {
 		t.Fatalf("copy into a full cache: %v", err)
 	}
-	// The floor is a tenth of the file system, but at most 4 GiB.
 	cacheSpace = func(string) (uint64, uint64, error) { return maxCacheFloor + 100, 1 << 50, nil }
 	if err := copyVerified(context.Background(), budget(), src, openPath(src), sumOf(string(make([]byte, 100))), filepath.Join(t.TempDir(), "big")); err != nil {
 		t.Fatalf("copy above a 4 GiB floor: %v", err)
@@ -118,8 +114,6 @@ func TestCopyVerifiedLimits(t *testing.T) {
 	}
 }
 
-// A file that shrinks after its size was read changed: what is left of it is never hashed or
-// read as the file.
 func TestFileShrinksWhileRead(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "package-lock.json")
 	real := openFile
@@ -147,7 +141,6 @@ func TestHashFile(t *testing.T) {
 	}
 }
 
-// files writes a tree of files below a new directory and returns it.
 func files(t *testing.T, tree map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -163,5 +156,4 @@ func files(t *testing.T, tree map[string]string) string {
 	return root
 }
 
-// budget is a run's whole read budget.
 func budget() *readBudget { return &readBudget{left: maxRunReadBytes} }

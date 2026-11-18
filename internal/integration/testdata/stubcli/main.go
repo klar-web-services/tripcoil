@@ -1,10 +1,3 @@
-// stubcli stands in for the agent CLIs in the sandbox tests. Installed as claude or codex, it
-// answers --version, and otherwise tries a few things the sandbox must allow or stop, writes a
-// marker into its home, and confirms every finding: the first in its final output, in the CLI's
-// format, the rest in entries.jsonl in its home, after a broken line and a duplicate of the first.
-// /etc/tripcoil-stub selects another behaviour: "sleep" (run past the timeout) or "auth" (no
-// credentials). tripcoil doctor's connectivity check gets {"ok":true}. Run as "stubcli listen <addr>" or "stubcli dns <listen> <upstream>", it is a TCP
-// listener or a UDP DNS forwarder for the tests.
 package main
 
 import (
@@ -66,7 +59,6 @@ func main() {
 	fmt.Println(string(env))
 }
 
-// review tries what the tests check and confirms every finding in audit.json.
 func review() map[string]any {
 	var checks []string
 	err := os.WriteFile("/etc/tripcoil-stub-wrote", []byte("x"), 0o644)
@@ -171,7 +163,6 @@ func listen(addr string) {
 	}
 }
 
-// forward relays DNS queries over UDP to upstream, one at a time.
 func forward(addr, upstream string) {
 	pc, err := net.ListenPacket("udp", addr)
 	if err != nil {

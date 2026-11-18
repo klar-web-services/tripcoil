@@ -1,7 +1,3 @@
-// Package probe is the sandbox probe (spec section 8.2): before each review, Tripcoil runs itself
-// in the identical sandbox, and the probe tries what the agent must not be able to do. Root
-// prepares files the agent may read outside the sandbox and a listener on every address; the
-// probe must be blocked from each.
 package probe
 
 import (
@@ -20,22 +16,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Args is what root passes to the probe, as JSON in its one argument.
 type Args struct {
-	Reads   []string `json:"reads"`   // files the agent could read without the sandbox
-	Writes  []string `json:"writes"`  // files it could create without the sandbox, in a folder of its group
-	Private []string `json:"private"` // files in folders anyone may write to, which must not show on the host
-	Home    string   `json:"home"`    // the per-review home: it must be a tmpfs the agent can write to
-	Runs    string   `json:"runs"`    // the runs folder, which may show only RunID
-	RunID   string   `json:"runId"`   //
-	RootPID int      `json:"rootPid"` // Tripcoil's PID, whose command line must stay unreadable
-	TCP     []string `json:"tcp"`     // host:port where root listens; a connect must be refused at once
-	UDP     []string `json:"udp"`     // host:port a datagram must not leave for (EPERM)
-	// ClearKeyrings empties the user's keyrings first: only ever for the agent's user.
-	ClearKeyrings bool `json:"clearKeyrings"`
+	Reads         []string `json:"reads"`
+	Writes        []string `json:"writes"`
+	Private       []string `json:"private"`
+	Home          string   `json:"home"`
+	Runs          string   `json:"runs"`
+	RunID         string   `json:"runId"`
+	RootPID       int      `json:"rootPid"`
+	TCP           []string `json:"tcp"`
+	UDP           []string `json:"udp"`
+	ClearKeyrings bool     `json:"clearKeyrings"`
 }
 
-// Check is one attempt and its outcome.
 type Check struct {
 	Check   string `json:"check"`
 	Target  string `json:"target"`
@@ -43,8 +36,6 @@ type Check struct {
 	Blocked bool   `json:"blocked"`
 }
 
-// refusedWithin is how fast a blocked TCP connect fails: the table answers with a reset at once,
-// while a dropped or unanswered SYN only times out.
 const refusedWithin = time.Second
 
 // Run makes every attempt, as the agent's user inside the sandbox. With ClearKeyrings it first
@@ -73,7 +64,7 @@ func Run(a Args) []Check {
 		}
 		out = append(out, fileCheck("write", p, err))
 	}
-	for _, p := range a.Private { // whether they show on the host, root checks (Setup.Leaked)
+	for _, p := range a.Private {
 		err := os.WriteFile(p, []byte("tripcoil sandbox probe\n"), 0o600)
 		c := fileCheck("write", p, err)
 		c.Blocked = true
@@ -110,9 +101,6 @@ func Run(a Args) []Check {
 	return out
 }
 
-// homeCheck passes when the home is a tmpfs, which bounds what the agent writes there, and the
-// agent can write to it. A Tripcoil running in a mount namespace of its own mounts the tmpfs where
-// the sandbox does not see it.
 func homeCheck(home string) Check {
 	c := Check{Check: "home", Target: home}
 	var st unix.Statfs_t
@@ -130,11 +118,10 @@ func homeCheck(home string) Check {
 		return c
 	}
 	os.Remove(p)
-	c.Result, c.Blocked = "a tmpfs it can write to", true // "blocked" here means the check passed
+	c.Result, c.Blocked = "a tmpfs it can write to", true
 	return c
 }
 
-// fileCheck counts a permission, read-only or not-found error as blocked.
 func fileCheck(check, target string, err error) Check {
 	c := Check{Check: check, Target: target, Result: "succeeded"}
 	if err != nil {
@@ -145,8 +132,6 @@ func fileCheck(check, target string, err error) Check {
 	return c
 }
 
-// tcpCheck counts a connect to root's live listener as blocked only when it fails at once with a
-// reset or the local drop's error.
 func tcpCheck(target string) Check {
 	c := Check{Check: "tcp", Target: target}
 	start := time.Now()
@@ -162,7 +147,6 @@ func tcpCheck(target string) Check {
 	return c
 }
 
-// udpCheck counts a datagram as blocked only when sending it fails with the local drop's EPERM.
 func udpCheck(target string) Check {
 	c := Check{Check: "udp", Target: target}
 	conn, err := net.Dial("udp", target)
@@ -187,8 +171,6 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// Main is the hidden command tripcoil sandbox-probe: it reads Args from its argument and prints
-// the checks as JSON.
 func Main(args []string, stdout, stderr io.Writer) int {
 	var a Args
 	if len(args) != 1 || json.Unmarshal([]byte(args[0]), &a) != nil {
@@ -200,7 +182,6 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// Failures returns what the probe was not blocked from, or why its output cannot be read.
 func Failures(a Args, output []byte) []string {
 	var checks []Check
 	if err := json.Unmarshal(output, &checks); err != nil {
@@ -212,7 +193,6 @@ func Failures(a Args, output []byte) []string {
 			out = append(out, fmt.Sprintf("%s %s: %s", c.Check, c.Target, c.Result))
 		}
 	}
-	// Every check must have run: a probe that stopped early proves nothing.
 	if want := len(a.Reads) + len(a.Writes) + len(a.Private) + len(a.TCP) + len(a.UDP) + btoi(a.Runs != "") + btoi(a.RootPID > 0) + btoi(a.Home != ""); len(checks) != want {
 		out = append(out, fmt.Sprintf("the probe made %d checks, expected %d", len(checks), want))
 	}

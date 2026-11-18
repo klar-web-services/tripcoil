@@ -1,5 +1,3 @@
-// Package setup configures the host for Tripcoil (tripcoil setup) and checks it (tripcoil doctor):
-// the agent's user, the config file and the service (spec sections 3, 9 and 13).
 package setup
 
 import (
@@ -9,7 +7,6 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
-// Manager is the host's service manager.
 type Manager string
 
 const (
@@ -17,14 +14,12 @@ const (
 	OpenRC  Manager = "openrc"
 )
 
-// Paths of the service files.
 const (
 	UnitPath       = "/etc/systemd/system/tripcoil.service"
 	InitScriptPath = "/etc/init.d/tripcoil"
 	ConfDPath      = "/etc/conf.d/tripcoil"
 )
 
-// File is a file setup writes.
 type File struct {
 	Path string
 	Data string
@@ -95,7 +90,6 @@ reload() {
 }
 `
 
-// confD holds the service's cgroup settings, which OpenRC applies on cgroup v2.
 const confD = `# Installed by tripcoil setup; running it again rewrites this file.
 rc_cgroup_settings="
 cpu.weight %d
@@ -103,7 +97,6 @@ memory.max %d
 "
 `
 
-// ServiceFiles are the service files for the binary at exe.
 func ServiceFiles(m Manager, exe string) []File {
 	if m == Systemd {
 		return []File{{UnitPath, fmt.Sprintf(unit, exe, priority.Nice, priority.CPUWeight, priority.MemoryMax), 0o644}}
@@ -115,10 +108,8 @@ func ServiceFiles(m Manager, exe string) []File {
 	}
 }
 
-// EnvFilePath is the token file the written config names in review.envFile.
 const EnvFilePath = "/etc/tripcoil/agent.env"
 
-// defaultConfig is the config setup writes, the defaults of spec section 10 with the chosen agent.
 const defaultConfig = `# Tripcoil's configuration. After a change: run tripcoil doctor as root, then restart or reload the service.
 version: 1
 interval: 6h
@@ -139,5 +130,4 @@ retention:
   keepRuns: 30             # the last reviewed run is always kept as well
 `
 
-// DefaultConfig is the config file for agent.
 func DefaultConfig(agent string) string { return fmt.Sprintf(defaultConfig, agent) }

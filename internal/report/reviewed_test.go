@@ -85,7 +85,6 @@ func TestReviewVerdict(t *testing.T) {
 	}
 }
 
-// AC-14: a review that addresses 20 of 200 findings and finds none exploitable is never green.
 func TestRenderPartialReviewIsNeverGreen(t *testing.T) {
 	aud := &audit.Audit{Status: audit.Complete, Grype: audit.GrypeInfo{Version: "0.121.2"}}
 	rev := &review.Review{Summary: "s", NotReviewed: []string{}}
@@ -149,7 +148,7 @@ func TestRenderReviewedLowerPriorityConditional(t *testing.T) {
 	}
 	mix := hostReview()
 	mix.Findings = append(mix.Findings[:0:0], mix.Findings...)
-	mix.Findings[0] = entry("f:0000000000000001", review.Conditional, "scheduled") // the exploitable one, now lower priority
+	mix.Findings[0] = entry("f:0000000000000001", review.Conditional, "scheduled")
 	mix.Findings[3] = entry("f:0000000000000003", review.Conditional, "none")
 	r := record(map[string]string{"inventory": "ok", "audit": "ok", "review": "ok"})
 	got := Render(Input{Run: r, Inventory: hostInventory(), Audit: hostAudit(), Review: mix})
@@ -167,7 +166,6 @@ func TestRenderReviewedLowerPriorityConditional(t *testing.T) {
 		t.Errorf("lower priority section:\n%s", got)
 	}
 
-	// Only lower-priority conditional findings: the verdict falls through.
 	only := &review.Review{Summary: "s", NotReviewed: []string{}}
 	aud := &audit.Audit{Status: audit.Complete, Grype: audit.GrypeInfo{Version: "0.121.2"}}
 	for i, p := range []string{"scheduled", "none", ""} {

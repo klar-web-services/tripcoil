@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// ParseCgroup returns the unified (v2) path from /proc/<pid>/cgroup, or the name=systemd path
-// when the unified path is missing or "/" (a v1 host, also one where cgroup2 was mounted).
 func ParseCgroup(data []byte) string {
 	var unified, systemd string
 	for _, line := range strings.Split(string(data), "\n") {
@@ -29,8 +27,6 @@ func ParseCgroup(data []byte) string {
 
 var dockerID = regexp.MustCompile(`(?m)(?:/docker-|/docker/)([0-9a-f]{64})(?:\.scope)?(?:/|$)`)
 
-// userManager matches a user's own systemd tree, which the user can write to: rootless Docker,
-// or a cgroup named like a container that anyone can create there.
 var userManager = regexp.MustCompile(`/user@[^/]*\.service/`)
 
 // nestedRuntime matches another runtime's tree (LXC/LXD/Incus, Proxmox CTs, systemd-nspawn): a
@@ -38,13 +34,8 @@ var userManager = regexp.MustCompile(`/user@[^/]*\.service/`)
 // host's Docker run with cgroup-parent machine.slice still counts.
 var nestedRuntime = regexp.MustCompile(`/(lxc\.payload\.[^/]+|lxc/[^/]+|machine\.slice/[^/]+)/`)
 
-// UserManaged reports whether /proc/<pid>/cgroup content puts the process below a user's own
-// systemd tree.
 func UserManaged(cgroup string) bool { return userManager.MatchString(cgroup) }
 
-// DockerContainerID returns the Docker container ID in /proc/<pid>/cgroup content (systemd or
-// cgroupfs driver, any line, so hybrid hosts work too), or "". A Docker path
-// below a user's own systemd tree or another runtime's container never counts.
 func DockerContainerID(cgroup string) string {
 	for _, line := range strings.Split(cgroup, "\n") {
 		m := dockerID.FindStringSubmatchIndex(line)
@@ -56,7 +47,6 @@ func DockerContainerID(cgroup string) string {
 	return ""
 }
 
-// SystemdUnit returns the deepest systemd service in a cgroup path, or "".
 func SystemdUnit(cgroup string) string {
 	parts := strings.Split(cgroup, "/")
 	for i := len(parts) - 1; i >= 0; i-- {

@@ -8,47 +8,40 @@ import (
 	"time"
 )
 
-// Report is what Tripcoil takes from one Grype JSON report.
 type Report struct {
-	DBBuilt time.Time
-	// Distro is the distribution Grype detected, such as debian, whether or not its database has
-	// data for it; "" when Grype saw none.
+	DBBuilt       time.Time
 	Distro        string
-	DistroVersion string // such as 12.15
+	DistroVersion string
 	Matches       []Match
 }
 
-// Match is one vulnerability matched in one package.
 type Match struct {
 	Vulnerability Vulnerability
-	Related       []Vulnerability // the same vulnerability under other IDs, such as the CVE of a DSA
+	Related       []Vulnerability
 	Artifact      Artifact
 }
 
-// Vulnerability is a vulnerability record as Grype reports it.
 type Vulnerability struct {
 	ID             string
-	Namespace      string // such as debian:distro:debian:12
+	Namespace      string
 	Severity       string
 	Description    string
 	URLs           []string
 	FixState       string
 	FixVersions    []string
 	CVSS           []CVSS
-	EPSS           float64 // the highest EPSS score listed
-	KnownExploited bool    // listed in CISA KEV
+	EPSS           float64
+	KnownExploited bool
 }
 
-// CVSS is one CVSS score.
 type CVSS struct {
 	Score  float64
 	Vector string
 }
 
-// Artifact is the matched package.
 type Artifact struct {
 	Name, Version, Type, PURL string
-	CPEs                      []string // CPE 2.3 formatted strings
+	CPEs                      []string
 	Locations                 []string
 }
 
@@ -179,8 +172,6 @@ func Parse(r io.Reader) (*Report, error) {
 	return &rep, nil
 }
 
-// members reads a JSON object from dec and calls member with each of its keys; member reads the
-// key's value.
 func members(dec *json.Decoder, member func(key string) error) error {
 	if err := delim(dec, '{'); err != nil {
 		return err
@@ -190,7 +181,7 @@ func members(dec *json.Decoder, member func(key string) error) error {
 		if err != nil {
 			return err
 		}
-		key, _ := tok.(string) // Token gives an object's keys as strings
+		key, _ := tok.(string)
 		if err := member(key); err != nil {
 			return err
 		}
@@ -198,8 +189,6 @@ func members(dec *json.Decoder, member func(key string) error) error {
 	return delim(dec, '}')
 }
 
-// elements reads a JSON array from dec and calls element for each of its elements, which element
-// reads.
 func elements(dec *json.Decoder, element func() error) error {
 	if err := delim(dec, '['); err != nil {
 		return err
@@ -223,7 +212,6 @@ func delim(dec *json.Decoder, want json.Delim) error {
 	return nil
 }
 
-// skip reads past the next value of dec, holding at most one element of an array at a time.
 func skip(dec *json.Decoder) error {
 	tok, err := dec.Token()
 	if err != nil {

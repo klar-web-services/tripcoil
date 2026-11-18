@@ -29,7 +29,7 @@ func TestElems(t *testing.T) {
 	want := []nftables.SetElement{
 		{Key: []byte{10, 0, 0, 0}}, {Key: []byte{11, 0, 0, 0}, IntervalEnd: true},
 		{Key: []byte{203, 0, 113, 7}}, {Key: []byte{203, 0, 113, 8}, IntervalEnd: true},
-		{Key: netip.MustParseAddr("ff00::").AsSlice()}, // runs to the end of the address space
+		{Key: netip.MustParseAddr("ff00::").AsSlice()},
 		{Key: []byte{224, 0, 0, 0}}, {Key: []byte{240, 0, 0, 0}, IntervalEnd: true},
 	}
 	if len(got) != len(want) {

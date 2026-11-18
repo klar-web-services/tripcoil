@@ -10,18 +10,15 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/osrel"
 )
 
-// maxNamed is how many units or containers a remediation line names before it says how many more.
 const maxNamed = 5
 
-// remediation writes the one remediation line of each finding (spec section 6.6). It never
-// invents versions or replacement packages: every version comes from the vulnerability data.
 type remediation struct {
 	family  osrel.Family
-	version string // the distribution's VERSION_ID
-	init    string // the host's init system
+	version string
+	init    string
 	origins map[string]inventory.Origin
-	users   map[string][]inventory.Item // the items of each origin
-	kernel  map[string]bool             // the kernel item's origins
+	users   map[string][]inventory.Item
+	kernel  map[string]bool
 }
 
 func newRemediation(family osrel.Family, inv *inventory.Inventory) remediation {
@@ -40,7 +37,6 @@ func newRemediation(family osrel.Family, inv *inventory.Inventory) remediation {
 	return r
 }
 
-// itemIDs returns the IDs of the items an origin belongs to.
 func (r remediation) itemIDs(origin string) []string {
 	ids := []string{}
 	for _, it := range r.users[origin] {
@@ -98,9 +94,6 @@ func (r remediation) line(f Finding) string {
 	return fmt.Sprintf("Upgrade %s to %s.", f.Package.Name, fix)
 }
 
-// fixVersion names the smallest fix version above the installed one, "or later", and the other
-// fix versions above it, which fix other branches, and true. When none is above it, or the
-// installed version is unknown, it is every fix version, as Grype lists them.
 func fixVersion(f Finding) (string, bool) {
 	installed, typ := f.Package.Version, f.Package.Type
 	// Debian's fixed versions are its source packages', which have no epoch where the binary
@@ -191,7 +184,6 @@ func (r remediation) restart(origin string) string {
 	return ", then restart " + list(all)
 }
 
-// recreate names how to recreate the containers of an image origin.
 func (r remediation) recreate(origin string) string {
 	var how []string
 	for _, it := range r.users[origin] {
@@ -214,7 +206,6 @@ func (r remediation) recreate(origin string) string {
 	return "the containers " + list(how)
 }
 
-// Compose's own name rules, and an absolute path without shell syntax.
 var (
 	composeProject = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	composeService = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
@@ -299,7 +290,6 @@ func (r remediation) packageUpgrade(pkg string) string {
 	return ""
 }
 
-// systemUpgrade is the command that upgrades the whole system, which brings a new kernel.
 func (r remediation) systemUpgrade() string {
 	switch r.family {
 	case osrel.Debian, osrel.Ubuntu:

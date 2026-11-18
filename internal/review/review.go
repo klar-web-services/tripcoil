@@ -1,5 +1,3 @@
-// Package review holds what the AI Review shares between the agent adapters: the prompt, the
-// output schema, review.json, its validation, and carrying a review forward (spec section 8).
 package review
 
 import (
@@ -13,7 +11,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
-// PromptVersion is the prompt's version (spec section 8.4). Change it with any change to the prompt
+// PromptVersion is the prompt's version. Change it with any change to the prompt
 // or the schema: it is part of the change check's fingerprint.
 const PromptVersion = "3"
 
@@ -30,7 +28,6 @@ var Prompt string
 //go:embed schema.json
 var Schema []byte
 
-// Verdicts and the other values of review.json (spec section 8.5).
 const (
 	Confirmed     = "confirmed"
 	Corrected     = "corrected"
@@ -49,17 +46,14 @@ var (
 	priorities     = []string{"now", "soon", "scheduled", "none"}
 )
 
-// Review is review.json.
 type Review struct {
 	SchemaVersion string   `json:"schemaVersion"`
 	Summary       string   `json:"summary"`
 	Findings      []Entry  `json:"findings"`
 	CoverageNotes []string `json:"coverageNotes"`
-	// NotReviewed lists the audit findings the agent did not address, by ID.
-	NotReviewed []string `json:"notReviewed"`
+	NotReviewed   []string `json:"notReviewed"`
 }
 
-// Entry is the review of one finding, or a finding the agent added.
 type Entry struct {
 	FindingID      string       `json:"findingId"`
 	Verdict        string       `json:"verdict"`
@@ -70,11 +64,10 @@ type Entry struct {
 	Fix            []string     `json:"fix,omitempty"`
 	Sources        []string     `json:"sources,omitempty"`
 	Corrections    []Correction `json:"corrections,omitempty"`
-	Item           string       `json:"item,omitempty"`          // added findings
-	Vulnerability  string       `json:"vulnerability,omitempty"` // added findings
+	Item           string       `json:"item,omitempty"`
+	Vulnerability  string       `json:"vulnerability,omitempty"`
 }
 
-// Correction is one field the agent corrected.
 type Correction struct {
 	Field string `json:"field"`
 	Old   string `json:"old"`
@@ -82,7 +75,6 @@ type Correction struct {
 	Why   string `json:"why"`
 }
 
-// Load reads a run's review.json.
 func Load(runDir string) (*Review, error) {
 	data, err := os.ReadFile(filepath.Join(runDir, "review.json"))
 	if err != nil {
@@ -95,9 +87,6 @@ func Load(runDir string) (*Review, error) {
 	return &r, nil
 }
 
-// Carry returns an earlier run's review for this run's findings (spec section 8.6): entries for
-// findings that no longer exist, or added findings whose item no longer runs, are dropped, and the
-// findings it does not address are not reviewed.
 func Carry(prev *Review, aud *audit.Audit, inv *inventory.Inventory) *Review {
 	ids, items := findingIDs(aud), itemIDs(inv)
 	out := &Review{SchemaVersion: "1", Summary: prev.Summary, Findings: []Entry{}, CoverageNotes: prev.CoverageNotes}
@@ -133,7 +122,6 @@ func itemIDs(inv *inventory.Inventory) map[string]bool {
 	return out
 }
 
-// notReviewed lists the audit findings without an entry, sorted.
 func notReviewed(aud *audit.Audit, entries []Entry) []string {
 	done := map[string]bool{}
 	for _, e := range entries {
@@ -151,7 +139,6 @@ func notReviewed(aud *audit.Audit, entries []Entry) []string {
 	return out
 }
 
-// Index maps finding IDs to their entries.
 func (r *Review) Index() map[string]Entry {
 	out := map[string]Entry{}
 	if r != nil {

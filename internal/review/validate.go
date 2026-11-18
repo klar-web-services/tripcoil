@@ -13,14 +13,10 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 )
 
-// MaxOutput is the largest agent output Tripcoil reads.
 const MaxOutput = 16 << 20
 
-// ErrInvalid marks agent output that does not parse or does not match the schema
-// (AGENT_OUTPUT_INVALID).
 var ErrInvalid = errors.New("the review does not match the schema")
 
-// agentEntry is an entry as the agent returns it: every key present, some values null.
 type agentEntry struct {
 	FindingID      string       `json:"findingId"`
 	Verdict        string       `json:"verdict"`
@@ -41,32 +37,18 @@ var (
 	correctionKeys = []string{"field", "old", "new", "why"}
 )
 
-// MaxEntriesFile is the largest entries file Tripcoil reads.
 const MaxEntriesFile = 64 << 20
 
-// maxBadLines is how many lines of the entries file that are not entries Tripcoil reads before it
-// ignores the rest.
 const maxBadLines = 10000
 
-// Limits of one entry, so that an entry cannot make Tripcoil, or review.json, huge.
 const (
-	maxEntryLine = 64 << 10 // a line of the entries file
-	maxListItems = 100      // evidence, fix, sources, corrections
+	maxEntryLine = 64 << 10
+	maxListItems = 100
 	maxReasoning = 16 << 10
 )
 
-// EntriesFile is the file in the agent's home where it may write review entries, one JSON object
-// per line, besides those in its final output.
 const EntriesFile = "entries.jsonl"
 
-// Validate turns the agent's output, and the entries it wrote to its entries file, into review.json
-// (spec section 8.5). Output that does not parse or does not match the schema is an error wrapping
-// ErrInvalid. An entry that matches the schema but breaks a rule of review.json is dropped with a
-// warning, as is an entry for a finding that is not in audit.json, a duplicate (the final output's
-// entries come first, then the file's in order), and a line of the file that is not an entry: its
-// finding is then not reviewed, like every finding the agent did not address. A review that
-// addresses none of audit.json's findings is ErrInvalid too: it would otherwise count as a review
-// and be carried forward for review.maxAge.
 func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) (*Review, []problem.Problem, error) {
 	if len(data) > MaxOutput {
 		return nil, nil, fmt.Errorf("%w: it is larger than %d MiB", ErrInvalid, MaxOutput>>20)
@@ -168,7 +150,6 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	return out, warns, nil
 }
 
-// firstReasons quotes the first three dropped entries, so a wrong ID format shows in the error.
 func firstReasons(dropped []string) string {
 	if len(dropped) == 0 {
 		return ""
@@ -176,7 +157,6 @@ func firstReasons(dropped []string) string {
 	return ": " + strings.Join(dropped[:min(3, len(dropped))], "; ")
 }
 
-// shorten cuts an ID the agent wrote to at most 80 bytes for a message.
 func shorten(id string) string {
 	if len(id) > 80 {
 		return strings.ToValidUTF8(id[:80], "") + "…"
@@ -184,7 +164,6 @@ func shorten(id string) string {
 	return id
 }
 
-// decodeEntry decodes one entry, which must have exactly the schema's keys and values.
 func decodeEntry(raw json.RawMessage) (Entry, error) {
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &keys); err != nil {
@@ -237,7 +216,6 @@ func decodeEntry(raw json.RawMessage) (Entry, error) {
 		Item: deref(a.Item), Vulnerability: deref(a.Vulnerability)}, nil
 }
 
-// broken names the rule of spec section 8.5 an entry breaks, or is "".
 func (e Entry) broken() string {
 	switch {
 	case strings.TrimSpace(e.Reasoning) == "":
@@ -256,7 +234,6 @@ func (e Entry) broken() string {
 	return ""
 }
 
-// exactKeys checks that an object has exactly the keys the schema requires.
 func exactKeys(what string, obj map[string]json.RawMessage, keys []string) error {
 	for _, k := range keys {
 		if _, ok := obj[k]; !ok {
@@ -271,7 +248,6 @@ func exactKeys(what string, obj map[string]json.RawMessage, keys []string) error
 	return nil
 }
 
-// strict decodes JSON into v, refusing unknown fields and values of the wrong type.
 func strict(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
