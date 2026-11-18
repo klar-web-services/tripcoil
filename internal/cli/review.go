@@ -123,7 +123,7 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	var rev *review.Review
 	if err == nil {
 		var warns []problem.Problem
-		rev, warns, err = review.Validate(out.Data, r.aud, r.inv)
+		rev, warns, err = review.Validate(out.Data, out.Entries, r.aud, r.inv)
 		rec.Add(warns...)
 		if errors.Is(err, review.ErrInvalid) {
 			err = &review.Failure{Code: problem.AgentOutputInvalid, Message: err.Error()}

@@ -1,6 +1,7 @@
 package review
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -28,7 +29,7 @@ func TestValidateRealOutputs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r, warns, err := Validate(data, aud, inv)
+		r, warns, err := Validate(data, nil, aud, inv)
 		if err != nil || len(warns) != 0 {
 			t.Fatalf("%s: %v %v", name, err, warns)
 		}
@@ -106,14 +107,14 @@ func TestValidateInvalid(t *testing.T) {
 		"only added findings":  output(entry(map[string]any{"findingId": "added:1", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-1", "sources": []string{"https://x"}})),
 	}
 	for name, data := range cases {
-		if _, _, err := Validate(data, aud, inv); !errors.Is(err, ErrInvalid) {
+		if _, _, err := Validate(data, nil, aud, inv); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: got %v, want ErrInvalid", name, err)
 		}
 	}
-	if _, _, err := Validate(output(), aud, inv); err == nil || !strings.Contains(err.Error(), "addresses none of the 3 findings") {
+	if _, _, err := Validate(output(), nil, aud, inv); err == nil || !strings.Contains(err.Error(), "addresses none of the 3 findings") {
 		t.Errorf("an empty review: %v", err)
 	}
-	if _, _, err := Validate(output(entry(map[string]any{"findingId": "CVE-2026-1234"})), aud, inv); err == nil ||
+	if _, _, err := Validate(output(entry(map[string]any{"findingId": "CVE-2026-1234"})), nil, aud, inv); err == nil ||
 		!strings.HasSuffix(err.Error(), "(1 entries dropped: CVE-2026-1234 (audit.json has no such finding))") {
 		t.Errorf("the reasons: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestValidateDropsEntries(t *testing.T) {
 		entry(map[string]any{"findingId": "f:0000000000000009", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-3", "sources": []string{"https://x"}}),
 		entry(map[string]any{"findingId": "added:3", "verdict": "added", "item": "proc:bbbb", "vulnerability": "CVE-2026-4", "sources": []string{"https://nvd.nist.gov/x"}}),
 	)
-	r, warns, err := Validate(data, aud, inv)
+	r, warns, err := Validate(data, nil, aud, inv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestValidateDropsEntries(t *testing.T) {
 }
 
 func TestValidateEmptyAuditNeedsNoEntries(t *testing.T) {
-	r, warns, err := Validate(output(), &audit.Audit{}, &inventory.Inventory{})
+	r, warns, err := Validate(output(), nil, &audit.Audit{}, &inventory.Inventory{})
 	if err != nil || len(warns) != 0 || len(r.Findings) != 0 || len(r.NotReviewed) != 0 {
 		t.Errorf("%v %v %+v", err, warns, r)
 	}
@@ -166,7 +167,7 @@ func TestValidateEmptyAuditNeedsNoEntries(t *testing.T) {
 func TestValidateShortensLongIDs(t *testing.T) {
 	aud, inv := fixtureAudit()
 	long := "f:" + strings.Repeat("x", 100000)
-	_, warns, err := Validate(output(entry(nil), entry(map[string]any{"findingId": long})), aud, inv)
+	_, warns, err := Validate(output(entry(nil), entry(map[string]any{"findingId": long})), nil, aud, inv)
 	if err != nil || len(warns) != 1 || len(warns[0].Message) > 300 {
 		t.Errorf("%v, a warning of %d bytes", err, len(warns[0].Message))
 	}
@@ -174,7 +175,7 @@ func TestValidateShortensLongIDs(t *testing.T) {
 
 func TestValidateFalsePositiveNeedsNoPriority(t *testing.T) {
 	aud, inv := fixtureAudit()
-	r, warns, err := Validate(output(entry(map[string]any{"verdict": "false_positive", "exploitability": nil, "priority": nil, "fix": []string{}})), aud, inv)
+	r, warns, err := Validate(output(entry(map[string]any{"verdict": "false_positive", "exploitability": nil, "priority": nil, "fix": []string{}})), nil, aud, inv)
 	if err != nil || len(warns) != 0 || len(r.Findings) != 1 {
 		t.Fatalf("%v %v %+v", err, warns, r)
 	}
@@ -209,5 +210,72 @@ func TestLoad(t *testing.T) {
 	r, err := Load(dir)
 	if err != nil || r.Index()["f:1"].Reasoning != "r" {
 		t.Errorf("%v %+v", err, r)
+	}
+}
+
+func lines(entries ...map[string]any) []byte {
+	var b []byte
+	for _, e := range entries {
+		data, _ := json.Marshal(e)
+		b = append(append(b, data...), '\n')
+	}
+	return b
+}
+
+func TestValidateMergesTheEntriesFile(t *testing.T) {
+	aud, inv := fixtureAudit()
+	file := append(lines(
+		entry(map[string]any{"reasoning": "from the file"}), // the final output's wins
+		entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": "from the file"}),
+	), "{not json\n\n"...)
+	file = append(file, lines(
+		entry(map[string]any{"findingId": "f:0000000000000003", "cvss": 9.8}),          // wrong keys
+		entry(map[string]any{"findingId": "f:ffffffffffffffff"}),                       // unknown finding
+		entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": "again"}), // a duplicate in the file
+	)...)
+	r, warns, err := Validate(output(entry(nil)), file, aud, inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := r.Index()
+	if len(r.Findings) != 2 || idx["f:0000000000000001"].Reasoning != "nginx listens on 0.0.0.0:443" || idx["f:0000000000000002"].Reasoning != "from the file" {
+		t.Errorf("findings %+v", r.Findings)
+	}
+	if !reflect.DeepEqual(r.NotReviewed, []string{"f:0000000000000003"}) {
+		t.Errorf("not reviewed %v", r.NotReviewed)
+	}
+	if len(warns) != 1 || !strings.HasPrefix(warns[0].Message, "5 review entries were dropped") {
+		t.Fatalf("warnings %+v", warns)
+	}
+	for _, want := range []string{"entries.jsonl line 3 (invalid character", `entries.jsonl line 5 (an entry has the unknown key "cvss")`, "f:ffffffffffffffff (audit.json has no such finding)", "twice"} {
+		if !strings.Contains(warns[0].Message, want) {
+			t.Errorf("the warning lacks %q: %s", want, warns[0].Message)
+		}
+	}
+}
+
+func TestValidateEntriesOnlyInTheFile(t *testing.T) {
+	aud, inv := fixtureAudit()
+	for name, file := range map[string][]byte{
+		"lines":                lines(entry(nil)),
+		"no final line break":  bytes.TrimSuffix(lines(entry(nil)), []byte("\n")),
+		"crlf and blank lines": append([]byte("\r\n\n"), bytes.ReplaceAll(lines(entry(nil)), []byte("\n"), []byte("\r\n"))...),
+	} {
+		r, warns, err := Validate(output(), file, aud, inv)
+		if err != nil || len(warns) != 0 || len(r.Findings) != 1 || len(r.NotReviewed) != 2 {
+			t.Errorf("%s: %v %v %+v", name, err, warns, r)
+		}
+	}
+	for name, file := range map[string][]byte{
+		"missing":       nil,
+		"empty":         {},
+		"only bad":      []byte("x\n"),
+		"only unknown":  lines(entry(map[string]any{"findingId": "f:ffffffffffffffff"})),
+		"only dropped":  lines(entry(map[string]any{"priority": nil})),
+		"only an added": lines(entry(map[string]any{"findingId": "added:1", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-1", "sources": []string{"https://x"}})),
+	} {
+		if _, _, err := Validate(output(), file, aud, inv); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "addresses none") {
+			t.Errorf("%s: got %v, want ErrInvalid", name, err)
+		}
 	}
 }

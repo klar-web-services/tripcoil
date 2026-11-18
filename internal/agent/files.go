@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 )
 
@@ -178,4 +180,44 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+// readEntries reads the entries file the agent may have written to its home, which root reads
+// but the agent controls: it follows no link, opens no pipe or device, and reads at most
+// max bytes. A missing file is no entries; an error says why the file was ignored.
+func readEntries(home, name string, max int64) ([]byte, error) {
+	dir, err := unix.Open(home, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(dir)
+	fd, err := unix.Openat(dir, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	switch {
+	case errors.Is(err, unix.ENOENT):
+		return nil, nil
+	case errors.Is(err, unix.ELOOP):
+		return nil, errors.New("it is a symbolic link")
+	case err != nil:
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), name)
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case !fi.Mode().IsRegular():
+		return nil, fmt.Errorf("it is not a regular file (%v)", fi.Mode().Type())
+	case fi.Size() > max:
+		return nil, fmt.Errorf("it is larger than %d MiB", max>>20)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("it is larger than %d MiB", max>>20)
+	}
+	return data, nil
 }

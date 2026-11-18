@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestFindCLI(t *testing.T) {
@@ -90,5 +91,54 @@ func TestResetHome(t *testing.T) {
 	}
 	if es, _ := os.ReadDir(home); len(es) != 0 {
 		t.Errorf("home not empty: %v", es)
+	}
+}
+
+func TestReadEntries(t *testing.T) {
+	home, outside := t.TempDir(), filepath.Join(t.TempDir(), "secret")
+	os.WriteFile(outside, []byte("root's secret\n"), 0o600)
+	name := "entries.jsonl"
+	path := filepath.Join(home, name)
+
+	if data, err := readEntries(home, name, 100); data != nil || err != nil {
+		t.Errorf("missing: %q %v", data, err)
+	}
+	os.WriteFile(path, []byte("{}\n{}\n"), 0o600)
+	if data, err := readEntries(home, name, 100); string(data) != "{}\n{}\n" || err != nil {
+		t.Errorf("regular: %q %v", data, err)
+	}
+	if data, err := readEntries(home, name, 5); data != nil || err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("over the cap: %q %v", data, err)
+	}
+	os.Remove(path)
+	os.Symlink(outside, path)
+	if data, err := readEntries(home, name, 100); data != nil || err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("symlink: %q %v", data, err)
+	}
+	os.Remove(path)
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if data, err := readEntries(home, name, 100); data != nil || err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("fifo: %q %v", data, err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a fifo blocked the read")
+	}
+	os.Remove(path)
+	os.Mkdir(path, 0o700)
+	if data, err := readEntries(home, name, 100); data != nil || err == nil {
+		t.Errorf("directory: %q %v", data, err)
+	}
+	link := filepath.Join(t.TempDir(), "home")
+	os.Symlink(home, link)
+	if _, err := readEntries(link, name, 100); err == nil {
+		t.Error("a linked home was followed")
 	}
 }

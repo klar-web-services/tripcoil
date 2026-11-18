@@ -102,7 +102,7 @@ func TestLiveSandbox(t *testing.T) {
 		probe, _ := os.ReadFile(filepath.Join(runDir, "agent", "probe.json"))
 		t.Fatalf("%v\nprobe: %s", err, probe)
 	}
-	rev, _, err := review.Validate(out.Data, aud, inv)
+	rev, _, err := review.Validate(out.Data, out.Entries, aud, inv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestLiveReview(t *testing.T) {
 		stderr, _ := os.ReadFile(filepath.Join(runDir, "agent", "stderr"))
 		t.Fatalf("%v\nstderr (end): %s", err, stderr[max(0, len(stderr)-2000):])
 	}
-	rev, warns, err := review.Validate(out.Data, aud, inv)
+	rev, warns, err := review.Validate(out.Data, out.Entries, aud, inv)
 	if err != nil {
 		t.Fatal(err)
 	}

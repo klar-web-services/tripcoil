@@ -174,7 +174,8 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 	rctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	warnings := h.watchNetwork(rctx, cancel, policy)
-	defer func() { out.Warnings = warnings() }()
+	var entryWarns []problem.Problem
+	defer func() { out.Warnings = append(warnings(), entryWarns...) }()
 	stopped := func(err error) error { // why a sandbox run ended early
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -222,6 +223,18 @@ func (h *Host) session(ctx context.Context, runDir, name, prompt string, schema 
 		return out, stopped(nil)
 	}
 	res, err := sb.Run(rctx, rs)
+	if err == nil {
+		// The agent's unit has ended, so nothing changes the file while it is read.
+		data, rerr := readEntries(home, review.EntriesFile, review.MaxEntriesFile)
+		if rerr != nil {
+			entryWarns = append(entryWarns, problem.New(problem.Warning, problem.ReviewEntriesDropped, "review",
+				"the agent's %s was ignored: %v", review.EntriesFile, rerr))
+		}
+		if data != nil {
+			os.WriteFile(filepath.Join(agentDir, review.EntriesFile), data, 0o600)
+		}
+		out.Entries = data
+	}
 	switch {
 	case err != nil:
 		return out, stopped(fail(problem.AgentFailed, "cannot run %s: %v", cli, err))

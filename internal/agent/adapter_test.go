@@ -85,7 +85,7 @@ func TestClaudeParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := review.Validate(data, nil, nil); err != nil {
+	if _, _, err := review.Validate(data, nil, nil, nil); err != nil {
 		t.Errorf("the structured output does not validate: %v", err)
 	}
 	var r map[string]any

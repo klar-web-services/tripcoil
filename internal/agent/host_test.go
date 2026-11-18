@@ -216,6 +216,39 @@ func TestReviewCodexGetsItsSchema(t *testing.T) {
 	}
 }
 
+func TestReviewReadsTheEntriesFile(t *testing.T) {
+	final := fixture(t, "agent/claude-success.json")
+	e := newEnv(t, "claude", func(_ context.Context, s sandbox.Spec) (sandbox.Result, error) {
+		os.WriteFile(filepath.Join(s.Home(), "entries.jsonl"), []byte("{\"findingId\":\"f:1\"}\n"), 0o600)
+		s.Stdout.Write(final)
+		return sandbox.Result{}, nil
+	})
+	out, err := e.h.Review(context.Background(), e.runDir)
+	if err != nil || string(out.Entries) != "{\"findingId\":\"f:1\"}\n" || len(out.Warnings) != 0 {
+		t.Fatalf("%v entries %q warnings %v", err, out.Entries, out.Warnings)
+	}
+	kept, err := os.ReadFile(filepath.Join(e.runDir, "agent", "entries.jsonl"))
+	if fi, _ := os.Stat(filepath.Join(e.runDir, "agent", "entries.jsonl")); err != nil || string(kept) != string(out.Entries) || fi.Mode().Perm() != 0o600 {
+		t.Errorf("agent/entries.jsonl: %q %v", kept, err)
+	}
+
+	secret := filepath.Join(t.TempDir(), "secret")
+	os.WriteFile(secret, []byte("root only"), 0o600)
+	e = newEnv(t, "claude", func(_ context.Context, s sandbox.Spec) (sandbox.Result, error) {
+		os.Symlink(secret, filepath.Join(s.Home(), "entries.jsonl"))
+		s.Stdout.Write(final)
+		return sandbox.Result{}, nil
+	})
+	out, err = e.h.Review(context.Background(), e.runDir)
+	if err != nil || out.Entries != nil || len(out.Warnings) != 1 || out.Warnings[0].Code != problem.ReviewEntriesDropped ||
+		!strings.Contains(out.Warnings[0].Message, "entries.jsonl was ignored: it is a symbolic link") {
+		t.Fatalf("%v entries %q warnings %v", err, out.Entries, out.Warnings)
+	}
+	if _, err := os.Stat(filepath.Join(e.runDir, "agent", "entries.jsonl")); err == nil {
+		t.Error("a linked file was kept")
+	}
+}
+
 func TestReviewFailures(t *testing.T) {
 	cases := []struct {
 		name  string

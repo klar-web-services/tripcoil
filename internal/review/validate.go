@@ -41,13 +41,22 @@ var (
 	correctionKeys = []string{"field", "old", "new", "why"}
 )
 
-// Validate turns the agent's output into review.json (spec section 8.5). Output that does not parse
-// or does not match the schema is an error wrapping ErrInvalid. An entry that matches the schema but
-// breaks a rule of review.json is dropped with a warning, as is an entry for a finding that is not in
-// audit.json or a duplicate: its finding is then not reviewed, like every finding the agent did not
-// address. A review that addresses none of audit.json's findings is ErrInvalid too: it would
-// otherwise count as a review and be carried forward for review.maxAge.
-func Validate(data []byte, aud *audit.Audit, inv *inventory.Inventory) (*Review, []problem.Problem, error) {
+// MaxEntriesFile is the largest entries file Tripcoil reads.
+const MaxEntriesFile = 64 << 20
+
+// EntriesFile is the file in the agent's home where it may write review entries, one JSON object
+// per line, besides those in its final output.
+const EntriesFile = "entries.jsonl"
+
+// Validate turns the agent's output, and the entries it wrote to its entries file, into review.json
+// (spec section 8.5). Output that does not parse or does not match the schema is an error wrapping
+// ErrInvalid. An entry that matches the schema but breaks a rule of review.json is dropped with a
+// warning, as is an entry for a finding that is not in audit.json, a duplicate (the final output's
+// entries come first, then the file's in order), and a line of the file that is not an entry: its
+// finding is then not reviewed, like every finding the agent did not address. A review that
+// addresses none of audit.json's findings is ErrInvalid too: it would otherwise count as a review
+// and be carried forward for review.maxAge.
+func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) (*Review, []problem.Problem, error) {
 	if len(data) > MaxOutput {
 		return nil, nil, fmt.Errorf("%w: it is larger than %d MiB", ErrInvalid, MaxOutput>>20)
 	}
@@ -69,14 +78,30 @@ func Validate(data []byte, aud *audit.Audit, inv *inventory.Inventory) (*Review,
 	if err := strict(top["findings"], &rawEntries); err != nil || rawEntries == nil {
 		return nil, nil, fmt.Errorf("%w: findings must be a list", ErrInvalid)
 	}
-	ids, items := findingIDs(aud), itemIDs(inv)
-	seen := map[string]bool{}
-	var dropped []string
+	var all []Entry
 	for i, raw := range rawEntries {
 		e, err := decodeEntry(raw)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: findings[%d]: %v", ErrInvalid, i, err)
 		}
+		all = append(all, e)
+	}
+	var dropped []string
+	for i, line := range bytes.Split(entries, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		e, err := decodeEntry(line)
+		if err != nil {
+			why := strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
+			dropped = append(dropped, fmt.Sprintf("%s line %d (%s)", EntriesFile, i+1, shorten(why)))
+			continue
+		}
+		all = append(all, e)
+	}
+	ids, items := findingIDs(aud), itemIDs(inv)
+	seen := map[string]bool{}
+	for _, e := range all {
 		why := ""
 		switch {
 		case seen[e.FindingID]:

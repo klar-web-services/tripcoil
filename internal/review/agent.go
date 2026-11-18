@@ -15,6 +15,7 @@ type Agent interface {
 // Output is what an agent returned. Warnings are recorded whether or not the review failed.
 type Output struct {
 	Data     []byte
+	Entries  []byte // the agent's entries file (EntriesFile), if it wrote one
 	CLI      string // the agent CLI and its version, such as "claude 2.1.309"
 	Warnings []problem.Problem
 }
