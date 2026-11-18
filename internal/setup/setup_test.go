@@ -12,19 +12,21 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/config"
 )
 
-// fakeHost is a host in a folder. Commands are recorded; fail names commands that fail (by their
-// first two words), and creating the user makes it exist.
+// fakeHost is a host in a folder. Commands are recorded; fail names commands that fail (by a
+// prefix), replies holds their output, and creating the user, or installing a package, makes it
+// exist. Claude Code is installed unless a test removes it from tools.
 type fakeHost struct {
 	Host
-	cmds  []string
-	fail  map[string]bool
-	tools map[string]bool
-	users map[string]bool
-	out   bytes.Buffer
+	cmds    []string
+	fail    map[string]bool
+	tools   map[string]bool
+	users   map[string]bool
+	replies map[string]string
+	out     bytes.Buffer
 }
 
 func newFake(t *testing.T, m Manager) *fakeHost {
-	f := &fakeHost{fail: map[string]bool{}, tools: map[string]bool{}, users: map[string]bool{}}
+	f := &fakeHost{fail: map[string]bool{}, tools: map[string]bool{"claude": true}, users: map[string]bool{}, replies: map[string]string{}}
 	root := t.TempDir()
 	switch m {
 	case Systemd:
@@ -55,13 +57,25 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 				f.users["group"] = true
 			case c == "apk add bubblewrap":
 				f.tools["bwrap"] = true
+			case slices.Contains([]string{"apk add nodejs npm", "pacman -S --noconfirm --needed nodejs npm", "apt-get install -y nodejs npm",
+				"apt-get install -y nodejs", "dnf install -y nodejs npm", "dnf install -y nodejs"}, c):
+				f.tools["node"], f.tools["npm"] = true, true
+				if _, ok := f.replies["node --version"]; !ok {
+					f.replies["node --version"] = "v22.11.0\n"
+				}
+			case c == "npm install -g @anthropic-ai/claude-code":
+				f.tools["claude"] = true
 			}
 			for k := range f.fail {
 				if strings.HasPrefix(c, k) {
-					return []byte("inactive\n"), errors.New("exit status 3")
+					out, ok := f.replies[c]
+					if !ok {
+						out = "inactive\n"
+					}
+					return []byte(out), errors.New("exit status 3")
 				}
 			}
-			return nil, nil
+			return []byte(f.replies[c]), nil
 		},
 		LookPath: func(n string) (string, error) {
 			if f.tools[n] {
@@ -72,7 +86,14 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 		UserExists:  func(string) bool { return f.users["user"] },
 		GroupExists: func(string) bool { return f.users["group"] || (f.users["user"] && f.tools["useradd"]) },
 		CheckBinary: func(string) error { return nil },
-		Stat:        rootStat,
+		FindCLI: func(command, name string) (string, error) {
+			if f.tools[name] {
+				return "/usr/bin/" + name, nil
+			}
+			return "", errors.New(name + " is not installed")
+		},
+		Fetch: func(url string) ([]byte, error) { return nil, errors.New("no network in tests") },
+		Stat:  rootStat,
 	}
 	return f
 }
@@ -363,21 +384,25 @@ func TestSudo(t *testing.T) {
 }
 
 func TestNextSteps(t *testing.T) {
-	claude := nextSteps("claude", "/etc/tripcoil/agent.env", "sudo ")
+	claude := nextSteps("claude", "/etc/tripcoil/agent.env", "sudo ", false)
 	for _, l := range []string{"sudo npm install -g @anthropic-ai/claude-code", `"claude setup-token"`, "subscription (Pro or Max), not API billing",
 		"  3. Add it to /etc/tripcoil/agent.env as the line CLAUDE_CODE_OAUTH_TOKEN=<token>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(claude, l) {
 			t.Errorf("claude lacks %q:\n%s", l, claude)
 		}
 	}
-	old := nextSteps("codex", "", "")
+	old := nextSteps("codex", "", "", true)
 	for _, l := range []string{"       npm install -g @openai/codex", "per use through the OpenAI API", "Store it root-only as the line CODEX_API_KEY=<key>",
 		"set review.envFile in\n     /etc/tripcoil/tripcoil.yaml", "       install -m 600 /dev/null /etc/tripcoil/agent.env\n       vi /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(old, l) {
 			t.Errorf("codex without envFile lacks %q:\n%s", l, old)
 		}
 	}
-	if !strings.Contains(nextSteps("none", "", ""), "audit-only") {
+	if !strings.Contains(nextSteps("none", "", "", true), "audit-only") {
 		t.Error("none")
+	}
+	installed := nextSteps("claude", "/etc/tripcoil/agent.env", "", true)
+	if strings.Contains(installed, "npm install") || !strings.Contains(installed, "  1. Create a token") || !strings.Contains(installed, "  2. Add it to") {
+		t.Errorf("claude installed:\n%s", installed)
 	}
 }

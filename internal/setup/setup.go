@@ -29,6 +29,9 @@ type Host struct {
 	// UserExists and GroupExists look up the agent's user and group.
 	UserExists  func(name string) bool
 	GroupExists func(name string) bool
+	// FindCLI is agent.FindCLI; Fetch downloads NodeSource's key.
+	FindCLI func(command, name string) (string, error)
+	Fetch   func(url string) ([]byte, error)
 	// CheckBinary checks that the binary is root-owned and writable only by root, with every
 	// folder above it (the service runs it as root).
 	CheckBinary func(path string) error
@@ -51,6 +54,8 @@ func NewHost(exe string, in io.Reader, out io.Writer) Host {
 		UserExists:  func(n string) bool { _, err := user.Lookup(n); return err == nil },
 		GroupExists: func(n string) bool { _, err := user.LookupGroup(n); return err == nil },
 		CheckBinary: func(p string) error { _, err := agent.FindCLI(p, "tripcoil"); return err },
+		FindCLI:     agent.FindCLI,
+		Fetch:       fetch,
 		Stat:        config.OSStat,
 	}
 }
@@ -114,10 +119,11 @@ func (h Host) Setup(o Options) error {
 		return err
 	}
 	note(did, "Created the user and group "+agent.UserName+".", "The user "+agent.UserName+" exists.")
-	name, envFile, did, created, err := h.config(o)
+	c, did, created, err := h.config(o)
 	if err != nil {
 		return err
 	}
+	name, envFile := c.Review.Agent, c.Review.EnvFile
 	wrote := fmt.Sprintf("Wrote %s (review.agent: %s).", config.DefaultPath, name)
 	if created {
 		wrote = fmt.Sprintf("Wrote %s (review.agent: %s) and %s.", config.DefaultPath, name, envFile)
@@ -130,6 +136,14 @@ func (h Host) Setup(o Options) error {
 		}
 		note(did, "Installed bubblewrap.", "bubblewrap is installed.")
 	}
+	installed := true
+	if name == "claude" && c.Review.Command == "" {
+		did, installed, err = h.claudeCode(o)
+		if err != nil {
+			return err
+		}
+		changed = changed || did
+	}
 	did, err = h.service(m)
 	if err != nil {
 		return err
@@ -138,7 +152,7 @@ func (h Host) Setup(o Options) error {
 	if !changed {
 		fmt.Fprintln(h.Out, "Nothing changed.")
 	}
-	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo))
+	fmt.Fprint(h.Out, nextSteps(name, envFile, h.Sudo, installed))
 	return nil
 }
 
@@ -199,19 +213,18 @@ func (h Host) agentUser() (bool, error) {
 
 // config writes the config file when there is none, with the chosen agent, and the empty token
 // file it names, unless that exists. An existing config is kept as it is. Either way the config
-// must be valid; it returns review.agent, review.envFile, and whether it wrote the config and
-// created the token file.
-func (h Host) config(o Options) (string, string, bool, bool, error) {
+// must be valid; it returns it, and whether it wrote the config and created the token file.
+func (h Host) config(o Options) (config.Config, bool, bool, error) {
 	path := h.path(config.DefaultPath)
 	if _, err := os.Lstat(path); err == nil {
 		c, err := h.loadConfig()
 		if err != nil {
-			return "", "", false, false, err
+			return c, false, false, err
 		}
 		if o.Agent != "" && o.Agent != c.Review.Agent {
 			fmt.Fprintf(h.Out, "! --agent %s: %s keeps review.agent: %s; edit it to change the agent.\n", o.Agent, config.DefaultPath, c.Review.Agent)
 		}
-		return c.Review.Agent, c.Review.EnvFile, false, false, nil
+		return c, false, false, nil
 	}
 	name := o.Agent
 	if name == "" {
@@ -219,13 +232,13 @@ func (h Host) config(o Options) (string, string, bool, bool, error) {
 		if !o.Yes {
 			a, err := h.ask("Which agent CLI should review the runs? claude, codex or none", "claude", "claude", "codex", "none")
 			if err != nil {
-				return "", "", false, false, err
+				return config.Config{}, false, false, err
 			}
 			name = a
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", "", false, false, err
+		return config.Config{}, false, false, err
 	}
 	// The token file comes first: should that fail, there is no config yet and a rerun starts over.
 	created := false
@@ -233,16 +246,13 @@ func (h Host) config(o Options) (string, string, bool, bool, error) {
 		f.Close()
 		created = true
 	} else if !errors.Is(err, fs.ErrExist) {
-		return "", "", false, false, err
+		return config.Config{}, false, false, err
 	}
 	if err := os.WriteFile(path, []byte(DefaultConfig(name)), 0o644); err != nil {
-		return "", "", false, false, err
+		return config.Config{}, false, false, err
 	}
 	c, err := h.loadConfig()
-	if err != nil {
-		return "", "", false, false, err
-	}
-	return name, c.Review.EnvFile, true, created, nil
+	return c, true, created, err
 }
 
 // loadConfig reads and validates the config, with its paths under Root.
@@ -384,9 +394,9 @@ func hasService(out []byte) bool {
 	return false
 }
 
-// nextSteps says how to install the agent CLI system-wide and give it credentials in envFile
-// (spec 8.3), and how each agent is billed.
-func nextSteps(name, envFile, sudo string) string {
+// nextSteps says how to install the agent CLI system-wide, unless it is installed, and give it
+// credentials in envFile (spec 8.3), and how each agent is billed.
+func nextSteps(name, envFile, sudo string, installed bool) string {
 	edit := "sudoedit"
 	if sudo == "" {
 		edit = "vi"
@@ -415,13 +425,15 @@ review.agent is none, so reports are audit-only. Check the host: %stripcoil doct
        %sinstall -m 600 /dev/null %s
        %s %s`, line, config.DefaultPath, sudo, EnvFilePath, edit, EnvFilePath)
 	}
-	return fmt.Sprintf(`
-Next, give the review its credentials:
-  1. Install %s
-  2. %s
-  3. %s
-Then check the host: %stripcoil doctor
-`, install, token, store, sudo)
+	steps := []string{"Install " + install, token, store}
+	if installed && name == "claude" {
+		steps = steps[1:]
+	}
+	s := "\nNext, give the review its credentials:\n"
+	for i, step := range steps {
+		s += fmt.Sprintf("  %d. %s\n", i+1, step)
+	}
+	return s + fmt.Sprintf("Then check the host: %stripcoil doctor\n", sudo)
 }
 
 // Service is the tripcoil service's state.
