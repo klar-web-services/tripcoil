@@ -14,7 +14,9 @@ import (
 const setupUsage = `Usage: tripcoil setup [--agent claude|codex|none] [--yes]
 
 Set this host up, as root: the agent's user, /etc/tripcoil/tripcoil.yaml and the tripcoil service
-(systemd or OpenRC), which it starts. Running it again changes nothing that is already set up.
+(systemd or OpenRC), which it starts. For Claude Code it offers to install Node.js 22 and Claude
+Code, and to create the token with claude setup-token; then it runs tripcoil doctor. Running it
+again changes nothing that is already set up.
 
 Flags:
 `

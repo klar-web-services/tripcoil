@@ -27,9 +27,12 @@ sudo tripcoil status    # the service, the last and next run
 sudo tripcoil uninstall # removes what setup and the installer added
 ```
 
-`setup` asks which agent CLI reviews the runs (Claude Code, Codex, or none) and ends by printing
-how to install it system-wide and give it credentials. Claude Code reviews run on your Claude
-subscription through a `claude setup-token` token; Codex needs an OpenAI API key, billed per use.
+Without sudo, as root, drop the `sudo`. `setup` asks which agent CLI reviews the runs (Claude
+Code, Codex, or none). For Claude Code it offers to install Node.js 22 and Claude Code (with apt,
+dnf, pacman or apk; on older Debian, Ubuntu and RHEL from NodeSource's repository), then runs
+`claude setup-token`, saves the token it prints to `/etc/tripcoil/agent.env` and checks the host.
+Claude Code reviews run on your Claude subscription (Pro or Max), not API billing. For Codex,
+`setup` prints how to install it and give it an OpenAI API key, billed per use.
 The review runs the CLI as the unprivileged user `tripcoil-agent` in an OS-enforced sandbox; on
 systemd it needs systemd 247 or later.
 
