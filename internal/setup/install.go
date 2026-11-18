@@ -37,6 +37,9 @@ const (
 	nodeSourceKeyURL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
 	armoredKey       = "-----BEGIN PGP PUBLIC KEY BLOCK-----"
 	claudePackage    = "@anthropic-ai/claude-code"
+	// claudeInstall allows the package's postinstall, which npm 12 blocks by default; without it
+	// claude is a stub that only prints an error.
+	claudeInstall = "npm install -g --allow-scripts=" + claudePackage + " " + claudePackage
 )
 
 // fetch downloads url.
@@ -92,7 +95,7 @@ func (h Host) claudeCode(o Options) (bool, bool, error) {
 		}
 	}
 	fmt.Fprintln(h.Out, "… Installing Claude Code with npm.")
-	if _, err := h.run("npm", "install", "-g", claudePackage); err != nil {
+	if _, err := h.run(strings.Fields(claudeInstall)...); err != nil {
 		return false, false, err
 	}
 	if p, err = h.FindCLI("", "claude"); err != nil {
@@ -201,7 +204,7 @@ func (h Host) planNode() (nodePlan, error) {
 			p.cmds = [][]string{{"dnf", "install", "-y", "nodejs"}}
 		}
 	default:
-		return p, fmt.Errorf("Claude Code needs Node.js 22, and this host has none of apk, pacman, dnf or apt-get; install Node.js 22 or later and npm, then %snpm install -g %s, and run setup again", h.Sudo, claudePackage)
+		return p, fmt.Errorf("Claude Code needs Node.js 22, and this host has none of apk, pacman, dnf or apt-get; install Node.js 22 or later and npm, then %s%s, and run setup again", h.Sudo, claudeInstall)
 	}
 	if p.nodeSource != "" {
 		p.what = fmt.Sprintf("Node.js 22 (NodeSource's %s repository)", strings.TrimSuffix(manager, "-get"))
@@ -219,7 +222,7 @@ func (h Host) nodeSourceArch(amd, arm string) (string, error) {
 	case "arm64":
 		return arm, nil
 	}
-	return "", fmt.Errorf("NodeSource has no Node.js 22 for %s; install Node.js 22 or later and npm, then %snpm install -g %s", runtime.GOARCH, h.Sudo, claudePackage)
+	return "", fmt.Errorf("NodeSource has no Node.js 22 for %s; install Node.js 22 or later and npm, then %s%s", runtime.GOARCH, h.Sudo, claudeInstall)
 }
 
 // tooOld says the distribution's nodejs is too old, or that there is none, which an update
@@ -228,7 +231,7 @@ func (h Host) tooOld(what, version, needs, update string) error {
 	if version == "" {
 		return fmt.Errorf("no nodejs package was found; run %s%s first, then run setup again", h.Sudo, update)
 	}
-	return fmt.Errorf("%s is too old (%s): Claude Code needs Node.js 22 (%s); install Node.js 22 or later and npm, then %snpm install -g %s", what, version, needs, h.Sudo, claudePackage)
+	return fmt.Errorf("%s is too old (%s): Claude Code needs Node.js 22 (%s); install Node.js 22 or later and npm, then %s%s", what, version, needs, h.Sudo, claudeInstall)
 }
 
 // installNode adds NodeSource's repository when the plan needs it and installs Node.js. It

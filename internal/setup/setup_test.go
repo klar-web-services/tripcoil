@@ -63,7 +63,7 @@ func newFake(t *testing.T, m Manager) *fakeHost {
 				if _, ok := f.replies["node --version"]; !ok {
 					f.replies["node --version"] = "v22.11.0\n"
 				}
-			case c == "npm install -g @anthropic-ai/claude-code":
+			case c == "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code":
 				f.tools["claude"] = true
 			}
 			for k := range f.fail {
@@ -388,7 +388,7 @@ func TestSudo(t *testing.T) {
 
 func TestNextSteps(t *testing.T) {
 	claude := nextSteps("claude", "/etc/tripcoil/agent.env", "sudo ", false, false)
-	for _, l := range []string{"sudo npm install -g @anthropic-ai/claude-code", `"claude setup-token"`, "subscription (Pro or Max), not API billing",
+	for _, l := range []string{"sudo npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code", `"claude setup-token"`, "subscription (Pro or Max), not API billing",
 		"  3. Add it to /etc/tripcoil/agent.env as the line CLAUDE_CODE_OAUTH_TOKEN=<token>:\n       sudoedit /etc/tripcoil/agent.env\n"} {
 		if !strings.Contains(claude, l) {
 			t.Errorf("claude lacks %q:\n%s", l, claude)

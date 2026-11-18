@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const npmInstall = "npm install -g @anthropic-ai/claude-code"
+const npmInstall = "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code"
 
 // withoutClaude is a systemd host without Claude Code, with the package manager pm (or none).
 func withoutClaude(t *testing.T, pm string) *fakeHost {
@@ -58,7 +58,7 @@ func TestClaudeCodeSkipped(t *testing.T) {
 		t.Fatalf("commands %q", f.cmds)
 	}
 	for _, l := range []string{"Claude Code is not installed. Install Claude Code (npm)? yes or no [yes]: ", "! Skipped installing Claude Code.\n",
-		"  1. Install Claude Code system-wide", "       npm install -g @anthropic-ai/claude-code\n"} {
+		"  1. Install Claude Code system-wide", "       npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code\n"} {
 		if !strings.Contains(f.out.String(), l) {
 			t.Errorf("output lacks %q:\n%s", l, f.out.String())
 		}
@@ -360,7 +360,7 @@ func TestClaudeCodeCannotInstall(t *testing.T) {
 			f.fail["apt-get update"] = true
 			f.replies["apt-get update"] = "E: Could not resolve 'deb.debian.org'\n"
 		}},
-		{"no package manager", "", "this host has none of apk, pacman, dnf or apt-get; install Node.js 22 or later and npm, then npm install -g @anthropic-ai/claude-code", func(*fakeHost) {}},
+		{"no package manager", "", "this host has none of apk, pacman, dnf or apt-get; install Node.js 22 or later and npm, then npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code", func(*fakeHost) {}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := withoutClaude(t, tc.pm)

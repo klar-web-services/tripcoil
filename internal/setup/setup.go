@@ -473,7 +473,7 @@ func nextSteps(name, envFile, sudo string, installed, hasToken bool) string {
 	var install, token, line string
 	switch name {
 	case "claude":
-		install = "Claude Code system-wide (root-owned, outside /home), for example:\n       " + sudo + "npm install -g @anthropic-ai/claude-code"
+		install = "Claude Code system-wide (root-owned, outside /home), for example:\n       " + sudo + claudeInstall
 		token = `Create a token with "claude setup-token" (as any user, on any machine). It uses your Claude
      subscription (Pro or Max), not API billing.`
 		line = "CLAUDE_CODE_OAUTH_TOKEN=<token>"
