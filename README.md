@@ -24,6 +24,7 @@ sudo tripcoil doctor    # checks the setup, the agent CLI and its sandbox
 sudo tripcoil run       # one run now; the service runs every 6 hours
 sudo tripcoil report    # the latest report
 sudo tripcoil status    # the service, the last and next run
+sudo tripcoil uninstall # removes what setup and the installer added
 ```
 
 `setup` asks which agent CLI reviews the runs (Claude Code, Codex, or none) and ends by printing

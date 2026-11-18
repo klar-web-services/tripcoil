@@ -35,6 +35,7 @@ Usage:
   tripcoil report [flags]  Print the latest report (as root)
   tripcoil status          Print the service's state and the last and next run (as root)
   tripcoil daemon          The service's entrypoint: a run every interval (as root)
+  tripcoil uninstall       Remove what setup and the installer added (as root)
   tripcoil version         Print version information
 
 Run "tripcoil <command> -h" for a command's flags.
@@ -68,6 +69,8 @@ type deps struct {
 	setup   func(o setup.Options, stdout io.Writer) (ready bool, err error)
 	service func() (setup.Service, error)
 	doctor  doctorHost
+	// uninstall removes what setup and the installer added (tripcoil uninstall).
+	uninstall func(o setup.UninstallOptions, stdout io.Writer) error
 	// hangups delivers each SIGHUP; after is time.After.
 	hangups func() <-chan struct{}
 	after   func(time.Duration) <-chan time.Time
@@ -90,11 +93,12 @@ func defaultDeps() deps {
 		interrupts: func() (context.Context, context.CancelFunc) {
 			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		},
-		setup:   setupHost,
-		service: serviceHost,
-		doctor:  hostDoctor(StateDir),
-		hangups: hangups,
-		after:   time.After,
+		setup:     setupHost,
+		service:   serviceHost,
+		doctor:    hostDoctor(StateDir),
+		uninstall: uninstallHost,
+		hangups:   hangups,
+		after:     time.After,
 	}
 }
 
@@ -143,6 +147,8 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 		return runStatus(args[1:], stdout, stderr, d)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr, d)
+	case "uninstall":
+		return runUninstall(args[1:], stdout, stderr, d)
 	case "sandbox-probe": // hidden: run by Tripcoil itself inside the sandbox (spec section 8.2)
 		return probe.Main(args[1:], stdout, stderr)
 	case "version", "--version":
