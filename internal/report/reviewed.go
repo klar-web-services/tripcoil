@@ -56,7 +56,7 @@ func renderReviewed(in Input) string {
 		}
 	}
 
-	b.WriteString(reviewVerdict(len(groups[review.Exploitable]), len(conditional), unassessed) + suffixes(in.Run, len(gaps), true) + "\n\n")
+	b.WriteString(reviewVerdict(len(groups[review.Exploitable]), len(conditional), unassessed, len(lower)) + suffixes(in.Run, len(gaps), true) + "\n\n")
 	b.WriteString(hostLine(in) + reviewHost(in) + "\n\n")
 	writeErrors(&b, in)
 	writeReviewWarnings(&b, in)
@@ -71,7 +71,7 @@ func renderReviewed(in Input) string {
 	names := itemNamesByID(in.Inventory)
 	writeEntries(&b, "Exploitable now", groups[review.Exploitable], names)
 	writeEntries(&b, "Exploitable under conditions", conditional, names)
-	writeCollapsed(&b, "Exploitable under conditions, lower priority", lower, names)
+	writeCollapsed(&b, "Conditional, lower priority", lower, names)
 	if unassessed > 0 {
 		fmt.Fprintf(&b, "## Not assessed (%d)\n\n", unassessed)
 		if len(groups[review.Unknown]) > 0 {
@@ -92,25 +92,30 @@ func renderReviewed(in Input) string {
 }
 
 // reviewVerdict is the verdict line of a reviewed run: the first rule of spec section 11.3 that applies.
-// conditional counts only conditional findings with priority now or soon.
-func reviewVerdict(exploitable, conditional, unassessed int) string {
+// conditional counts only conditional findings with priority now or soon; lower counts the other
+// conditional findings, which every line names at its end.
+func reviewVerdict(exploitable, conditional, unassessed, lower int) string {
+	var s string
 	switch {
 	case exploitable > 0:
-		s := fmt.Sprintf("🔴 %s exploitable now", plural(exploitable, "issue", "issues"))
+		s = fmt.Sprintf("🔴 %s exploitable now", plural(exploitable, "issue", "issues"))
 		if unassessed > 0 {
 			s += fmt.Sprintf("; %d not assessed", unassessed)
 		}
-		return s
 	case conditional > 0:
-		s := fmt.Sprintf("🟠 No issue exploitable now; %d exploitable under conditions", conditional)
+		s = fmt.Sprintf("🟠 No issue exploitable now; %d exploitable under conditions", conditional)
 		if unassessed > 0 {
 			s += fmt.Sprintf("; %d not assessed", unassessed)
 		}
-		return s
 	case unassessed > 0:
-		return fmt.Sprintf("🟡 No issue found exploitable, but %s not assessed", plural(unassessed, "finding was", "findings were"))
+		s = fmt.Sprintf("🟡 No issue found exploitable, but %s not assessed", plural(unassessed, "finding was", "findings were"))
+	default:
+		s = "🟢 No exploitable issues found"
 	}
-	return "🟢 No exploitable issues found"
+	if lower > 0 {
+		s += fmt.Sprintf("; %d lower-priority conditional", lower)
+	}
+	return s
 }
 
 // reviewHost ends the host line with the agent and, for a carried-forward review, where it is from.

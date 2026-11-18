@@ -64,18 +64,22 @@ func TestRenderReviewWarnings(t *testing.T) {
 
 func TestReviewVerdict(t *testing.T) {
 	for _, c := range []struct {
-		exp, cond, un int
-		want          string
+		exp, cond, un, lower int
+		want                 string
 	}{
-		{2, 1, 180, "🔴 2 issues exploitable now; 180 not assessed"},
-		{1, 0, 0, "🔴 1 issue exploitable now"},
-		{0, 3, 0, "🟠 No issue exploitable now; 3 exploitable under conditions"},
-		{0, 3, 1, "🟠 No issue exploitable now; 3 exploitable under conditions; 1 not assessed"},
-		{0, 0, 180, "🟡 No issue found exploitable, but 180 findings were not assessed"},
-		{0, 0, 1, "🟡 No issue found exploitable, but 1 finding was not assessed"},
-		{0, 0, 0, "🟢 No exploitable issues found"},
+		{2, 1, 180, 0, "🔴 2 issues exploitable now; 180 not assessed"},
+		{1, 0, 0, 0, "🔴 1 issue exploitable now"},
+		{0, 3, 0, 0, "🟠 No issue exploitable now; 3 exploitable under conditions"},
+		{0, 3, 1, 0, "🟠 No issue exploitable now; 3 exploitable under conditions; 1 not assessed"},
+		{0, 0, 180, 0, "🟡 No issue found exploitable, but 180 findings were not assessed"},
+		{0, 0, 1, 0, "🟡 No issue found exploitable, but 1 finding was not assessed"},
+		{0, 0, 0, 0, "🟢 No exploitable issues found"},
+		{2, 1, 180, 7, "🔴 2 issues exploitable now; 180 not assessed; 7 lower-priority conditional"},
+		{0, 3, 0, 1, "🟠 No issue exploitable now; 3 exploitable under conditions; 1 lower-priority conditional"},
+		{0, 0, 1, 3084, "🟡 No issue found exploitable, but 1 finding was not assessed; 3084 lower-priority conditional"},
+		{0, 0, 0, 2, "🟢 No exploitable issues found; 2 lower-priority conditional"},
 	} {
-		if got := reviewVerdict(c.exp, c.cond, c.un); got != c.want {
+		if got := reviewVerdict(c.exp, c.cond, c.un, c.lower); got != c.want {
 			t.Errorf("got %q, want %q", got, c.want)
 		}
 	}
@@ -149,11 +153,11 @@ func TestRenderReviewedLowerPriorityConditional(t *testing.T) {
 	mix.Findings[3] = entry("f:0000000000000003", review.Conditional, "none")
 	r := record(map[string]string{"inventory": "ok", "audit": "ok", "review": "ok"})
 	got := Render(Input{Run: r, Inventory: hostInventory(), Audit: hostAudit(), Review: mix})
-	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🔴 1 issue exploitable now; 3 not assessed") {
+	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🔴 1 issue exploitable now; 3 not assessed; 2 lower-priority conditional (") {
 		t.Errorf("verdict %q", line)
 	}
 	full, rest, ok := strings.Cut(got, "## Exploitable under conditions (1)\n")
-	lowerAt := strings.Index(rest, "## Exploitable under conditions, lower priority (2)\n\n<details>\n<summary>2 findings</summary>")
+	lowerAt := strings.Index(rest, "## Conditional, lower priority (2)\n\n<details>\n<summary>2 findings</summary>")
 	if !ok || lowerAt < 0 || !strings.Contains(rest[:lowerAt], "priority soon**: Needs a local user") || strings.Contains(full, "why f:") {
 		t.Fatalf("sections:\n%s", got)
 	}
@@ -172,14 +176,14 @@ func TestRenderReviewedLowerPriorityConditional(t *testing.T) {
 		only.Findings = append(only.Findings, entry(id, review.Conditional, p))
 	}
 	got = Render(Input{Run: r, Inventory: hostInventory(), Audit: aud, Review: only})
-	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🟢 No exploitable issues found") || strings.Contains(got, "## Exploitable under conditions (") ||
-		!strings.Contains(got, "## Exploitable under conditions, lower priority (3)") {
+	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🟢 No exploitable issues found; 3 lower-priority conditional (") || strings.Contains(got, "## Exploitable under conditions (") ||
+		!strings.Contains(got, "## Conditional, lower priority (3)") {
 		t.Errorf("all lower priority:\n%s", got)
 	}
 	only.NotReviewed = []string{"f:0000000000000009"}
 	aud.Findings = append(aud.Findings, audit.Finding{ID: "f:0000000000000009", Risk: audit.RiskLow, Origin: libssl, Package: audit.Package{Name: "libssl3", Version: "1"}, Vulnerability: audit.Vulnerability{ID: "CVE-2026-9"}})
 	got = Render(Input{Run: r, Inventory: hostInventory(), Audit: aud, Review: only})
-	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🟡 No issue found exploitable, but 1 finding was not assessed") {
+	if line := strings.SplitN(got, "\n", 2)[0]; !strings.HasPrefix(line, "🟡 No issue found exploitable, but 1 finding was not assessed; 3 lower-priority conditional (") {
 		t.Errorf("verdict %q", line)
 	}
 }
