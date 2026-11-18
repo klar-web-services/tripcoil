@@ -78,9 +78,9 @@ func TestInstall(t *testing.T) {
 		code                   int
 		out                    string
 	}{
-		{"wget", "", "TRIPCOIL_BASE_URL=" + good, "root", 0, "Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil\nNext: sudo tripcoil setup\nok tripcoil "},
+		{"wget", "", "TRIPCOIL_BASE_URL=" + good, "root", 0, "Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil\nNext: tripcoil setup\nok tripcoil "},
 		{"curl", "apk add -q curl >/dev/null && mkdir -p /etc/init.d && touch /etc/init.d/tripcoil;", "TRIPCOIL_BASE_URL=" + good + " TRIPCOIL_VERSION=v9.8.7", "root", 0,
-			"Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil\nRestart the service to use it: sudo rc-service tripcoil restart\nok"},
+			"Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil\nRestart the service to use it: rc-service tripcoil restart\nok"},
 		{"not root", "", "TRIPCOIL_BASE_URL=" + good, "nobody", 1, "tripcoil installer: run it as root"},
 		{"bad checksum", "", "TRIPCOIL_BASE_URL=" + bad, "root", 1, "checksum verification failed for tripcoil-x86_64-unknown-linux-gnu.tar.gz; nothing was installed"},
 		{"missing version", "", "TRIPCOIL_BASE_URL=" + good + " TRIPCOIL_VERSION=1.0.0", "root", 1, "tripcoil 1.0.0 not found at " + good + "/v1.0.0"},
