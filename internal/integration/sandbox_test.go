@@ -76,10 +76,12 @@ $B/stubcli listen 0.0.0.0:7777 >/dev/null 2>&1 &
 sleep 1
 summary() { sed -n 's/.*"summary": "\([^"]*\)".*/\1/p' $R/review.json 2>/dev/null; }
 run() { $B/tripcoil run "$@" >/tmp/run.out 2>&1; echo $?; }
+entries() { echo "$(grep -c '"reasoning": "stub review"' $R/review.json) in the output, $(grep -c '"reasoning": "stub review in the file"' $R/review.json) from the file, $(grep -c '"notReviewed": \[\]' $R/review.json) all reviewed, $(grep -c REVIEW_ENTRIES_DROPPED $R/run.json) dropped, $(grep -c . $R/agent/entries.jsonl 2>/dev/null) lines kept"; }
 
 config claude 60s ok
 echo "CHECK first $(run) $(summary) | $(head -1 $R/report.md)"
 [ "$FULL" = 1 ] || exit 0
+echo "CHECK entries $(entries)"
 echo "CHECK probe 0 $(grep -o '"blocked":true' $R/agent/probe.json | wc -l) blocked, $(grep -o '"blocked":false' $R/agent/probe.json | wc -l) not"
 echo "CHECK again $(run --force-review) $(summary) |"
 config claude 5s sleep
@@ -96,6 +98,7 @@ code=$?
 echo "CHECK interrupt $code leftovers $(leftovers), home $(ls -d /var/lib/tripcoil/agent-home 2>/dev/null | wc -l)"
 config codex 60s ok
 echo "CHECK codex $(run --force-review) $(summary) | $(grep -o '"agentCli": "[^"]*"' $R/run.json)"
+echo "CHECK codex-entries $(entries)"
 `
 
 // TestSandbox runs reviews with a stub agent CLI through the real sandbox: transient units on
@@ -205,7 +208,25 @@ func TestSandbox(t *testing.T) {
 					}
 				}
 			}
+			// The stub puts one entry in its final output and the rest, with a broken line and a
+			// duplicate, in its entries file: review.json holds both.
+			for _, k := range []string{"entries", "codex-entries"} {
+				if !tc.full {
+					break
+				}
+				var out, file, all, dropped, kept int
+				if _, err := fmt.Sscanf(checks[k], "%d in the output, %d from the file, %d all reviewed, %d dropped, %d lines kept", &out, &file, &all, &dropped, &kept); err != nil {
+					t.Errorf("%s: %q: %v", k, checks[k], err)
+					continue
+				}
+				if out != 1 || file == 0 || all != 1 || dropped != 1 || kept != file+2 {
+					t.Errorf("%s: %q, want 1 entry in the output, the others from the file, all reviewed, one warning, every line kept", k, checks[k])
+				}
+			}
 			for _, k := range []string{"first", "again", "codex"} {
+				if tc.full && !strings.Contains(checks[k], "groups=ok") || tc.full && !strings.Contains(checks[k], "entries=ok") {
+					t.Errorf("%s: the agent could not read groups.json or write its entries file: %q", k, checks[k])
+				}
 				if tc.full && !strings.Contains(checks[k], "pids=1 ") && !strings.Contains(checks[k], "pids=2 ") { // bubblewrap's own init counts
 					t.Errorf("%s: the agent sees other processes: %q", k, checks[k])
 				}

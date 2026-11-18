@@ -50,8 +50,8 @@ func TestClaudeArgs(t *testing.T) {
 
 func TestCodexArgs(t *testing.T) {
 	in := Inputs{Prompt: "PROMPT", Schema: []byte(`{"type":"object"}`), Home: "/var/lib/tripcoil/agent-home", Model: "gpt-5", Extra: []string{"-c", "model_reasoning_effort=\"high\""}}
-	want := []string{"--search", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
-		"--color", "never", "-c", "check_for_update_on_startup=false", "--output-schema", "/var/lib/tripcoil/agent-home/tripcoil-schema.json",
+	want := []string{"--search", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "workspace-write",
+		"--add-dir", "/var/lib/tripcoil/agent-home", "--color", "never", "-c", "check_for_update_on_startup=false", "--output-schema", "/var/lib/tripcoil/agent-home/tripcoil-schema.json",
 		"-m", "gpt-5", "-c", "model_reasoning_effort=\"high\"", "PROMPT"}
 	a := For("codex")
 	if got := a.Args(in); !slices.Equal(got, want) {

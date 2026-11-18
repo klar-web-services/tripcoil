@@ -123,14 +123,16 @@ func (claude) Parse(stdout, stderr []byte, exitCode int) ([]byte, error) {
 }
 
 // codex is codex exec, verified with 0.154.0: the final message, which --output-schema shapes,
-// is printed on stdout; progress and log lines go to stderr. exec reads CODEX_API_KEY.
+// is printed on stdout; progress and log lines go to stderr. exec reads CODEX_API_KEY. Its own
+// sandbox lets it write to the home (--add-dir), for the entries file; the working directory, the
+// run folder, stays read-only in the OS sandbox, which is the security boundary (spec section 8.2).
 type codex struct{}
 
 const codexSchema = "tripcoil-schema.json"
 
 func (codex) Args(in Inputs) []string {
-	a := []string{"--search", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
-		"--color", "never", "-c", "check_for_update_on_startup=false", "--output-schema", in.Home + "/" + codexSchema}
+	a := []string{"--search", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--sandbox", "workspace-write",
+		"--add-dir", in.Home, "--color", "never", "-c", "check_for_update_on_startup=false", "--output-schema", in.Home + "/" + codexSchema}
 	if in.Model != "" {
 		a = append(a, "-m", in.Model)
 	}

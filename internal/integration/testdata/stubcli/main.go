@@ -1,6 +1,7 @@
 // stubcli stands in for the agent CLIs in the sandbox tests. Installed as claude or codex, it
 // answers --version, and otherwise tries a few things the sandbox must allow or stop, writes a
-// marker into its home, and returns a review in the CLI's format that confirms every finding.
+// marker into its home, and confirms every finding: the first in its final output, in the CLI's
+// format, the rest in entries.jsonl in its home, after a broken line and a duplicate of the first.
 // /etc/tripcoil-stub selects another behaviour: "sleep" (run past the timeout) or "auth" (no
 // credentials). tripcoil doctor's connectivity check gets {"ok":true}. Run as "stubcli listen <addr>" or "stubcli dns <listen> <upstream>", it is a TCP
 // listener or a UDP DNS forwarder for the tests.
@@ -98,19 +99,40 @@ func review() map[string]any {
 		checks = append(checks, "keyring=absent")
 	}
 
+	var groups struct {
+		Groups []struct {
+			ID string `json:"id"`
+		} `json:"groups"`
+	}
+	data, err := os.ReadFile("groups.json")
+	if err == nil {
+		err = json.Unmarshal(data, &groups)
+	}
+	checks = append(checks, "groups="+errText(err))
+
 	var aud struct {
 		Findings []struct {
 			ID string `json:"id"`
 		} `json:"findings"`
 	}
-	data, _ := os.ReadFile("audit.json")
+	data, _ = os.ReadFile("audit.json")
 	json.Unmarshal(data, &aud)
-	findings := []map[string]any{}
-	for _, f := range aud.Findings {
-		findings = append(findings, map[string]any{"findingId": f.ID, "verdict": "confirmed", "exploitability": "unknown", "priority": "scheduled",
-			"reasoning": "stub review", "evidence": []string{}, "fix": []string{"upgrade"}, "sources": []string{}, "corrections": []any{},
-			"item": nil, "vulnerability": nil})
+	entry := func(id, reasoning string) map[string]any {
+		return map[string]any{"findingId": id, "verdict": "confirmed", "exploitability": "unknown", "priority": "scheduled",
+			"reasoning": reasoning, "evidence": []string{}, "fix": []string{"upgrade"}, "sources": []string{}, "corrections": []any{},
+			"item": nil, "vulnerability": nil}
 	}
+	findings := []map[string]any{}
+	file := []byte("not an entry\n")
+	for i, f := range aud.Findings {
+		if i == 0 {
+			findings = append(findings, entry(f.ID, "stub review"))
+		}
+		line, _ := json.Marshal(entry(f.ID, "stub review in the file"))
+		file = append(append(file, line...), '\n')
+	}
+	err = os.WriteFile(filepath.Join(os.Getenv("HOME"), "entries.jsonl"), file, 0o600)
+	checks = append(checks, "entries="+errText(err))
 	return map[string]any{"summary": strings.Join(checks, " "), "findings": findings, "coverageNotes": []string{}}
 }
 
