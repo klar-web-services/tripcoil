@@ -86,6 +86,17 @@ func runStatus(args []string, stdout, stderr io.Writer, d deps) int {
 		line("Last reviewed", fmt.Sprintf("%s, review made %s", st.LastReviewed, when(st.LastReviewedAt, now)))
 	}
 	line("Failures in a row", fmt.Sprint(st.ConsecutiveFailures))
+	if _, connected, err := d.zosiaSecret(cfg.Zosia.SecretFile); !connected {
+		line("Zosia", "not connected")
+	} else if err != nil {
+		line("Zosia", "secret file unusable: "+err.Error())
+	} else if z := st.Zosia; z == nil {
+		line("Zosia", "connected, no report sent yet")
+	} else if z.LastError != nil {
+		line("Zosia", fmt.Sprintf("last send failed %s: %s (%s)", when(z.LastAttemptAt, now), z.LastError.Message, z.LastError.Code))
+	} else {
+		line("Zosia", fmt.Sprintf("last report sent %s (%s)", when(z.LastSentAt, now), z.LastURL))
+	}
 	if running && !st.LastRunAt.IsZero() && now.Sub(st.LastRunAt) > 2*cfg.Interval.Std() {
 		line("Warning", "no run has finished for more than two intervals; see the service's log")
 	}

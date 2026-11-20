@@ -40,6 +40,7 @@ Last run:          20261116T070000Z-0a0b, partial, 2026-11-16 07:00 UTC (4h ago)
 Next run:          2026-11-16 13:00 UTC
 Last reviewed:     20261113T070000Z-0c0d, review made 2026-11-13 07:30 UTC (3d ago)
 Failures in a row: 2
+Zosia:             not connected
 Grype database:    built 2026-11-16 03:00 UTC (8h ago) (as of the last run)
 Kernel CNA data:   checked 2026-11-15 07:00 UTC (28h ago) (as of the last run)
 Agent CLI:         claude 2.1.309 (as of the last run)
@@ -60,6 +61,7 @@ Last run:          none yet
 Next run:          none: the service is not running
 Last reviewed:     none yet
 Failures in a row: 0
+Zosia:             not connected
 Grype database:    unknown until a run has used it
 Kernel CNA data:   unknown until a run has used it
 Agent CLI:         claude, version unknown until a review has run
@@ -112,5 +114,36 @@ func TestStatusRefusals(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := dispatch([]string{"status"}, &out, &errb, d); code != 2 || !strings.Contains(errb.String(), "must run as root") {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+}
+
+func TestStatusZosia(t *testing.T) {
+	d := testDeps(t, nil, nil)
+	d.now = func() time.Time { return time.Date(2026, 11, 16, 11, 0, 0, 0, time.UTC) }
+	d.zosiaSecret = func(string) (string, bool, error) { return "zosia_x", true, nil }
+	at := time.Date(2026, 11, 16, 7, 1, 0, 0, time.UTC)
+	for _, c := range []struct {
+		zosia *run.Zosia
+		want  string
+	}{
+		{nil, "connected, no report sent yet"},
+		{&run.Zosia{LastAttemptAt: at, LastRun: "x", LastSentAt: at, LastURL: "https://zosiasec.com/app/reports/1"},
+			"last report sent 2026-11-16 07:01 UTC (3h ago) (https://zosiasec.com/app/reports/1)"},
+		{&run.Zosia{LastAttemptAt: at, LastRun: "x", LastError: &run.ZosiaError{Code: "BAD_SECRET", Message: "This secret is unknown or was revoked."}},
+			"last send failed 2026-11-16 07:01 UTC (3h ago): This secret is unknown or was revoked. (BAD_SECRET)"},
+	} {
+		run.WriteState(d.stateDir, run.State{Zosia: c.zosia})
+		var out, errb bytes.Buffer
+		if code := dispatch([]string{"status"}, &out, &errb, d); code != 0 || !strings.Contains(out.String(), "Zosia:             "+c.want+"\n") {
+			t.Errorf("exit %d, want %q in\n%s", code, c.want, out.String())
+		}
+	}
+	d.zosiaSecret = func(string) (string, bool, error) {
+		return "", true, errors.New("zosia.secretFile /etc/tripcoil/zosia.secret must be owned by root")
+	}
+	var out, errb bytes.Buffer
+	dispatch([]string{"status"}, &out, &errb, d)
+	if !strings.Contains(out.String(), "Zosia:             secret file unusable: zosia.secretFile /etc/tripcoil/zosia.secret must be owned by root\n") {
+		t.Errorf("got\n%s", out.String())
 	}
 }
