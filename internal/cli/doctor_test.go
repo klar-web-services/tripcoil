@@ -13,6 +13,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/problem"
 	"github.com/klar-web-services/tripcoil/internal/review"
 	"github.com/klar-web-services/tripcoil/internal/setup"
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 func healthy(t *testing.T, d *deps, checked *string) {
@@ -50,6 +51,7 @@ func TestDoctorPasses(t *testing.T) {
 ✓ The tripcoil service is running (systemd).
 ✓ The package tool can read the package database.
 ✓ Docker answers.
+✓ Zosia: not connected (optional).
 ✓ Grype 0.121.2 is ready.
 ✓ The agent's user tripcoil-agent exists.
 ✓ The agent CLI /usr/local/bin/claude is safely owned.
@@ -154,5 +156,63 @@ func TestDoctorInvalidConfig(t *testing.T) {
 	d.euid = func() int { return 1000 }
 	if code := dispatch([]string{"doctor"}, &out, &errb, d); code != 2 {
 		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestDoctorZosia(t *testing.T) {
+	const file = "/etc/tripcoil/zosia.secret"
+	for _, c := range []struct {
+		name   string
+		config string
+		secret func(string) (string, bool, error)
+		ping   func(context.Context, string, string) (string, error)
+		code   int
+		want   string
+	}{
+		{"accepted", "zosia:\n  key: " + testZosiaKey + "\n", func(string) (string, bool, error) { return "zosia_x", true, nil },
+			func(_ context.Context, url, secret string) (string, error) {
+				if url != "https://zosiasec.com" || secret != "zosia_x" {
+					return "", errors.New("pinged " + url)
+				}
+				return "taskmaster", nil
+			}, 0, "✓ Zosia accepts the secret \"taskmaster\".\n"},
+		{"unsafe file", "zosia:\n  key: " + testZosiaKey + "\n", func(string) (string, bool, error) {
+			return "", true, errors.New("zosia.secretFile " + file + " must not be readable by group or others (chmod 600 " + file + ")")
+		}, nil, 1, "✗ Zosia: zosia.secretFile " + file + " must not be readable by group or others (chmod 600 " + file + ")\n" +
+			"  Fix: chmod 600 " + file + " and chown root:root " + file + "\n"},
+		{"revoked", "zosia:\n  key: " + testZosiaKey + "\n  url: http://127.0.0.1:3000\n", func(string) (string, bool, error) { return "zosia_x", true, nil },
+			func(context.Context, string, string) (string, error) {
+				return "", &zosia.Error{Code: "BAD_SECRET", Message: "This secret is unknown or was revoked."}
+			}, 1, "✗ Zosia: This secret is unknown or was revoked.\n  Fix: sudo tripcoil zosia connect --replace, or make a new secret at " +
+				"http://127.0.0.1:3000/app/secrets and write it to " + file + "\n"},
+		{"unreachable", "zosia:\n  key: " + testZosiaKey + "\n", func(string) (string, bool, error) { return "zosia_x", true, nil },
+			func(context.Context, string, string) (string, error) {
+				return "", &zosia.Error{Code: "NETWORK", Message: "cannot reach Zosia: no route to host"}
+			}, 1, "✗ Zosia: cannot reach Zosia: no route to host\n"},
+	} {
+		d := testDeps(t, nil, nil)
+		d.sudo = "sudo "
+		var checked string
+		healthy(t, &d, &checked)
+		os.WriteFile(d.configPath, []byte("version: 1\nreview:\n  agent: none\n"+c.config), 0o644)
+		d.zosiaSecret, d.pingZosia = c.secret, c.ping
+		var out, errb bytes.Buffer
+		if code := dispatch([]string{"doctor"}, &out, &errb, d); code != c.code || !strings.Contains(out.String(), c.want) || strings.Contains(out.String(), "zosia_x") {
+			t.Errorf("%s: exit %d, want %q in\n%s", c.name, code, c.want, out.String())
+		}
+	}
+}
+
+func TestDoctorZosiaWithoutABuiltInKey(t *testing.T) {
+	if zosia.DefaultKey != "" {
+		t.Skip("a default key is built in")
+	}
+	d := testDeps(t, nil, nil)
+	var checked string
+	healthy(t, &d, &checked)
+	d.zosiaSecret = func(string) (string, bool, error) { return "zosia_x", true, nil }
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"doctor"}, &out, &errb, d); code != 1 || !strings.Contains(out.String(), "✗ Zosia: this build has no Zosia key\n") {
+		t.Errorf("exit %d\n%s", code, out.String())
 	}
 }

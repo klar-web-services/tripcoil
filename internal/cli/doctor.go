@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/agent"
@@ -22,6 +23,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
 	"github.com/klar-web-services/tripcoil/internal/setup"
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 const doctorUsage = `Usage: tripcoil doctor
@@ -162,6 +164,7 @@ func doctor(stdout io.Writer, d deps, starting bool) int {
 	default:
 		pass("Docker answers.")
 	}
+	checkZosia(ctx, d, cfg, pass, failCheck)
 
 	unlock, err := run.LockContext(ctx, d.stateDir, func() { fmt.Fprintln(stdout, "Waiting for the current run to finish (Ctrl-C stops waiting)...") })
 	if err != nil {
@@ -224,4 +227,34 @@ func doctor(stdout io.Writer, d deps, starting bool) int {
 		failCheck(err.Error(), "")
 	}
 	return verdict()
+}
+
+func checkZosia(ctx context.Context, d deps, cfg config.Config, pass func(string), failCheck func(msg, fix string)) {
+	file := cfg.Zosia.SecretFile
+	secret, connected, err := d.zosiaSecret(file)
+	if !connected {
+		pass("Zosia: not connected (optional).")
+		return
+	}
+	if err != nil {
+		failCheck("Zosia: "+err.Error(), fmt.Sprintf("chmod 600 %s and chown root:root %s", file, file))
+		return
+	}
+	url, _, err := zosia.Target(cfg.Zosia.URL, cfg.Zosia.Key)
+	if err != nil {
+		failCheck("Zosia: "+err.Error(), "")
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	name, err := d.pingZosia(ctx, url, secret)
+	var ze *zosia.Error
+	switch {
+	case err == nil:
+		pass("Zosia accepts the secret " + strconv.Quote(name) + ".")
+	case errors.As(err, &ze) && ze.Code == "BAD_SECRET":
+		failCheck("Zosia: "+ze.Message, fmt.Sprintf("%stripcoil zosia connect --replace, or make a new secret at %s/app/secrets and write it to %s", d.sudo, url, file))
+	default:
+		failCheck("Zosia: "+err.Error(), "")
+	}
 }

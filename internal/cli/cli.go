@@ -70,6 +70,7 @@ type deps struct {
 	zosiaSecret   func(path string) (secret string, connected bool, err error)
 	machineKey    func() (string, error)
 	sendZosia     func(ctx context.Context, r zosia.Request) (zosia.Result, error)
+	pingZosia     func(ctx context.Context, url, secret string) (string, error)
 }
 
 func defaultDeps() deps {
@@ -103,6 +104,9 @@ func defaultDeps() deps {
 		},
 		sendZosia: func(ctx context.Context, r zosia.Request) (zosia.Result, error) {
 			return zosia.Send(ctx, &http.Client{Timeout: 60 * time.Second}, zosiaPolicy, r)
+		},
+		pingZosia: func(ctx context.Context, url, secret string) (string, error) {
+			return zosia.Ping(ctx, &http.Client{Timeout: 15 * time.Second}, url, secret, "tripcoil/"+buildinfo.Version)
 		},
 	}
 }
