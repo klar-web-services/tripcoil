@@ -34,6 +34,7 @@ Usage:
   tripcoil report [flags]  Print the latest report (as root)
   tripcoil status          Print the service's state and the last and next run (as root)
   tripcoil daemon          The service's entrypoint: a run every interval (as root)
+  tripcoil update          Update to the latest release and restart the service (as root)
   tripcoil uninstall       Remove what setup and the installer added (as root)
   tripcoil version         Print version information
 
@@ -61,6 +62,7 @@ type deps struct {
 	holdSignals   func() (release func())
 	doctor        doctorHost
 	uninstall     func(o setup.UninstallOptions, stdout io.Writer) error
+	update        func(stdout, stderr io.Writer) error
 	hangups       func() <-chan struct{}
 	after         func(time.Duration) <-chan time.Time
 }
@@ -87,6 +89,7 @@ func defaultDeps() deps {
 		holdSignals: holdSignals,
 		doctor:      hostDoctor(StateDir),
 		uninstall:   uninstallHost,
+		update:      updateHost,
 		hangups:     hangups,
 		after:       time.After,
 	}
@@ -141,6 +144,8 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 		return runDoctor(args[1:], stdout, stderr, d)
 	case "uninstall":
 		return runUninstall(args[1:], stdout, stderr, d)
+	case "update":
+		return runUpdate(args[1:], stdout, stderr, d)
 	case "sandbox-probe":
 		return probe.Main(args[1:], stdout, stderr)
 	case "version", "--version":

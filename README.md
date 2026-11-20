@@ -24,6 +24,7 @@ sudo tripcoil doctor    # checks the setup, the agent CLI and its sandbox
 sudo tripcoil run       # one run now; the service runs every 6 hours
 sudo tripcoil report    # the latest report
 sudo tripcoil status    # the service, the last and next run
+sudo tripcoil update    # the latest release, then restarts the service
 sudo tripcoil uninstall # removes Tripcoil; Node.js and Claude Code stay
 ```
 
@@ -35,6 +36,12 @@ Claude Code reviews run on your Claude subscription (Pro or Max), not API billin
 `setup` prints how to install it and give it an OpenAI API key, billed per use.
 The review runs the CLI as the unprivileged user `tripcoil-agent` in an OS-enforced sandbox; on
 systemd it needs systemd 247 or later.
+
+`update` replaces the binary, in the folder it is installed in, with the latest release, or says
+that it is already up to date. It runs the installer that came with your version, checksum check
+included, and then restarts a running service. When a run is in progress it asks before it
+interrupts it; without an answer it leaves the service alone and prints the restart command.
+Releases before 1.1.0 have no `update`: run the installer again instead.
 
 ## Configuration
 

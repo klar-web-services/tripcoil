@@ -42,6 +42,11 @@ main() {
 	version=${version#v}
 	# The value itself is not printed: it may come from the server.
 	case $version in '' | *[!0-9A-Za-z._-]*) fail "invalid version from $from" ;; esac
+	# tripcoil update sets TRIPCOIL_UPDATE_FROM to its own version, and restarts the service itself.
+	if [ "$version" = "${TRIPCOIL_UPDATE_FROM:-}" ]; then
+		say "tripcoil $version is already up to date."
+		exit 0
+	fi
 
 	asset="tripcoil-$arch-unknown-linux-gnu.tar.gz"
 	url="$base/v$version"
@@ -69,6 +74,7 @@ main() {
 	fi
 	new=
 	say "Installed tripcoil $version to $install_dir/tripcoil"
+	[ -z "${TRIPCOIL_UPDATE_FROM:-}" ] || exit 0
 	sudo=
 	[ -z "${SUDO_USER:-}" ] || sudo="sudo "
 	if [ -e /etc/systemd/system/tripcoil.service ]; then

@@ -179,3 +179,25 @@ func TestLockContextStopsWaiting(t *testing.T) {
 		t.Fatalf("err %v, waited %v", err, waited)
 	}
 }
+
+func TestBusy(t *testing.T) {
+	dir := t.TempDir()
+	if busy, err := Busy(dir); busy || err != nil {
+		t.Fatalf("no lock file: busy %v, %v", busy, err)
+	}
+	unlock, err := Lock(dir, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if busy, err := Busy(dir); !busy || err != nil {
+		t.Fatalf("lock held: busy %v, %v", busy, err)
+	}
+	unlock()
+	if busy, err := Busy(dir); busy || err != nil {
+		t.Fatalf("lock released: busy %v, %v", busy, err)
+	}
+	if unlock, err = Lock(dir, func() { t.Error("Busy kept the lock") }); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+}

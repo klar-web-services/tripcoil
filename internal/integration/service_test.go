@@ -45,6 +45,11 @@ fi
 lastrun() { sed -n 's/.*"lastRun": "\([^"]*\)".*/\1/p' $S/state.json 2>/dev/null; }
 waitnew() { for i in $(seq 1 600); do l=$(lastrun); [ -n "$l" ] && [ "$l" != "$1" ] && return 0; sleep 1; done; return 1; }
 
+# tripcoil update's installer fetches the mounted release with this curl.
+printf '#!/bin/sh\ncp "/opt/release${2#http://release}" "$4"\n' >/usr/local/bin/curl && chmod 755 /usr/local/bin/curl
+export TRIPCOIL_BASE_URL=http://release
+update() { tripcoil update >/tmp/update.out 2>&1; echo "$? $(tr '\n' '|' </tmp/update.out)"; }
+
 mkdir -p /etc/tripcoil
 install -m 600 /dev/null /etc/tripcoil/agent.env
 echo CLAUDE_CODE_OAUTH_TOKEN=stub >/etc/tripcoil/agent.env
@@ -69,9 +74,13 @@ if [ -d /run/systemd/system ]; then
 else
 	echo "CHECK scope 0 n/a"
 fi
+echo "CHECK update $(update </dev/null) $(svc status >/dev/null 2>&1; echo $?)"
 echo sleep > /etc/tripcoil-stub
 rm $S/state.json $S/runs/latest-reviewed # a run is due at once, and it reviews
 svc restart
+for i in $(seq 1 600); do running && break; sleep 1; done
+echo "CHECK busy $(echo no | update) $(running; echo $?)"
+echo "CHECK interrupt $(echo yes | update)"
 for i in $(seq 1 600); do running && break; sleep 1; done
 svc stop
 I=$S/runs/$(ls -1 $S/runs | grep '^[0-9]' | tail -1)
@@ -91,6 +100,7 @@ func TestService(t *testing.T) {
 	if out, err := stub.CombinedOutput(); err != nil {
 		t.Fatalf("go build stubcli: %v\n%s", err, out)
 	}
+	site := release(t, filepath.Join(dir, "tripcoil"), "9.8.7", false)
 	cache := preparedCache(t)
 	for i, tc := range []struct{ name, image, manager string }{
 		{"systemd-247", "debian11", "systemd"},
@@ -118,7 +128,7 @@ func TestService(t *testing.T) {
 				}
 			})
 			if out, err := exec.CommandContext(interrupt, "docker", "run", "-d", "--name", name, "--privileged",
-				"-v", dir+":/opt/tripcoil:ro", "-v", cache+":/var/lib/tripcoil/cache", image).CombinedOutput(); err != nil {
+				"-v", dir+":/opt/tripcoil:ro", "-v", site+":/opt/release:ro", "-v", cache+":/var/lib/tripcoil/cache", image).CombinedOutput(); err != nil {
 				t.Fatalf("docker run: %v\n%s", err, out)
 			}
 			if tc.manager == "systemd" {
@@ -142,9 +152,9 @@ func TestService(t *testing.T) {
 					checks[k] = v
 				}
 			}
-			setupLines := "3 1"
+			setupLines, restart := "3 1", "systemctl restart tripcoil"
 			if tc.manager == "openrc" {
-				setupLines = "4 1"
+				setupLines, restart = "4 1", "rc-service tripcoil restart"
 			}
 			for k, parts := range map[string][]string{
 				"setup":  {"0 " + setupLines + " 0 1 ✓ Started the tripcoil service."},
@@ -154,7 +164,12 @@ func TestService(t *testing.T) {
 				"again":  {"1"},
 				"reload": {"1 0"},
 				"scope":  {"0 "},
-				"stop":   {`"status": "interrupted" leftovers 0 home 0`},
+				"update": {"0 Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil|Restarted the tripcoil service.| 0"},
+				"busy": {"0 Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil|A run is in progress. Interrupt it and restart the service now? yes or no [no]: " +
+					"Restart the service to use the new version: " + restart + "| 0"},
+				"interrupt": {"0 Installed tripcoil 9.8.7 to /usr/local/bin/tripcoil|A run is in progress. Interrupt it and restart the service now? yes or no [no]: " +
+					"Restarted the tripcoil service.|"},
+				"stop": {`"status": "interrupted" leftovers 0 home 0`},
 			} {
 				got, ok := checks[k]
 				if !ok {

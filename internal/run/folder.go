@@ -24,6 +24,23 @@ var AgentGID = func() (int, bool) {
 	return gid, err == nil
 }
 
+// Busy reports whether a run holds the run lock.
+func Busy(stateDir string) (bool, error) {
+	f, err := os.Open(filepath.Join(stateDir, "run.lock"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return true, nil
+	}
+	return false, err
+}
+
 func shareWithAgent(path string) error {
 	if gid, ok := AgentGID(); ok {
 		return os.Lchown(path, -1, gid)
