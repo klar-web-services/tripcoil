@@ -53,10 +53,11 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 			t.Fatal("setup must not run")
 			return false, nil, nil
 		},
-		service: func() (setup.Service, error) { return setup.Service{Manager: setup.Systemd}, nil },
-		doctor:  doctorHost{},
-		hangups: func() <-chan struct{} { return nil },
-		after:   func(time.Duration) <-chan time.Time { return nil },
+		service:     func() (setup.Service, error) { return setup.Service{Manager: setup.Systemd}, nil },
+		doctor:      doctorHost{},
+		hangups:     func() <-chan struct{} { return nil },
+		after:       func(time.Duration) <-chan time.Time { return nil },
+		zosiaSecret: func(string) (string, bool, error) { return "", false, nil },
 	}
 }
 

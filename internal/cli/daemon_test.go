@@ -10,6 +10,7 @@ import (
 
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/run"
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 func daemonDeps(t *testing.T, stopAfter int) (deps, *[]time.Time) {
@@ -127,5 +128,32 @@ func TestDaemonRefusals(t *testing.T) {
 	d.euid = func() int { return 1000 }
 	if code := dispatch([]string{"daemon"}, &out, &errb, d); code != 2 || !strings.Contains(errb.String(), "must run as root") {
 		t.Fatalf("exit %d %q", code, errb.String())
+	}
+}
+
+func TestDaemonStopEndsASendToZosia(t *testing.T) {
+	d, _ := daemonDeps(t, 0)
+	writeZosiaConfig(t, d)
+	d.zosiaSecret = func(string) (string, bool, error) { return "zosia_x", true, nil }
+	d.machineKey = func() (string, error) { return "0123456789abcdef0123456789abcdef", nil }
+	sends := 0
+	d.sendZosia = func(ctx context.Context, _ zosia.Request) (zosia.Result, error) {
+		sends++
+		_, stop := d.interrupts()
+		stop()
+		<-ctx.Done()
+		return zosia.Result{}, &zosia.Error{Code: "NETWORK", Message: "cannot reach Zosia: " + ctx.Err().Error()}
+	}
+	var out, errb bytes.Buffer
+	if code := dispatch([]string{"daemon"}, &out, &errb, d); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	st, _ := run.ReadState(d.stateDir)
+	rec, err := run.ReadRecord(d.stateDir + "/runs/" + st.LastRun)
+	if err != nil || sends != 1 || rec.Status != run.Complete || st.Zosia == nil || st.Zosia.LastError == nil || st.Zosia.LastError.Code != "NETWORK" {
+		t.Fatalf("sends %d, run %+v %v, state %+v", sends, rec, err, st.Zosia)
+	}
+	if !strings.Contains(out.String(), ": complete.") || !strings.Contains(out.String(), "Tripcoil daemon stopped.") {
+		t.Fatalf("stdout:\n%s", out.String())
 	}
 }

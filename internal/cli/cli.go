@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/probe"
 	"github.com/klar-web-services/tripcoil/internal/review"
 	"github.com/klar-web-services/tripcoil/internal/setup"
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 const usage = `Tripcoil watches a running Linux server: it finds what is running, audits the
@@ -65,6 +67,9 @@ type deps struct {
 	update        func(stdout, stderr io.Writer) error
 	hangups       func() <-chan struct{}
 	after         func(time.Duration) <-chan time.Time
+	zosiaSecret   func(path string) (secret string, connected bool, err error)
+	machineKey    func() (string, error)
+	sendZosia     func(ctx context.Context, r zosia.Request) (zosia.Result, error)
 }
 
 func defaultDeps() deps {
@@ -92,6 +97,13 @@ func defaultDeps() deps {
 		update:      updateHost,
 		hangups:     hangups,
 		after:       time.After,
+		zosiaSecret: defaultZosiaSecret,
+		machineKey: func() (string, error) {
+			return zosia.MachineKey("/etc/machine-id", filepath.Join(StateDir, "machine-key"), rand.Reader)
+		},
+		sendZosia: func(ctx context.Context, r zosia.Request) (zosia.Result, error) {
+			return zosia.Send(ctx, &http.Client{Timeout: 60 * time.Second}, zosiaPolicy, r)
+		},
 	}
 }
 

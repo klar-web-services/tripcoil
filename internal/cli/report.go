@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/facts"
@@ -118,7 +119,13 @@ func printJSONReport(stdout, stderr io.Writer, sudo, dir, id string) int {
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(report.JSON(in)); err != nil {
+	out := report.JSON(in)
+	if out.Verdict.Line == "" {
+		if md, err := os.ReadFile(filepath.Join(dir, "report.md")); err == nil {
+			out.Verdict.Line, _, _ = strings.Cut(string(md), "\n")
+		}
+	}
+	if err := enc.Encode(out); err != nil {
 		return 2
 	}
 	return 0

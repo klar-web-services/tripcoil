@@ -16,6 +16,21 @@ type State struct {
 	LastReviewed        string    `json:"lastReviewed,omitempty"`
 	LastReviewedAt      time.Time `json:"lastReviewedAt,omitzero"`
 	ConsecutiveFailures int       `json:"consecutiveFailures"`
+	Zosia               *Zosia    `json:"zosia,omitempty"`
+}
+
+// Zosia is the last attempt to send a run's report to Zosia.
+type Zosia struct {
+	LastAttemptAt time.Time   `json:"lastAttemptAt"`
+	LastRun       string      `json:"lastRun"`
+	LastSentAt    time.Time   `json:"lastSentAt,omitzero"`
+	LastURL       string      `json:"lastUrl,omitempty"`
+	LastError     *ZosiaError `json:"lastError,omitempty"`
+}
+
+type ZosiaError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func statePath(stateDir string) string { return filepath.Join(stateDir, "state.json") }

@@ -219,7 +219,10 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 			rec.Status, rec.ExitCode = run.Failed, 2
 		}
 	}
-	md := report.Render(report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, NoReview: why, Agent: rv.agentName()})
+	in := report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, NoReview: why, Agent: rv.agentName()}
+	md := report.Render(in)
+	verdict := report.VerdictOf(in, md)
+	rec.Verdict = &verdict
 	if err := run.WriteFile(filepath.Join(dir, "report.md"), []byte(md), 0o640); err != nil {
 		rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write report.md: %v", err))
 		if rec.Status != run.Interrupted {
@@ -249,6 +252,9 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 	}
 	if _, err := run.Prune(d.stateDir, int(cfg.Retention.KeepRuns)); err != nil {
 		fmt.Fprintf(stderr, "tripcoil: cannot remove old run folders: %v\n", err)
+	}
+	if rec.Status != run.Interrupted && ctx.Err() == nil {
+		reportToZosia(ctx, d, cfg, in, stderr)
 	}
 	return rec, dir, nil
 }
