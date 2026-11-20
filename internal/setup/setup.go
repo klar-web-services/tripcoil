@@ -22,23 +22,24 @@ import (
 )
 
 type Host struct {
-	Root        string
-	Exe         string
-	Sudo        string
-	Run         func(name string, args ...string) ([]byte, error)
-	LookPath    func(name string) (string, error)
-	UserExists  func(name string) bool
-	GroupExists func(name string) bool
-	FindCLI     func(command, name string) (string, error)
-	Fetch       func(url string) ([]byte, error)
-	CheckBinary func(path string) error
-	Stat        config.StatFunc
-	Terminal    func() bool
-	NoEcho      func() (restore func(), err error)
-	SetupToken  func(cli string) ([]byte, error)
-	PingZosia   func(url, secret string) (name string, err error)
-	In          io.Reader
-	Out         io.Writer
+	Root         string
+	Exe          string
+	Sudo         string
+	Run          func(name string, args ...string) ([]byte, error)
+	LookPath     func(name string) (string, error)
+	UserExists   func(name string) bool
+	GroupExists  func(name string) bool
+	FindCLI      func(command, name string) (string, error)
+	Fetch        func(url string) ([]byte, error)
+	CheckBinary  func(path string) error
+	Stat         config.StatFunc
+	Terminal     func() bool
+	NoEcho       func() (restore func(), err error)
+	SetupToken   func(cli string) ([]byte, error)
+	PingZosia    func(url, secret string) (name string, err error)
+	ConnectZosia func(url, file string) (name string, err error)
+	In           io.Reader
+	Out          io.Writer
 }
 
 func NewHost(exe string, in io.Reader, out io.Writer) Host {

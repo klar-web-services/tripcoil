@@ -10,7 +10,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
-// zosia asks for the Zosia secret unless the secret file exists, sending is off, or nobody can answer.
+// zosia offers to connect to Zosia unless the secret file exists, sending is off, or nobody can answer.
 func (h Host) zosia(o Options, c config.Config) (bool, error) {
 	file := c.Zosia.SecretFile
 	if file == "" {
@@ -26,6 +26,27 @@ func (h Host) zosia(o Options, c config.Config) (bool, error) {
 	url := c.Zosia.URL
 	if url == "" {
 		url = zosia.DefaultURL
+	}
+	skipped := func() (bool, error) {
+		fmt.Fprintf(h.Out, "· Zosia: skipped; connect later with %stripcoil zosia connect.\n", h.Sudo)
+		return false, nil
+	}
+	how, err := h.ask(fmt.Sprintf("Connect this machine to Zosia (%s)?\n  b  in the browser (recommended)\n  p  paste a secret\n  Enter to skip\nb or p", url), "skip", "b", "p", "skip")
+	if err != nil {
+		fmt.Fprintln(h.Out)
+		return skipped()
+	}
+	if how == "skip" {
+		return skipped()
+	}
+	if how == "b" {
+		name, err := h.ConnectZosia(url, h.path(file))
+		if err != nil {
+			fmt.Fprintf(h.Out, "! Zosia: %v\n", err)
+			return skipped()
+		}
+		fmt.Fprintf(h.Out, "✓ Connected to Zosia as %q.\n", name)
+		return true, nil
 	}
 	for range 2 {
 		fmt.Fprintf(h.Out, "Zosia secret from %s/app/secrets (input hidden, empty to skip): ", url)
@@ -46,8 +67,7 @@ func (h Host) zosia(o Options, c config.Config) (bool, error) {
 		fmt.Fprintf(h.Out, "✓ Connected to Zosia as %q.\n", name)
 		return true, nil
 	}
-	fmt.Fprintf(h.Out, "· Zosia: skipped; connect later with %stripcoil setup.\n", h.Sudo)
-	return false, nil
+	return skipped()
 }
 
 // WriteSecret writes the Zosia secret file in one step, readable by its owner only.

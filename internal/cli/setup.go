@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/buildinfo"
@@ -90,6 +92,11 @@ func setupHost(o setup.Options, stdout io.Writer) (bool, func() error, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		return zosia.Ping(ctx, &http.Client{Timeout: 15 * time.Second}, url, secret, "tripcoil/"+buildinfo.Version)
+	}
+	h.ConnectZosia = func(url, file string) (string, error) {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return connectZosia(ctx, defaultDeps(), url, file, stdout)
 	}
 	return h.Setup(o)
 }
