@@ -11,12 +11,10 @@ func TestTargetUsesOverrides(t *testing.T) {
 	}
 }
 
-func TestTargetWithoutAnyKeyRefuses(t *testing.T) {
-	if DefaultKey != "" {
-		t.Skip("a default key is built in")
-	}
-	if _, _, err := Target("", ""); err == nil || err.Error() != "this build has no Zosia key" {
-		t.Fatal(err)
+func TestTargetDefaultsToProduction(t *testing.T) {
+	url, k, err := Target("", "")
+	if err != nil || url != "https://zosiasec.com" || k.ID != "2026a" {
+		t.Fatalf("%q %+v %v", url, k, err)
 	}
 }
 

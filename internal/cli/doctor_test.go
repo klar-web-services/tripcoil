@@ -202,17 +202,3 @@ func TestDoctorZosia(t *testing.T) {
 		}
 	}
 }
-
-func TestDoctorZosiaWithoutABuiltInKey(t *testing.T) {
-	if zosia.DefaultKey != "" {
-		t.Skip("a default key is built in")
-	}
-	d := testDeps(t, nil, nil)
-	var checked string
-	healthy(t, &d, &checked)
-	d.zosiaSecret = func(string) (string, bool, error) { return "zosia_x", true, nil }
-	var out, errb bytes.Buffer
-	if code := dispatch([]string{"doctor"}, &out, &errb, d); code != 1 || !strings.Contains(out.String(), "✗ Zosia: this build has no Zosia key\n") {
-		t.Errorf("exit %d\n%s", code, out.String())
-	}
-}
