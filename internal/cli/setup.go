@@ -1,14 +1,19 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/klar-web-services/tripcoil/internal/buildinfo"
 	"github.com/klar-web-services/tripcoil/internal/setup"
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 const setupUsage = `Usage: tripcoil setup [--agent claude|codex|none] [--yes]
@@ -80,5 +85,11 @@ func setupHost(o setup.Options, stdout io.Writer) (bool, func() error, error) {
 	if err != nil {
 		return false, nil, fmt.Errorf("cannot find Tripcoil's own binary: %v", err)
 	}
-	return setup.NewHost(exe, os.Stdin, stdout).Setup(o)
+	h := setup.NewHost(exe, os.Stdin, stdout)
+	h.PingZosia = func(url, secret string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return zosia.Ping(ctx, &http.Client{Timeout: 15 * time.Second}, url, secret, "tripcoil/"+buildinfo.Version)
+	}
+	return h.Setup(o)
 }

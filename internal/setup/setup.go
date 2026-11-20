@@ -36,6 +36,7 @@ type Host struct {
 	Terminal    func() bool
 	NoEcho      func() (restore func(), err error)
 	SetupToken  func(cli string) ([]byte, error)
+	PingZosia   func(url, secret string) (name string, err error)
 	In          io.Reader
 	Out         io.Writer
 }
@@ -191,6 +192,11 @@ func (h Host) Setup(o Options) (ready bool, start func() error, err error) {
 			changed, hasToken = changed || did, did
 		}
 	}
+	did, err = h.zosia(o, c)
+	if err != nil {
+		return false, nil, err
+	}
+	changed = changed || did
 	ready = name == "none" || installed && hasToken
 	did, wroteService, step, err := h.service(m, ready)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/config"
 	"github.com/klar-web-services/tripcoil/internal/run"
 	"github.com/klar-web-services/tripcoil/internal/sandbox"
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 type UninstallOptions struct {
@@ -73,9 +74,14 @@ func (h Host) Uninstall(o UninstallOptions) error {
 	if err != nil || len(removed) == 0 {
 		step(false, err, "", "Setup added no NodeSource repository.")
 	}
+	secret := h.exists(config.DefaultZosiaSecretFile)
 	for _, dir := range []string{filepath.Dir(config.DefaultPath), o.StateDir} {
 		removed, err := h.removeDir(dir)
-		step(removed, err, "Removed "+dir+".", dir+" was not there.")
+		done := "Removed " + dir + "."
+		if secret && dir == filepath.Dir(config.DefaultPath) {
+			done = fmt.Sprintf("Removed %s, with the Zosia secret %s; revoke it at %s/app/secrets.", dir, config.DefaultZosiaSecretFile, zosia.DefaultURL)
+		}
+		step(removed, err, done, dir+" was not there.")
 	}
 	removedUser, err := h.removeAgentUser()
 	step(removedUser, err, "Removed the user and group "+agent.UserName+".", "The user "+agent.UserName+" was not there.")

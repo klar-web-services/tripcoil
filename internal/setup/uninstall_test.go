@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/klar-web-services/tripcoil/internal/config"
 )
 
 func installed(t *testing.T, m Manager) (*fakeHost, UninstallOptions) {
@@ -279,5 +281,20 @@ func TestUninstallReportsNodeSourceFilesBeforeAFailure(t *testing.T) {
 	}
 	if out := f.out.String(); !strings.Contains(out, "✓ Removed NodeSource's repository: "+NodeSourceSourcesPath+".\n! remove ") {
 		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestUninstallNamesTheZosiaSecret(t *testing.T) {
+	f, o := installed(t, Systemd)
+	if err := WriteSecret(filepath.Join(f.Root, config.DefaultZosiaSecretFile), "zosia_x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Uninstall(o); err != nil {
+		t.Fatalf("%v\n%s", err, f.out.String())
+	}
+	f.gone(t, "/etc/tripcoil")
+	want := "✓ Removed /etc/tripcoil, with the Zosia secret /etc/tripcoil/zosia.secret; revoke it at https://zosiasec.com/app/secrets.\n"
+	if out := f.out.String(); !strings.Contains(out, want) || strings.Contains(out, "zosia_x") {
+		t.Fatalf("output:\n%s", out)
 	}
 }
