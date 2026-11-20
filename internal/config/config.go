@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/klar-web-services/tripcoil/internal/zosia"
 )
 
 const DefaultPath = "/etc/tripcoil/tripcoil.yaml"
@@ -27,6 +29,7 @@ type Config struct {
 	Review    Review      `yaml:"review"`
 	Audit     Audit       `yaml:"audit"`
 	Retention Retention   `yaml:"retention"`
+	Zosia     Zosia       `yaml:"zosia"`
 
 	Path    string `yaml:"-"`
 	Missing bool   `yaml:"-"`
@@ -53,6 +56,14 @@ type Retention struct {
 	KeepRuns WholeNumber `yaml:"keepRuns"`
 }
 
+const DefaultZosiaSecretFile = "/etc/tripcoil/zosia.secret"
+
+type Zosia struct {
+	SecretFile string `yaml:"secretFile"`
+	URL        string `yaml:"url"`
+	Key        string `yaml:"key"`
+}
+
 func Default() Config {
 	return Config{
 		Version:  1,
@@ -66,6 +77,7 @@ func Default() Config {
 		},
 		Audit:     Audit{MaxDatabaseAgeHours: 48},
 		Retention: Retention{KeepRuns: 30},
+		Zosia:     Zosia{SecretFile: DefaultZosiaSecretFile},
 	}
 }
 
@@ -202,26 +214,45 @@ func validate(c Config, root *yaml.Node, stat StatFunc) []string {
 	if c.Retention.KeepRuns < 1 {
 		p = append(p, at("retention", "keepRuns")+"retention.keepRuns must be at least 1")
 	}
+	if z := c.Zosia; z.SecretFile != "" && !filepath.IsAbs(z.SecretFile) {
+		p = append(p, at("zosia", "secretFile")+"zosia.secretFile must be an absolute path")
+	}
+	if u := c.Zosia.URL; u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+		p = append(p, at("zosia", "url")+"zosia.url must start with https:// (or http:// for a local test server)")
+	}
+	if k := c.Zosia.Key; k != "" {
+		if _, err := zosia.ParseKey(k); err != nil {
+			p = append(p, at("zosia", "key")+"zosia.key: "+err.Error())
+		}
+	}
 	return p
 }
+
+// Stat is the StatFunc config uses on the real file system.
+func Stat(path string) (FileInfo, error) { return osStat(path) }
 
 func checkEnvFile(path, at string, stat StatFunc) []string {
 	if !filepath.IsAbs(path) {
 		return []string{at + "review.envFile must be an absolute path"}
 	}
+	return CheckRootFile(path, "review.envFile", at, stat)
+}
+
+// CheckRootFile checks that path is a regular file owned by root that only root can read.
+func CheckRootFile(path, field, at string, stat StatFunc) []string {
 	fi, err := stat(path)
 	if err != nil {
-		return []string{at + fmt.Sprintf("review.envFile %s cannot be read: %v", path, err)}
+		return []string{at + fmt.Sprintf("%s %s cannot be read: %v", field, path, err)}
 	}
 	var p []string
 	if !fi.Regular {
-		p = append(p, at+fmt.Sprintf("review.envFile %s is not a regular file", path))
+		p = append(p, at+fmt.Sprintf("%s %s is not a regular file", field, path))
 	}
 	if fi.UID != 0 {
-		p = append(p, at+fmt.Sprintf("review.envFile %s must be owned by root", path))
+		p = append(p, at+fmt.Sprintf("%s %s must be owned by root", field, path))
 	}
 	if fi.Mode&0o077 != 0 {
-		p = append(p, at+fmt.Sprintf("review.envFile %s must not be readable by group or others (chmod 600 %s)", path, path))
+		p = append(p, at+fmt.Sprintf("%s %s must not be readable by group or others (chmod 600 %s)", field, path, path))
 	}
 	return p
 }
