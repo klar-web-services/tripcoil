@@ -36,6 +36,7 @@ type Record struct {
 	Reviewed      bool              `json:"reviewed"`
 	CarriedFrom   string            `json:"carriedFrom,omitempty"`
 	ReviewedAt    time.Time         `json:"reviewedAt,omitzero"`
+	Verdict       *Verdict          `json:"verdict,omitempty"`
 	Errors        []problem.Problem `json:"errors"`
 	Warnings      []problem.Problem `json:"warnings"`
 	Notices       []problem.Problem `json:"notices"`

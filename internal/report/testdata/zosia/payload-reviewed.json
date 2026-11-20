@@ -1,0 +1,443 @@
+{
+  "run": {
+    "schemaVersion": "1",
+    "runId": "20261114T061500Z-3fa2",
+    "startedAt": "2026-11-14T06:15:00Z",
+    "endedAt": "2026-11-14T06:18:00Z",
+    "trigger": "manual",
+    "versions": {
+      "tripcoil": "dev"
+    },
+    "stages": {
+      "audit": "ok",
+      "inventory": "ok",
+      "review": "ok"
+    },
+    "status": "complete",
+    "counts": {},
+    "reviewed": false,
+    "verdict": {
+      "code": "exploitable",
+      "line": "🔴 2 issues exploitable now; 3 not assessed (4 coverage gaps)",
+      "counts": {
+        "conditional": 1,
+        "conditionalLower": 0,
+        "critical": 1,
+        "errors": 0,
+        "exploitable": 2,
+        "falsePositive": 1,
+        "gaps": 4,
+        "high": 2,
+        "low": 1,
+        "medium": 3,
+        "notExploitable": 1,
+        "unassessed": 3
+      }
+    },
+    "errors": [],
+    "warnings": [],
+    "notices": [],
+    "exitCode": 0
+  },
+  "summary": "nginx's TLS is exploitable from the internet now. The kernel CVE needs a local user, and this host has untrusted ones.",
+  "findings": [
+    {
+      "id": "f:0000000000000001",
+      "vulnerability": {
+        "id": "CVE-2026-1234",
+        "aliases": null,
+        "severity": "High",
+        "cvss": null,
+        "epss": 0.41,
+        "knownExploited": false,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-1234"
+        ]
+      },
+      "origin": "pkg:deb/debian/libssl3@3.0.15-1~deb12u1?arch=amd64\u0026distro=debian-12",
+      "package": {
+        "name": "libssl3",
+        "version": "3.0.15-1~deb12u1",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "proc:nginx",
+        "proc:shop",
+        "proc:worker"
+      ],
+      "risk": "high",
+      "remediation": "Upgrade libssl3 to 3.0.16-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.",
+      "review": {
+        "findingId": "f:0000000000000001",
+        "verdict": "confirmed",
+        "exploitability": "exploitable",
+        "priority": "now",
+        "reasoning": "nginx listens on 0.0.0.0:443 and the firewall allows 443 from anywhere.",
+        "evidence": [
+          "facts/network.json: 0.0.0.0:443 nginx",
+          "facts/firewall.txt: tcp dport 443 accept"
+        ],
+        "fix": [
+          "apt-get install --only-upgrade libssl3",
+          "systemctl restart nginx shop"
+        ],
+        "sources": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-1234"
+        ]
+      }
+    },
+    {
+      "id": "f:0000000000000002",
+      "vulnerability": {
+        "id": "CVE-2026-2000",
+        "aliases": null,
+        "severity": "High",
+        "cvss": null,
+        "epss": 0,
+        "knownExploited": true,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-2000"
+        ]
+      },
+      "origin": "pkg:deb/debian/linux-image-6.1.0-28-amd64@6.1.119-1?arch=amd64\u0026distro=debian-12",
+      "package": {
+        "name": "linux-image-6.1.0-28-amd64",
+        "version": "6.1.119-1",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "kernel"
+      ],
+      "risk": "critical",
+      "remediation": "Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot.",
+      "review": {
+        "findingId": "f:0000000000000002",
+        "verdict": "confirmed",
+        "exploitability": "conditional",
+        "priority": "soon",
+        "reasoning": "Needs a local user; alice and bob can log in.",
+        "fix": [
+          "apt-get dist-upgrade",
+          "reboot"
+        ]
+      }
+    },
+    {
+      "id": "f:0000000000000003",
+      "vulnerability": {
+        "id": "GHSA-35jh-r3h4-6jhm",
+        "aliases": null,
+        "severity": "High",
+        "cvss": null,
+        "epss": 0.002,
+        "knownExploited": false,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/GHSA-35jh-r3h4-6jhm"
+        ]
+      },
+      "origin": "appdir:/srv/shop",
+      "package": {
+        "name": "lodash",
+        "version": "4.17.20",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "proc:shop"
+      ],
+      "risk": "medium",
+      "remediation": "Upgrade lodash in /srv/shop to 4.17.21, then restart shop.service.",
+      "review": {
+        "findingId": "f:0000000000000003",
+        "verdict": "confirmed",
+        "exploitability": "not_exploitable",
+        "priority": "none",
+        "reasoning": "The shop never calls lodash's template function.",
+        "fix": [
+          "upgrade lodash when convenient"
+        ]
+      }
+    },
+    {
+      "id": "f:0000000000000004",
+      "vulnerability": {
+        "id": "CVE-2026-3000",
+        "aliases": null,
+        "severity": "Low",
+        "cvss": null,
+        "epss": 0,
+        "knownExploited": false,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-3000"
+        ]
+      },
+      "origin": "image:sha256:1111",
+      "package": {
+        "name": "zlib1g",
+        "version": "1:1.2.13.dfsg-1",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "container:shop-web-1"
+      ],
+      "risk": "low",
+      "remediation": "No fix is known for zlib1g 1:1.2.13.dfsg-1 yet.",
+      "review": {
+        "findingId": "f:0000000000000004",
+        "verdict": "false_positive",
+        "reasoning": "Debian fixed it in 1:1.2.13.dfsg-1 (DSA-5000-1)."
+      }
+    },
+    {
+      "id": "f:0000000000000005",
+      "vulnerability": {
+        "id": "CVE-2026-1234",
+        "aliases": null,
+        "severity": "High",
+        "cvss": null,
+        "epss": 0.41,
+        "knownExploited": false,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-1234"
+        ]
+      },
+      "origin": "image:sha256:1111",
+      "package": {
+        "name": "libssl3",
+        "version": "3.0.11-1~deb12u2",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "container:shop-web-1"
+      ],
+      "risk": "high",
+      "remediation": "Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the container shop-web-1.",
+      "review": {
+        "findingId": "f:0000000000000005",
+        "verdict": "corrected",
+        "exploitability": "unknown",
+        "priority": "scheduled",
+        "reasoning": "The image's libssl3 is not loaded by the shop process, as far as the image shows.",
+        "fix": [
+          "rebuild the image"
+        ],
+        "corrections": [
+          {
+            "field": "package.version",
+            "old": "3.0.11-1~deb12u2",
+            "new": "3.0.11-1~deb12u3",
+            "why": "the image's dpkg status says so"
+          }
+        ]
+      }
+    },
+    {
+      "id": "f:0000000000000006",
+      "vulnerability": {
+        "id": "CVE-2026-3100",
+        "aliases": null,
+        "severity": "High",
+        "cvss": null,
+        "epss": 0.001,
+        "knownExploited": false,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-3100"
+        ]
+      },
+      "origin": "image:sha256:1111",
+      "package": {
+        "name": "libssl3",
+        "version": "3.0.11-1~deb12u2",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "container:shop-web-1"
+      ],
+      "risk": "medium",
+      "remediation": "Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.17-1~deb12u1 or later, then recreate the container shop-web-1.",
+      "review": {
+        "verdict": "not_reviewed"
+      }
+    },
+    {
+      "id": "f:0000000000000007",
+      "vulnerability": {
+        "id": "CVE-2026-3200",
+        "aliases": null,
+        "severity": "Critical",
+        "cvss": null,
+        "epss": 0.003,
+        "knownExploited": false,
+        "urls": [
+          "https://security-tracker.debian.org/tracker/CVE-2026-3200"
+        ]
+      },
+      "origin": "pkg:deb/debian/libssl3@3.0.15-1~deb12u1?arch=amd64\u0026distro=debian-12",
+      "package": {
+        "name": "libssl3",
+        "version": "3.0.15-1~deb12u1",
+        "type": "deb"
+      },
+      "fix": {
+        "state": "",
+        "versions": null
+      },
+      "source": "debian:distro:debian:12",
+      "items": [
+        "proc:nginx",
+        "proc:shop",
+        "proc:worker"
+      ],
+      "risk": "medium",
+      "remediation": "Upgrade libssl3 to 3.0.17-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.",
+      "review": {
+        "verdict": "not_reviewed"
+      }
+    }
+  ],
+  "added": [
+    {
+      "findingId": "added:1",
+      "verdict": "added",
+      "exploitability": "exploitable",
+      "priority": "now",
+      "reasoning": "The api binary embeds an old Go net/http; it listens on 0.0.0.0:8080.",
+      "fix": [
+        "rebuild /opt/api/api with Go 1.27.4"
+      ],
+      "sources": [
+        "https://go.dev/issue/1"
+      ],
+      "item": "proc:api",
+      "vulnerability": "CVE-2026-9999"
+    }
+  ],
+  "coverage": [
+    {
+      "code": "ORIGIN_UNRESOLVED",
+      "subject": "lxd: /snap/lxd/123/bin/lxd",
+      "detail": "it runs from a snap, and snaps are not audited in v1"
+    },
+    {
+      "code": "ORIGIN_UNIDENTIFIED",
+      "subject": "api: /opt/api/api",
+      "detail": "no packages were identified in it"
+    },
+    {
+      "code": "APPDIR_NOT_FOUND",
+      "subject": "python3.11 (/usr/bin/python3.11)",
+      "detail": "no app directory was found, so only the interpreter is audited"
+    },
+    {
+      "code": "IMAGE_ONLY",
+      "subject": "container shop-web-1",
+      "detail": "only the image is audited, not bind-mounted code or changes made in the running container"
+    }
+  ],
+  "errors": [],
+  "verdict": {
+    "code": "exploitable",
+    "line": "🔴 2 issues exploitable now; 3 not assessed (4 coverage gaps)",
+    "counts": {
+      "conditional": 1,
+      "conditionalLower": 0,
+      "critical": 1,
+      "errors": 0,
+      "exploitable": 2,
+      "falsePositive": 1,
+      "gaps": 4,
+      "high": 2,
+      "low": 1,
+      "medium": 3,
+      "notExploitable": 1,
+      "unassessed": 3
+    }
+  },
+  "host": {
+    "hostname": "web-1",
+    "distro": "debian 12",
+    "kernel": "6.1.0-28-amd64"
+  },
+  "names": {
+    "items": {
+      "container:shop-web-1": "shop-web-1",
+      "kernel": "kernel",
+      "proc:api": "api",
+      "proc:nginx": "nginx",
+      "proc:shop": "node",
+      "proc:worker": "python3.11"
+    },
+    "origins": {
+      "appdir:/srv/shop": "node: /srv/shop",
+      "image:sha256:1111": "shop-web-1: image ghcr.io/acme/shop:2026.11.3",
+      "pkg:deb/debian/libssl3@3.0.15-1~deb12u1?arch=amd64\u0026distro=debian-12": "nginx, node, python3.11: package libssl3 3.0.15-1~deb12u1",
+      "pkg:deb/debian/linux-image-6.1.0-28-amd64@6.1.119-1?arch=amd64\u0026distro=debian-12": "kernel: package linux-image-6.1.0-28-amd64 6.1.119-1"
+    }
+  },
+  "restarts": [
+    {
+      "item": "kernel",
+      "name": "kernel",
+      "rebootPending": true,
+      "rebootReasons": [
+        "a newer kernel package is installed: linux-image-6.1.0-31-amd64 6.1.128-1"
+      ]
+    },
+    {
+      "item": "proc:nginx",
+      "name": "nginx",
+      "units": [
+        "nginx.service"
+      ],
+      "restartNeeded": [
+        "/usr/lib/x86_64-linux-gnu/libssl.so.3"
+      ]
+    }
+  ],
+  "upgrades": [
+    {
+      "origin": "appdir:/srv/shop",
+      "path": "/srv/shop",
+      "package": "lodash",
+      "type": "npm",
+      "installed": [
+        "4.17.20"
+      ],
+      "version": "4.18.0",
+      "findings": 4
+    }
+  ],
+  "freshness": {
+    "grype": "0.121.2",
+    "dbBuilt": "2026-11-14T03:12:00Z"
+  }
+}

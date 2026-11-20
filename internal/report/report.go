@@ -74,7 +74,7 @@ func Gaps(inv *inventory.Inventory, aud *audit.Audit, idx *facts.Index) []Gap {
 }
 
 func Render(in Input) string {
-	if in.Review != nil && in.Audit != nil && in.Run.Status != run.Interrupted && in.Run.Stages["audit"] != run.StageFailed {
+	if reviewedReport(in) {
 		return renderReviewed(in)
 	}
 	var b strings.Builder
