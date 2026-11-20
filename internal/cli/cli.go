@@ -35,6 +35,7 @@ Usage:
   tripcoil run [flags]     Run once now and write an evidence folder (as root)
   tripcoil report [flags]  Print the latest report (as root)
   tripcoil status          Print the service's state and the last and next run (as root)
+  tripcoil zosia connect   Connect this machine to Zosia in the browser (as root)
   tripcoil daemon          The service's entrypoint: a run every interval (as root)
   tripcoil update          Update to the latest release and restart the service (as root)
   tripcoil uninstall       Remove what setup and the installer added (as root)
@@ -71,6 +72,9 @@ type deps struct {
 	machineKey    func() (string, error)
 	sendZosia     func(ctx context.Context, r zosia.Request) (zosia.Result, error)
 	pingZosia     func(ctx context.Context, url, secret string) (string, error)
+	hostInfo      func() zosia.HostInfo
+	startConnect  func(ctx context.Context, url string, host zosia.HostInfo) (zosia.ConnectRequest, error)
+	waitConnect   func(ctx context.Context, url string, r zosia.ConnectRequest) (secret, name string, err error)
 }
 
 func defaultDeps() deps {
@@ -107,6 +111,13 @@ func defaultDeps() deps {
 		},
 		pingZosia: func(ctx context.Context, url, secret string) (string, error) {
 			return zosia.Ping(ctx, &http.Client{Timeout: 15 * time.Second}, url, secret, "tripcoil/"+buildinfo.Version)
+		},
+		hostInfo: hostInfo,
+		startConnect: func(ctx context.Context, url string, host zosia.HostInfo) (zosia.ConnectRequest, error) {
+			return zosia.StartConnect(ctx, &http.Client{Timeout: 15 * time.Second}, url, "tripcoil/"+buildinfo.Version, host)
+		},
+		waitConnect: func(ctx context.Context, url string, r zosia.ConnectRequest) (string, string, error) {
+			return zosia.WaitConnect(ctx, &http.Client{Timeout: 15 * time.Second}, url, "tripcoil/"+buildinfo.Version, r)
 		},
 	}
 }
@@ -162,6 +173,8 @@ func dispatch(args []string, stdout, stderr io.Writer, d deps) int {
 		return runUninstall(args[1:], stdout, stderr, d)
 	case "update":
 		return runUpdate(args[1:], stdout, stderr, d)
+	case "zosia":
+		return runZosia(args[1:], stdout, stderr, d)
 	case "sandbox-probe":
 		return probe.Main(args[1:], stdout, stderr)
 	case "version", "--version":
