@@ -30,6 +30,7 @@ type Config struct {
 	Audit     Audit       `yaml:"audit"`
 	Retention Retention   `yaml:"retention"`
 	Zosia     Zosia       `yaml:"zosia"`
+	Exposure  Exposure    `yaml:"exposure"`
 
 	Path    string `yaml:"-"`
 	Missing bool   `yaml:"-"`
@@ -56,6 +57,32 @@ type Retention struct {
 	KeepRuns WholeNumber `yaml:"keepRuns"`
 }
 
+// Exposure is what the owner states about who can reach this machine. Both keys are optional.
+type Exposure struct {
+	// LAN says how findings on services that only the LAN can reach count: lower, trusted or untrusted.
+	LAN string `yaml:"lan"`
+	// InternetPorts, when set, are exactly the ports of this machine the internet can reach.
+	InternetPorts *[]WholeNumber `yaml:"internetPorts"`
+}
+
+const (
+	LANLower     = "lower"
+	LANTrusted   = "trusted"
+	LANUntrusted = "untrusted"
+)
+
+// Ports is InternetPorts as plain numbers; nil when the owner states nothing.
+func (e Exposure) Ports() *[]int {
+	if e.InternetPorts == nil {
+		return nil
+	}
+	out := make([]int, len(*e.InternetPorts))
+	for i, p := range *e.InternetPorts {
+		out[i] = int(p)
+	}
+	return &out
+}
+
 const DefaultZosiaSecretFile = "/etc/tripcoil/zosia.secret"
 
 type Zosia struct {
@@ -78,6 +105,7 @@ func Default() Config {
 		Audit:     Audit{MaxDatabaseAgeHours: 48},
 		Retention: Retention{KeepRuns: 30},
 		Zosia:     Zosia{SecretFile: DefaultZosiaSecretFile},
+		Exposure:  Exposure{LAN: LANLower},
 	}
 }
 
@@ -223,6 +251,18 @@ func validate(c Config, root *yaml.Node, stat StatFunc) []string {
 	if k := c.Zosia.Key; k != "" {
 		if _, err := zosia.ParseKey(k); err != nil {
 			p = append(p, at("zosia", "key")+"zosia.key: "+err.Error())
+		}
+	}
+	switch c.Exposure.LAN {
+	case LANLower, LANTrusted, LANUntrusted:
+	default:
+		p = append(p, at("exposure", "lan")+fmt.Sprintf("exposure.lan must be lower, trusted or untrusted, found %q", c.Exposure.LAN))
+	}
+	if ports := c.Exposure.InternetPorts; ports != nil {
+		for i, port := range *ports {
+			if port < 1 || port > 65535 {
+				p = append(p, at("exposure", "internetPorts")+fmt.Sprintf("exposure.internetPorts[%d]: %d is not a port (1 to 65535)", i, port))
+			}
 		}
 	}
 	return p

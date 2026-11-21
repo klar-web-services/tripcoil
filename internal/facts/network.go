@@ -31,6 +31,26 @@ type Socket struct {
 	inode     string
 }
 
+// Exposed are the sockets that say what the machine offers: every listening TCP socket, and the
+// bound UDP sockets that are neither connected nor on a port the kernel handed out.
+func (n Network) Exposed() []Socket {
+	var out []Socket
+	for _, s := range n.Sockets {
+		if s.Proto == "udp" && (s.Connected || n.Ephemeral(s.Port)) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// Ephemeral reports whether a port is one the kernel hands out when a program binds port 0: at or
+// above the start of net.ipv4.ip_local_port_range. Development servers, IDEs and agents listen on
+// such ports, a new one at each start, so a listener on one counts by its address and items only.
+func (n Network) Ephemeral(port int) bool {
+	return n.LocalPortRangeStart > 0 && port >= n.LocalPortRangeStart
+}
+
 const (
 	stateEstablished = "01"
 	stateClose       = "07"

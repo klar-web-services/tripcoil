@@ -55,7 +55,7 @@ type deps struct {
 	stateDir      string
 	collect       func(ctx context.Context, cacheDir string) (*inventory.Inventory, error)
 	audit         func(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir string, cfg config.Config) *audit.Audit
-	facts         func(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error)
+	facts         func(ctx context.Context, inv *inventory.Inventory, runDir string, cfg config.Config) (*facts.Index, error)
 	agent         func(cfg config.Config) review.Agent
 	enterScope    func(args []string) (code int, ran bool, err error)
 	lowerPriority func() error

@@ -197,7 +197,7 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 	case inv == nil:
 		rec.Stages["facts"] = run.StageSkipped
 	default:
-		idx, err = d.facts(ctx, inv, dir)
+		idx, err = d.facts(ctx, inv, dir, cfg)
 		switch {
 		case ctx.Err() != nil:
 			rec.Interrupt(d.now(), "facts")
@@ -259,8 +259,8 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 	return rec, dir, nil
 }
 
-func factsHost(ctx context.Context, inv *inventory.Inventory, runDir string) (*facts.Index, error) {
-	d := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath}
+func factsHost(ctx context.Context, inv *inventory.Inventory, runDir string, cfg config.Config) (*facts.Index, error) {
+	d := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath, Interfaces: facts.SystemInterfaces, InternetPorts: cfg.Exposure.Ports()}
 	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
 		d.Docker, d.DockerSocket = dockerapi.New(socket), socket
 	}

@@ -108,6 +108,10 @@ func base() Input {
 		Audit:    &audit.Audit{Findings: []audit.Finding{{ID: "f:1", Risk: "high", Fix: audit.Fix{State: "fixed"}}, {ID: "f:2", Risk: "low", Fix: audit.Fix{State: "not-fixed"}}}},
 		Network:  &facts.Network{LocalPortRangeStart: 32768, Sockets: []facts.Socket{{Proto: "tcp", Address: "0.0.0.0", Port: 443, Items: []string{"proc:nginx"}}, {Proto: "udp", Address: "127.0.0.53", Port: 53, Items: []string{"proc:resolved"}}}},
 		Firewall: &fw, SSHD: &sshd, Users: &users, Containers: &conts, Kernel: kern, PromptVersion: "1", Agent: "claude",
+		Reach: &facts.Reach{Items: []facts.ItemReach{
+			{Item: "proc:nginx", Default: facts.ReachLAN, Via: facts.ViaDirect, Sockets: []facts.ReachSocket{{Proto: "tcp", Address: "0.0.0.0", Port: 443, Reach: facts.ReachLAN}}},
+			{Item: "container:web", Default: facts.ReachLAN, Via: facts.ViaDirect, Unsure: "nginx runs here"},
+		}},
 	}
 }
 
@@ -132,6 +136,9 @@ func TestCompute(t *testing.T) {
 		"capabilities reordered":  func(in *Input) { (*in.Containers)[0].CapAdd = []string{"SYS_TIME", "NET_ADMIN"} },
 		"a key file's path":       func(in *Input) { (*in.Users)[0].KeyFiles = []string{"/etc/ssh/keys/root"} },
 		"the kernel command line": func(in *Input) { in.Kernel.Cmdline = "ro" },
+		// A new lease or IPv6 prefix changes a socket's address, not the item's reach.
+		"an address behind a reach":    func(in *Input) { in.Reach.Items[0].Sockets[0].Address = "192.168.178.101" },
+		"the words of an unsure reach": func(in *Input) { in.Reach.Items[1].Unsure = "caddy runs here" },
 	}
 	withIDE := func(port int) Input {
 		in := base()
@@ -191,16 +198,24 @@ func TestCompute(t *testing.T) {
 		"a new user": func(in *Input) {
 			*in.Users = append(*in.Users, facts.User{Name: "bob", UID: 1001, Shell: "/bin/sh", Password: "set"})
 		},
-		"an empty password":         func(in *Input) { (*in.Users)[1].Password = "empty" },
-		"a new SSH key":             func(in *Input) { (*in.Users)[1].AuthorizedKeys = 3 },
-		"a missing users fact":      func(in *Input) { in.Users = nil },
-		"an added capability":       func(in *Input) { (*in.Containers)[0].CapAdd = append((*in.Containers)[0].CapAdd, "SYS_ADMIN") },
-		"a Docker socket mount":     func(in *Input) { (*in.Containers)[0].DockerSocket = true },
-		"host networking":           func(in *Input) { (*in.Containers)[0].HostNetwork = true },
-		"the host's PID namespace":  func(in *Input) { (*in.Containers)[0].PIDMode = "host" },
-		"a missing containers fact": func(in *Input) { in.Containers = nil },
-		"a sysctl":                  func(in *Input) { in.Kernel.Sysctls["kernel.unprivileged_bpf_disabled"] = "0" },
-		"a missing kernel fact":     func(in *Input) { in.Kernel = nil },
+		"an empty password":          func(in *Input) { (*in.Users)[1].Password = "empty" },
+		"a new SSH key":              func(in *Input) { (*in.Users)[1].AuthorizedKeys = 3 },
+		"a missing users fact":       func(in *Input) { in.Users = nil },
+		"an added capability":        func(in *Input) { (*in.Containers)[0].CapAdd = append((*in.Containers)[0].CapAdd, "SYS_ADMIN") },
+		"a Docker socket mount":      func(in *Input) { (*in.Containers)[0].DockerSocket = true },
+		"host networking":            func(in *Input) { (*in.Containers)[0].HostNetwork = true },
+		"the host's PID namespace":   func(in *Input) { (*in.Containers)[0].PIDMode = "host" },
+		"a missing containers fact":  func(in *Input) { in.Containers = nil },
+		"a sysctl":                   func(in *Input) { in.Kernel.Sysctls["kernel.unprivileged_bpf_disabled"] = "0" },
+		"a missing kernel fact":      func(in *Input) { in.Kernel = nil },
+		"an item's default reach":    func(in *Input) { in.Reach.Items[0].Default = facts.ReachInternet },
+		"a reach put in doubt":       func(in *Input) { in.Reach.Items[0].Unsure = "caddy runs here" },
+		"a reach no longer in doubt": func(in *Input) { in.Reach.Items[1].Unsure = "" },
+		"a reach the owner stated":   func(in *Input) { in.Reach.Items[0].Stated = true },
+		"a proxy that started": func(in *Input) {
+			in.Reach.Routers = append(in.Reach.Routers, facts.Router{Item: "proc:nginx", Program: "nginx", Kind: facts.ViaProxy, Reach: facts.ReachLAN})
+		},
+		"a missing reach fact": func(in *Input) { in.Reach = nil },
 	}
 	for name, change := range changed {
 		in := base()

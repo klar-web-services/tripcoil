@@ -233,7 +233,7 @@ func TestRunInterruptedDuringReview(t *testing.T) {
 func TestRunFactsWriteFailed(t *testing.T) {
 	calls := 0
 	d := reviewDeps(t, fakeAgent{out: validReview, calls: &calls})
-	d.facts = func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
+	d.facts = func(context.Context, *inventory.Inventory, string, config.Config) (*facts.Index, error) {
 		return nil, errors.New("no space left on device")
 	}
 	code, rec, md := runOnce(t, d)
@@ -273,7 +273,7 @@ func TestRunReviewWriteFailed(t *testing.T) {
 func TestRunCountsMissingFacts(t *testing.T) {
 	calls := 0
 	d := reviewDeps(t, fakeAgent{out: validReview, calls: &calls})
-	d.facts = func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
+	d.facts = func(context.Context, *inventory.Inventory, string, config.Config) (*facts.Index, error) {
 		return &facts.Index{Collected: []string{}, Missing: []facts.Missing{{Fact: "firewall.txt", Reason: "nft: not permitted"}}}, nil
 	}
 	code, rec, md := runOnce(t, d)
@@ -286,7 +286,7 @@ func TestRunReviewsAgainWhenUsersChange(t *testing.T) {
 	calls := 0
 	d := reviewDeps(t, fakeAgent{out: validReview, calls: &calls})
 	users := `[{"name":"root","uid":0,"home":"/root","shell":"/bin/bash","password":"none","authorizedKeys":1,"keyFiles":[]}]`
-	d.facts = func(_ context.Context, _ *inventory.Inventory, dir string) (*facts.Index, error) {
+	d.facts = func(_ context.Context, _ *inventory.Inventory, dir string, _ config.Config) (*facts.Index, error) {
 		if err := os.MkdirAll(filepath.Join(dir, "facts"), 0o750); err != nil {
 			return nil, err
 		}

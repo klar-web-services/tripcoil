@@ -95,7 +95,7 @@ func TestLiveHost(t *testing.T) {
 	}
 	t.Logf("audit: %d findings %v; origins %v; database built %s", len(a.Findings), tiers, statuses, a.Grype.DBBuilt)
 
-	fd := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath}
+	fd := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath, Interfaces: facts.SystemInterfaces}
 	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
 		fd.Docker, fd.DockerSocket = dockerapi.New(socket), socket
 	}

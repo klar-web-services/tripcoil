@@ -27,6 +27,10 @@ type Deps struct {
 	Docker       Docker
 	DockerSocket string
 	MountInfo    string
+	// Interfaces lists the machine's network interfaces (SystemInterfaces).
+	Interfaces func() ([]NetInterface, error)
+	// InternetPorts is the owner's exposure.internetPorts; nil when the owner states nothing.
+	InternetPorts *[]int
 }
 
 type Index struct {
@@ -72,8 +76,8 @@ func Collect(ctx context.Context, d Deps, inv *inventory.Inventory, runDir strin
 		return nil
 	}
 
-	net, err := c.network()
-	if err := add("network.json", err, func() error { return writeJSON("network.json", net) }); err != nil {
+	net, netErr := c.network()
+	if err := add("network.json", netErr, func() error { return writeJSON("network.json", net) }); err != nil {
 		return nil, err
 	}
 	fw, err := c.firewall()
@@ -84,8 +88,8 @@ func Collect(ctx context.Context, d Deps, inv *inventory.Inventory, runDir strin
 	if err := add("processes.json", err, func() error { return writeJSON("processes.json", procs) }); err != nil {
 		return nil, err
 	}
-	conts, err := c.containers()
-	if err := add("containers.json", err, func() error { return writeJSON("containers.json", conts) }); err != nil {
+	conts, contErr := c.containers()
+	if err := add("containers.json", contErr, func() error { return writeJSON("containers.json", conts) }); err != nil {
 		return nil, err
 	}
 	kern, err := c.kernel()
@@ -105,6 +109,18 @@ func Collect(ctx context.Context, d Deps, inv *inventory.Inventory, runDir strin
 	}
 	users, err := c.users()
 	if err := add("users.json", err, func() error { return writeJSON("users.json", users) }); err != nil {
+		return nil, err
+	}
+	addrs, addrErr := c.addresses()
+	if err := add("addresses.json", addrErr, func() error { return writeJSON("addresses.json", addrs) }); err != nil {
+		return nil, err
+	}
+	// The default reach needs all three; without it the review lowers nothing.
+	reachErr := errors.Join(netErr, contErr, addrErr)
+	if reachErr != nil {
+		reachErr = errors.New("it needs network.json, containers.json and addresses.json")
+	}
+	if err := add("reach.json", reachErr, func() error { return writeJSON("reach.json", c.reach(net, conts, addrs)) }); err != nil {
 		return nil, err
 	}
 	if err := writeJSON("index.json", idx); err != nil {

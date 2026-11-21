@@ -31,6 +31,7 @@ type reviewRun struct {
 	noReview bool
 	force    bool
 	cli      string
+	reach    *facts.Reach
 }
 
 func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
@@ -60,6 +61,10 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	var kernel facts.Kernel
 	if r.fact("kernel.json", &kernel) {
 		in.Kernel = &kernel
+	}
+	var reach facts.Reach
+	if r.fact("reach.json", &reach) {
+		in.Reach, r.reach = &reach, &reach
 	}
 	rec.Fingerprint = fingerprint.Compute(in)
 	switch {

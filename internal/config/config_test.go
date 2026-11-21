@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +86,9 @@ func TestProblems(t *testing.T) {
 		{"relative command", "version: 1\nreview:\n  command: claude\n", `line 3: review.command must be an absolute path, found "claude"`},
 		{"keepRuns", "version: 1\nretention:\n  keepRuns: 0\n", "line 3: retention.keepRuns must be at least 1"},
 		{"db age", "version: 1\naudit:\n  maxDatabaseAgeHours: 0\n", "line 3: audit.maxDatabaseAgeHours must be at least 1"},
+		{"lan", "version: 1\nexposure:\n  lan: open\n", `line 3: exposure.lan must be lower, trusted or untrusted, found "open"`},
+		{"port", "version: 1\nexposure:\n  internetPorts: [443, 70000]\n", "line 3: exposure.internetPorts[1]: 70000 is not a port (1 to 65535)"},
+		{"port not a number", "version: 1\nexposure:\n  internetPorts: [https]\n", `line 3: expected a whole number, found "https"`},
 		{"two documents", "version: 1\n---\nversion: 1\n", "the file holds more than one YAML document; keep only one"},
 		{"empty", "", "the file is empty; it needs at least version: 1"},
 		{"syntax", "version: 1\nreview: [\n", "not valid YAML"},
@@ -145,5 +149,20 @@ func TestEnvFileChecks(t *testing.T) {
 	_, err := Parse("x.yaml", []byte("version: 1\nreview:\n  envFile: agent.env\n"), noStat)
 	if err == nil || !strings.Contains(err.Error(), "review.envFile must be an absolute path") {
 		t.Fatalf("relative envFile: %v", err)
+	}
+}
+
+func TestExposure(t *testing.T) {
+	c, err := Parse("/etc/tripcoil/tripcoil.yaml", []byte("version: 1\n"), noStat)
+	if err != nil || c.Exposure.LAN != LANLower || c.Exposure.Ports() != nil {
+		t.Fatalf("defaults: %+v, %v", c.Exposure, err)
+	}
+	c, err = Parse("/etc/tripcoil/tripcoil.yaml", []byte("version: 1\nexposure:\n  lan: trusted\n  internetPorts: []\n"), noStat)
+	if err != nil || c.Exposure.LAN != LANTrusted || c.Exposure.Ports() == nil || len(*c.Exposure.Ports()) != 0 {
+		t.Fatalf("an empty list is a statement that no port is public: %+v, %v", c.Exposure, err)
+	}
+	c, err = Parse("/etc/tripcoil/tripcoil.yaml", []byte("version: 1\nexposure:\n  internetPorts: [80, 443]\n"), noStat)
+	if err != nil || c.Exposure.LAN != LANLower || !slices.Equal(*c.Exposure.Ports(), []int{80, 443}) {
+		t.Fatalf("ports: %+v, %v", c.Exposure, err)
 	}
 }

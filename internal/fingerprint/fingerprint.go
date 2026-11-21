@@ -22,6 +22,7 @@ type Input struct {
 	Users         *[]facts.User
 	Containers    *[]facts.Container
 	Kernel        *facts.Kernel
+	Reach         *facts.Reach
 	PromptVersion string
 	Agent         string
 	Model         string
@@ -38,6 +39,7 @@ type canonical struct {
 	Users         []string `json:"users"`
 	ContainerSec  []string `json:"containerSecurity"`
 	Sysctls       []string `json:"sysctls"`
+	Reach         []string `json:"reach"`
 	Prompt        string   `json:"prompt"`
 	Agent         string   `json:"agent"`
 	Model         string   `json:"model"`
@@ -45,7 +47,7 @@ type canonical struct {
 
 func Compute(in Input) string {
 	c := canonical{Findings: []string{}, RestartNeeded: []string{}, RebootPending: []string{}, Sockets: []string{}, Containers: []string{},
-		Users: []string{}, ContainerSec: []string{}, Sysctls: []string{}, Prompt: in.PromptVersion, Agent: in.Agent, Model: in.Model}
+		Users: []string{}, ContainerSec: []string{}, Sysctls: []string{}, Reach: []string{}, Prompt: in.PromptVersion, Agent: in.Agent, Model: in.Model}
 	if in.Audit != nil {
 		for _, f := range in.Audit.Findings {
 			c.Findings = append(c.Findings, f.ID+" "+f.Risk+" "+f.Fix.State)
@@ -112,7 +114,18 @@ func Compute(in Input) string {
 			c.Sysctls = append(c.Sysctls, k+"="+v)
 		}
 	}
-	for _, l := range [][]string{c.Findings, c.RestartNeeded, c.RebootPending, c.Containers, c.Users, c.ContainerSec, c.Sysctls} {
+	// The default reach, not the addresses behind it: a new DHCP lease or IPv6 prefix changes nothing here.
+	if in.Reach == nil {
+		c.Reach = append(c.Reach, "missing")
+	} else {
+		for _, r := range in.Reach.Items {
+			c.Reach = append(c.Reach, fmt.Sprintf("%s %s %s unsure=%v stated=%v", r.Item, r.Default, r.Via, r.Unsure != "", r.Stated))
+		}
+		for _, r := range in.Reach.Routers {
+			c.Reach = append(c.Reach, fmt.Sprintf("router %s %s %s", r.Item, r.Program, r.Reach))
+		}
+	}
+	for _, l := range [][]string{c.Findings, c.RestartNeeded, c.RebootPending, c.Containers, c.Users, c.ContainerSec, c.Sysctls, c.Reach} {
 		slices.Sort(l)
 	}
 	slices.Sort(c.Sockets)
@@ -122,20 +135,6 @@ func Compute(in Input) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func Exposed(n facts.Network) []facts.Socket {
-	var out []facts.Socket
-	for _, s := range n.Sockets {
-		if s.Proto == "udp" && (s.Connected || Ephemeral(n, s.Port)) {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
-}
+func Exposed(n facts.Network) []facts.Socket { return n.Exposed() }
 
-// Ephemeral reports whether a port is one the kernel hands out when a program binds port 0: at or
-// above the start of net.ipv4.ip_local_port_range. Development servers, IDEs and agents listen on
-// such ports, a new one at each start, so a listener on one counts by its address and items only.
-func Ephemeral(n facts.Network, port int) bool {
-	return n.LocalPortRangeStart > 0 && port >= n.LocalPortRangeStart
-}
+func Ephemeral(n facts.Network, port int) bool { return n.Ephemeral(port) }

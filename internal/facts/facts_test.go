@@ -188,13 +188,13 @@ func TestCollect(t *testing.T) {
 	}, &calls), LookPath: func(string) (string, error) { return "", errNotFound },
 		Docker: fakeDocker{"c1": {HostConfig: dockerapi.HostConfig{Privileged: true, CapAdd: []string{"NET_ADMIN"}, NetworkMode: "bridge", PidMode: "host"},
 			Mounts: []dockerapi.Mount{{Type: "bind", Source: "/var/run", Destination: "/var/run", RW: true}, {Type: "volume", Source: "/var/lib/docker/volumes/x/_data", Destination: "/data", RW: true}}}},
-		DockerSocket: "/var/run/docker.sock"}
+		DockerSocket: "/var/run/docker.sock", Interfaces: homeInterfaces}
 	runDir := t.TempDir()
 	idx, err := Collect(context.Background(), d, inv, runDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "sshd.txt", "users.json"}
+	want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "sshd.txt", "users.json", "addresses.json", "reach.json"}
 	if !reflect.DeepEqual(idx.Collected, want) || len(idx.Missing) != 0 {
 		t.Fatalf("index %+v", idx)
 	}
@@ -307,11 +307,12 @@ func TestCollectMissingFacts(t *testing.T) {
 	for _, m := range idx.Missing {
 		reasons[m.Fact] = m.Reason
 	}
-	if len(reasons) != 4 || !strings.Contains(reasons["network.json"], "proc/net/tcp") || !strings.Contains(reasons["firewall.txt"], "Operation not permitted") ||
+	if len(reasons) != 6 || !strings.Contains(reasons["addresses.json"], "interfaces") || !strings.Contains(reasons["reach.json"], "network.json") ||
+		!strings.Contains(reasons["network.json"], "proc/net/tcp") || !strings.Contains(reasons["firewall.txt"], "Operation not permitted") ||
 		!strings.Contains(reasons["containers.json"], "no Docker") || !strings.Contains(reasons["kernel.json"], "cmdline") {
 		t.Errorf("missing: %+v", idx.Missing)
 	}
-	for _, name := range []string{"network.json", "firewall.txt", "kernel.json"} {
+	for _, name := range []string{"network.json", "firewall.txt", "kernel.json", "addresses.json", "reach.json"} {
 		if _, err := os.Stat(filepath.Join(runDir, "facts", name)); err == nil {
 			t.Errorf("%s written although it is missing", name)
 		}

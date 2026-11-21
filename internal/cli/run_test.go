@@ -41,7 +41,7 @@ func testDeps(t *testing.T, inv *inventory.Inventory, err error) deps {
 		audit: func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
 			return sampleAudit(audit.Complete)
 		},
-		facts: func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
+		facts: func(context.Context, *inventory.Inventory, string, config.Config) (*facts.Index, error) {
 			return &facts.Index{Collected: []string{}, Missing: []facts.Missing{}, Notes: []string{}}, nil
 		},
 		agent:         func(config.Config) review.Agent { return nil },
@@ -277,7 +277,7 @@ func TestRunInterruptedDuringFacts(t *testing.T) {
 	d := testDeps(t, sampleInventory(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	d.interrupts = func() (context.Context, context.CancelFunc) { return ctx, cancel }
-	d.facts = func(context.Context, *inventory.Inventory, string) (*facts.Index, error) {
+	d.facts = func(context.Context, *inventory.Inventory, string, config.Config) (*facts.Index, error) {
 		cancel()
 		return &facts.Index{Collected: []string{}, Missing: []facts.Missing{}, Notes: []string{}}, nil
 	}
