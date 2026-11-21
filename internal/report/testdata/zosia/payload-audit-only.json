@@ -563,5 +563,35 @@
         "unassessed": 1
       }
     }
+  ],
+  "reach": [
+    {
+      "item": "nginx",
+      "from": "internet",
+      "via": "direct",
+      "source": "default",
+      "evidence": "tcp 0.0.0.0 port 443"
+    },
+    {
+      "item": "node",
+      "from": "internet",
+      "via": "direct",
+      "source": "default",
+      "evidence": "tcp 0.0.0.0 port 8443"
+    },
+    {
+      "item": "api",
+      "from": "lan",
+      "via": "direct",
+      "source": "config",
+      "evidence": "tcp 0.0.0.0 port 8080"
+    },
+    {
+      "item": "python3.11",
+      "from": "localhost",
+      "via": "direct",
+      "source": "default",
+      "evidence": "tcp 127.0.0.1 port 9000"
+    }
   ]
 }

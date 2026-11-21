@@ -23,8 +23,10 @@ type Input struct {
 	Audit     *audit.Audit
 	Facts     *facts.Index
 	Review    *review.Review
-	NoReview  string
-	Agent     string
+	// Reach is facts/reach.json, each item's default reach; nil when the fact is missing.
+	Reach    *facts.Reach
+	NoReview string
+	Agent    string
 }
 
 // maxItems is how many items a finding names; the C library belongs to nearly every process.

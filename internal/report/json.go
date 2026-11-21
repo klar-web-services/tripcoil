@@ -23,6 +23,8 @@ type JSONReport struct {
 	Freshness *JSONFreshness  `json:"freshness"`
 	// Actions are the cards: what to do on this host, most urgent first.
 	Actions []Card `json:"actions"`
+	// Reach says who can reach what, the widest first.
+	Reach []ReachLine `json:"reach"`
 }
 
 type JSONFinding struct {
@@ -80,5 +82,6 @@ func JSON(in Input) JSONReport {
 	}
 	out.Freshness = jsonFreshness(in.Audit)
 	out.Actions = Cards(in)
+	out.Reach = Reaches(in)
 	return out
 }

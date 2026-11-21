@@ -40,7 +40,11 @@ type Card struct {
 	Steps       []audit.Step          `json:"steps"`
 	Upstream    review.Upstream       `json:"upstream"`
 	Why         string                `json:"why,omitempty"`
-	Counts      map[string]int        `json:"counts"`
+	// Reach is from where the card's items can be reached together; empty for the kernel and
+	// where no review established it.
+	Reach  string         `json:"reach,omitempty"`
+	Via    string         `json:"via,omitempty"`
+	Counts map[string]int `json:"counts"`
 
 	tier int
 }
@@ -141,14 +145,31 @@ func Cards(in Input) []Card {
 		c.MoreChanges = max(0, len(a.Changes)+a.MoreChanges-len(c.Changes))
 		byID[a.ID] = &c
 	}
+	itemsOf := map[string][]string{}
 	for _, f := range in.Audit.Findings {
 		if c := byID[f.Action]; c != nil {
 			e, ok := entries[f.ID]
 			c.count(e, reviewed && ok, f.Vulnerability.KnownExploited, slices.Index(audit.Tiers, f.Risk))
+			for _, item := range f.Items {
+				if !slices.Contains(itemsOf[f.Action], item) {
+					itemsOf[f.Action] = append(itemsOf[f.Action], item)
+				}
+			}
+		}
+	}
+	withReach := reviewed && in.Reach != nil
+	established := review.Established(in.Review, in.Reach)
+	asked := map[string]bool{}
+	if reviewed {
+		for _, e := range in.Review.Reach {
+			asked[e.Item] = true
 		}
 	}
 	for _, a := range in.Audit.Actions {
 		if c := byID[a.ID]; c.Urgency != UrgencyNone {
+			if withReach && a.Kind != audit.ActionKernel {
+				c.Reach, c.Via = cardReach(itemsOf[a.ID], established, in.Reach, asked)
+			}
 			out = append(out, *c)
 		}
 	}
@@ -173,6 +194,9 @@ func Cards(in Input) []Card {
 				}
 			}
 			if c.count(e, true, false, len(audit.Tiers)); c.Urgency != UrgencyNone {
+				if withReach {
+					c.Reach, c.Via = cardReach([]string{e.Item}, established, in.Reach, asked)
+				}
 				out = append(out, c)
 			}
 		}
@@ -288,8 +312,15 @@ func writeActions(b *strings.Builder, cards []Card) {
 				break
 			}
 			fmt.Fprintf(b, "- **%s**", escapeBlockStart(md(c.Title)))
+			var about []string
 			if c.Name != "" && !strings.Contains(c.Title, c.Name) {
-				b.WriteString(" (" + md(c.Name) + ")")
+				about = append(about, md(c.Name))
+			}
+			if c.Reach != "" {
+				about = append(about, reachWords[c.Reach]+viaWords[c.Via])
+			}
+			if len(about) > 0 {
+				b.WriteString(" (" + strings.Join(about, "; ") + ")")
 			}
 			var changes []string
 			for _, ch := range c.Changes {

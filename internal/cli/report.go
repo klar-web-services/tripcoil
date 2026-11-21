@@ -117,6 +117,10 @@ func printJSONReport(stdout, stderr io.Writer, sudo, dir, id string) int {
 	if rev, err := review.Load(dir); err == nil {
 		in.Review = rev
 	}
+	var reach facts.Reach
+	if readOptional(filepath.Join(dir, "facts", "reach.json"), &reach) {
+		in.Reach = &reach
+	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	out := report.JSON(in)

@@ -219,7 +219,7 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 			rec.Status, rec.ExitCode = run.Failed, 2
 		}
 	}
-	in := report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, NoReview: why, Agent: rv.agentName()}
+	in := report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, Reach: rv.reach, NoReview: why, Agent: rv.agentName()}
 	md := report.Render(in)
 	verdict := report.VerdictOf(in, md)
 	rec.Verdict = &verdict

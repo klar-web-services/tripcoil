@@ -69,6 +69,7 @@ func renderReviewed(in Input) string {
 	}
 	b.WriteString("\n")
 	writeActions(&b, cards)
+	writeReaches(&b, Reaches(in))
 	names := itemNamesByID(in.Inventory)
 	writeEntries(&b, "Exploitable now", groups[review.Exploitable], names)
 	writeEntries(&b, "Exploitable under conditions", conditional, names)
@@ -191,6 +192,9 @@ func writeList(b *strings.Builder, rs []reviewed, names map[string]string) {
 		for _, c := range e.Corrections {
 			fmt.Fprintf(b, "  - Corrected %s: %s → %s (%s)\n", md(c.Field), md(c.Old), md(c.New), md(c.Why))
 		}
+		if l := lowered(e); l != "" {
+			b.WriteString("  - " + l + "\n")
+		}
 		for _, f := range e.Fix {
 			b.WriteString("  - Fix: " + escapeBlockStart(md(f)) + "\n")
 		}
@@ -231,6 +235,9 @@ func writeCollapsed(b *strings.Builder, title string, rs []reviewed, names map[s
 			break
 		}
 		fmt.Fprintf(b, "- %s: %s\n", entryTitle(r, names), md(r.entry.Reasoning))
+		if l := lowered(r.entry); l != "" {
+			b.WriteString("  - " + l + "\n")
+		}
 	}
 	b.WriteString("\n</details>\n\n")
 }

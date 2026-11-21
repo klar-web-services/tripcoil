@@ -18,17 +18,17 @@
     "reviewed": false,
     "verdict": {
       "code": "exploitable",
-      "line": "🔴 2 things to fix now, 1 to fix this week, 1 not assessed (4 coverage gaps)",
+      "line": "🔴 1 thing to fix now, 1 to fix this week, 1 routine update, 1 not assessed (4 coverage gaps)",
       "counts": {
-        "actionsNow": 2,
-        "actionsRoutine": 0,
+        "actionsNow": 1,
+        "actionsRoutine": 1,
         "actionsSoon": 1,
         "actionsUnassessed": 1,
         "conditional": 1,
-        "conditionalLower": 0,
+        "conditionalLower": 1,
         "critical": 1,
         "errors": 0,
-        "exploitable": 2,
+        "exploitable": 1,
         "falsePositive": 1,
         "gaps": 4,
         "high": 2,
@@ -95,7 +95,8 @@
         ],
         "sources": [
           "https://security-tracker.debian.org/tracker/CVE-2026-1234"
-        ]
+        ],
+        "vector": "inbound"
       }
     },
     {
@@ -139,7 +140,8 @@
         "fix": [
           "apt-get dist-upgrade",
           "reboot"
-        ]
+        ],
+        "vector": "local"
       }
     },
     {
@@ -351,8 +353,8 @@
     {
       "findingId": "added:1",
       "verdict": "added",
-      "exploitability": "exploitable",
-      "priority": "now",
+      "exploitability": "conditional",
+      "priority": "scheduled",
       "reasoning": "The api binary embeds an old Go net/http; it listens on 0.0.0.0:8080.",
       "fix": [
         "rebuild /opt/api/api with Go 1.27.4"
@@ -361,7 +363,13 @@
         "https://go.dev/issue/1"
       ],
       "item": "proc:api",
-      "vulnerability": "CVE-2026-9999"
+      "vulnerability": "CVE-2026-9999",
+      "vector": "inbound",
+      "adjusted": {
+        "exploitability": "exploitable",
+        "priority": "now",
+        "rule": "lan"
+      }
     }
   ],
   "coverage": [
@@ -389,17 +397,17 @@
   "errors": [],
   "verdict": {
     "code": "exploitable",
-    "line": "🔴 2 things to fix now, 1 to fix this week, 1 not assessed (4 coverage gaps)",
+    "line": "🔴 1 thing to fix now, 1 to fix this week, 1 routine update, 1 not assessed (4 coverage gaps)",
     "counts": {
-      "actionsNow": 2,
-      "actionsRoutine": 0,
+      "actionsNow": 1,
+      "actionsRoutine": 1,
       "actionsSoon": 1,
       "actionsUnassessed": 1,
       "conditional": 1,
-      "conditionalLower": 0,
+      "conditionalLower": 1,
       "critical": 1,
       "errors": 0,
-      "exploitable": 2,
+      "exploitable": 1,
       "falsePositive": 1,
       "gaps": 4,
       "high": 2,
@@ -510,6 +518,8 @@
         "source": "https://security-tracker.debian.org/tracker/CVE-2026-1234"
       },
       "why": "nginx serves TLS to the internet with this library.",
+      "reach": "internet",
+      "via": "direct",
       "counts": {
         "conditional": 0,
         "conditionalLower": 0,
@@ -520,39 +530,6 @@
         "notExploitable": 0,
         "open": 2,
         "unassessed": 1
-      }
-    },
-    {
-      "id": "added:1",
-      "kind": "finding",
-      "name": "api",
-      "items": [
-        "api"
-      ],
-      "urgency": "now",
-      "reviewed": true,
-      "title": "Fix CVE-2026-9999 in api",
-      "changes": [],
-      "also": [],
-      "steps": [
-        {
-          "text": "rebuild /opt/api/api with Go 1.27.4"
-        }
-      ],
-      "upstream": {
-        "state": "unknown"
-      },
-      "why": "The api binary embeds an old Go net/http; it listens on 0.0.0.0:8080.",
-      "counts": {
-        "conditional": 0,
-        "conditionalLower": 0,
-        "exploitable": 1,
-        "falsePositive": 0,
-        "findings": 1,
-        "knownExploited": 0,
-        "notExploitable": 0,
-        "open": 1,
-        "unassessed": 0
       }
     },
     {
@@ -598,6 +575,41 @@
       }
     },
     {
+      "id": "added:1",
+      "kind": "finding",
+      "name": "api",
+      "items": [
+        "api"
+      ],
+      "urgency": "routine",
+      "reviewed": true,
+      "title": "Fix CVE-2026-9999 in api",
+      "changes": [],
+      "also": [],
+      "steps": [
+        {
+          "text": "rebuild /opt/api/api with Go 1.27.4"
+        }
+      ],
+      "upstream": {
+        "state": "unknown"
+      },
+      "why": "The api binary embeds an old Go net/http; it listens on 0.0.0.0:8080.",
+      "reach": "lan",
+      "via": "direct",
+      "counts": {
+        "conditional": 0,
+        "conditionalLower": 1,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "findings": 1,
+        "knownExploited": 0,
+        "notExploitable": 0,
+        "open": 1,
+        "unassessed": 0
+      }
+    },
+    {
       "id": "a:44c050e2c9e4",
       "kind": "image",
       "name": "shop-web-1",
@@ -631,6 +643,7 @@
       "upstream": {
         "state": "unknown"
       },
+      "reach": "unknown",
       "counts": {
         "conditional": 0,
         "conditionalLower": 0,
@@ -642,6 +655,42 @@
         "open": 2,
         "unassessed": 2
       }
+    }
+  ],
+  "reach": [
+    {
+      "item": "nginx",
+      "from": "internet",
+      "via": "direct",
+      "source": "review",
+      "evidence": "facts/firewall.txt: tcp dport 443 accept"
+    },
+    {
+      "item": "shop-web-1",
+      "from": "unknown",
+      "source": "review",
+      "evidence": "/etc/nginx/conf.d is readable by root only"
+    },
+    {
+      "item": "api",
+      "from": "lan",
+      "via": "direct",
+      "source": "config",
+      "evidence": "exposure.internetPorts does not list its ports; the reviewer said internet"
+    },
+    {
+      "item": "node",
+      "from": "tailnet",
+      "via": "direct",
+      "source": "review",
+      "evidence": "facts/firewall.txt: tcp dport 8443 drop on eth0"
+    },
+    {
+      "item": "python3.11",
+      "from": "localhost",
+      "via": "direct",
+      "source": "default",
+      "evidence": "tcp 127.0.0.1 port 9000"
     }
   ]
 }
