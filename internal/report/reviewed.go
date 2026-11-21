@@ -51,7 +51,12 @@ func renderReviewed(in Input) string {
 		}
 	}
 
-	b.WriteString(reviewVerdict(len(groups[review.Exploitable]), len(conditional), unassessed, len(lower)) + suffixes(in.Run, len(gaps), true) + "\n\n")
+	cards := Cards(in)
+	line := reviewVerdict(len(groups[review.Exploitable]), len(conditional), unassessed, len(lower))
+	if len(in.Audit.Actions) > 0 {
+		line = actionsVerdict(Summarize(in).Code, cardCounts(cards))
+	}
+	b.WriteString(line + suffixes(in.Run, len(gaps), true) + "\n\n")
 	b.WriteString(hostLine(in) + reviewHost(in) + "\n\n")
 	writeErrors(&b, in)
 	writeReviewWarnings(&b, in)
@@ -63,6 +68,7 @@ func renderReviewed(in Input) string {
 		}
 	}
 	b.WriteString("\n")
+	writeActions(&b, cards)
 	names := itemNamesByID(in.Inventory)
 	writeEntries(&b, "Exploitable now", groups[review.Exploitable], names)
 	writeEntries(&b, "Exploitable under conditions", conditional, names)

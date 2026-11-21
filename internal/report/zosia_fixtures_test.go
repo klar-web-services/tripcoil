@@ -14,8 +14,8 @@ var updateZosia = flag.Bool("update-zosia", false, "rewrite testdata/zosia/*.jso
 // host: a reviewed run and an audit-only run. Zosia copies them into its tests/fixtures/.
 func TestZosiaFixtures(t *testing.T) {
 	ok := map[string]string{"inventory": "ok", "audit": "ok", "review": "ok"}
-	reviewed := Input{Run: record(ok), Inventory: hostInventory(), Audit: hostAudit(), Review: hostReview()}
-	auditOnly := Input{Run: record(map[string]string{"inventory": "ok", "audit": "ok"}), Inventory: hostInventory(), Audit: hostAudit(),
+	reviewed := Input{Run: record(ok), Inventory: hostInventory(), Audit: cardAudit(), Review: cardReview()}
+	auditOnly := Input{Run: record(map[string]string{"inventory": "ok", "audit": "ok"}), Inventory: hostInventory(), Audit: cardAudit(),
 		NoReview: "review.agent is none"}
 	for name, in := range map[string]Input{"payload-reviewed.json": reviewed, "payload-audit-only.json": auditOnly} {
 		v := VerdictOf(in, Render(in))

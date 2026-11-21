@@ -21,6 +21,8 @@ type JSONReport struct {
 	Restarts  []JSONRestart   `json:"restarts"`
 	Upgrades  []audit.Upgrade `json:"upgrades"`
 	Freshness *JSONFreshness  `json:"freshness"`
+	// Actions are the cards: what to do on this host, most urgent first.
+	Actions []Card `json:"actions"`
 }
 
 type JSONFinding struct {
@@ -77,5 +79,6 @@ func JSON(in Input) JSONReport {
 		out.Upgrades = in.Audit.Upgrades
 	}
 	out.Freshness = jsonFreshness(in.Audit)
+	out.Actions = Cards(in)
 	return out
 }

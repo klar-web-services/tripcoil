@@ -19,6 +19,10 @@
       "code": "audit_only",
       "line": "⚠️ Audit only (review.agent is none): 1 critical, 2 high, 3 medium, 1 low findings (4 coverage gaps)",
       "counts": {
+        "actionsNow": 0,
+        "actionsRoutine": 0,
+        "actionsSoon": 0,
+        "actionsUnassessed": 4,
         "conditional": 0,
         "conditionalLower": 0,
         "critical": 1,
@@ -60,8 +64,10 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "fixed",
+        "versions": [
+          "9.9"
+        ]
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -71,6 +77,7 @@
       ],
       "risk": "high",
       "remediation": "Upgrade libssl3 to 3.0.16-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.",
+      "action": "a:f85bdbe6e9e1",
       "review": null
     },
     {
@@ -93,8 +100,10 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "fixed",
+        "versions": [
+          "9.9"
+        ]
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -102,6 +111,7 @@
       ],
       "risk": "critical",
       "remediation": "Upgrade the kernel to 6.1.123-1 or later (apt-get dist-upgrade), then reboot.",
+      "action": "a:18d4158d999f",
       "review": null
     },
     {
@@ -124,8 +134,10 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "fixed",
+        "versions": [
+          "9.9"
+        ]
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -133,6 +145,7 @@
       ],
       "risk": "medium",
       "remediation": "Upgrade lodash in /srv/shop to 4.17.21, then restart shop.service.",
+      "action": "a:bbb4b8f01098",
       "review": null
     },
     {
@@ -155,8 +168,8 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "not-fixed",
+        "versions": []
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -164,6 +177,7 @@
       ],
       "risk": "low",
       "remediation": "No fix is known for zlib1g 1:1.2.13.dfsg-1 yet.",
+      "action": "a:44c050e2c9e4",
       "review": null
     },
     {
@@ -186,8 +200,10 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "fixed",
+        "versions": [
+          "9.9"
+        ]
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -195,6 +211,7 @@
       ],
       "risk": "high",
       "remediation": "Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.16-1~deb12u1 or later, then recreate the container shop-web-1.",
+      "action": "a:44c050e2c9e4",
       "review": null
     },
     {
@@ -217,8 +234,10 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "fixed",
+        "versions": [
+          "9.9"
+        ]
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -226,6 +245,7 @@
       ],
       "risk": "medium",
       "remediation": "Rebuild ghcr.io/acme/shop:2026.11.3 or pull a newer image with libssl3 3.0.17-1~deb12u1 or later, then recreate the container shop-web-1.",
+      "action": "a:44c050e2c9e4",
       "review": null
     },
     {
@@ -248,8 +268,10 @@
         "type": "deb"
       },
       "fix": {
-        "state": "",
-        "versions": null
+        "state": "fixed",
+        "versions": [
+          "9.9"
+        ]
       },
       "source": "debian:distro:debian:12",
       "items": [
@@ -259,6 +281,7 @@
       ],
       "risk": "medium",
       "remediation": "Upgrade libssl3 to 3.0.17-1~deb12u1 (apt-get install --only-upgrade libssl3), then restart nginx.service, shop.service, python3.11.",
+      "action": "a:f85bdbe6e9e1",
       "review": null
     }
   ],
@@ -290,6 +313,10 @@
     "code": "audit_only",
     "line": "⚠️ Audit only (review.agent is none): 1 critical, 2 high, 3 medium, 1 low findings (4 coverage gaps)",
     "counts": {
+      "actionsNow": 0,
+      "actionsRoutine": 0,
+      "actionsSoon": 0,
+      "actionsUnassessed": 4,
       "conditional": 0,
       "conditionalLower": 0,
       "critical": 1,
@@ -360,5 +387,181 @@
   "freshness": {
     "grype": "0.121.2",
     "dbBuilt": "2026-11-14T03:12:00Z"
-  }
+  },
+  "actions": [
+    {
+      "id": "a:18d4158d999f",
+      "kind": "kernel",
+      "name": "Linux kernel",
+      "items": [
+        "kernel"
+      ],
+      "urgency": "unassessed",
+      "reviewed": false,
+      "title": "Update the kernel and reboot",
+      "changes": [
+        {
+          "name": "linux-image-6.1.0-28-amd64",
+          "from": "6.1.119-1",
+          "to": "9.9"
+        }
+      ],
+      "also": [],
+      "steps": [
+        {
+          "text": "Upgrade the kernel",
+          "command": "apt-get update \u0026\u0026 apt-get dist-upgrade"
+        },
+        {
+          "text": "Reboot"
+        }
+      ],
+      "upstream": {
+        "state": "unknown"
+      },
+      "counts": {
+        "conditional": 0,
+        "conditionalLower": 0,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "findings": 1,
+        "knownExploited": 1,
+        "notExploitable": 0,
+        "open": 1,
+        "unassessed": 1
+      }
+    },
+    {
+      "id": "a:f85bdbe6e9e1",
+      "kind": "packages",
+      "name": "System packages",
+      "items": [
+        "nginx",
+        "node",
+        "python3.11"
+      ],
+      "urgency": "unassessed",
+      "reviewed": false,
+      "title": "Update system packages",
+      "changes": [
+        {
+          "name": "libssl3",
+          "from": "3.0.15-1~deb12u1",
+          "to": "9.9"
+        }
+      ],
+      "also": [],
+      "steps": [
+        {
+          "text": "Upgrade the packages",
+          "command": "apt-get update \u0026\u0026 apt-get install --only-upgrade libssl3"
+        },
+        {
+          "text": "Restart nginx.service, shop.service, python3.11"
+        }
+      ],
+      "upstream": {
+        "state": "unknown"
+      },
+      "counts": {
+        "conditional": 0,
+        "conditionalLower": 0,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "findings": 2,
+        "knownExploited": 0,
+        "notExploitable": 0,
+        "open": 2,
+        "unassessed": 2
+      }
+    },
+    {
+      "id": "a:44c050e2c9e4",
+      "kind": "image",
+      "name": "shop-web-1",
+      "target": "ghcr.io/acme/shop:2026.11.3",
+      "items": [
+        "shop-web-1"
+      ],
+      "urgency": "unassessed",
+      "reviewed": false,
+      "title": "Update the shop-web-1 image",
+      "changes": [
+        {
+          "name": "libssl3",
+          "from": "3.0.11-1~deb12u2",
+          "to": "9.9"
+        },
+        {
+          "name": "zlib1g",
+          "from": "1:1.2.13.dfsg-1"
+        }
+      ],
+      "also": [],
+      "steps": [
+        {
+          "text": "Pull or rebuild ghcr.io/acme/shop:2026.11.3"
+        },
+        {
+          "text": "Recreate the container shop-web-1"
+        }
+      ],
+      "upstream": {
+        "state": "unknown"
+      },
+      "counts": {
+        "conditional": 0,
+        "conditionalLower": 0,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "findings": 3,
+        "knownExploited": 0,
+        "notExploitable": 0,
+        "open": 3,
+        "unassessed": 3
+      }
+    },
+    {
+      "id": "a:bbb4b8f01098",
+      "kind": "appdir",
+      "name": "/srv/shop",
+      "target": "/srv/shop",
+      "items": [
+        "node"
+      ],
+      "urgency": "unassessed",
+      "reviewed": false,
+      "title": "Update packages in /srv/shop",
+      "changes": [
+        {
+          "name": "lodash",
+          "from": "4.17.20",
+          "to": "9.9"
+        }
+      ],
+      "also": [],
+      "steps": [
+        {
+          "text": "Upgrade the packages below in /srv/shop"
+        },
+        {
+          "text": "Restart shop.service"
+        }
+      ],
+      "upstream": {
+        "state": "unknown"
+      },
+      "counts": {
+        "conditional": 0,
+        "conditionalLower": 0,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "findings": 1,
+        "knownExploited": 0,
+        "notExploitable": 0,
+        "open": 1,
+        "unassessed": 1
+      }
+    }
+  ]
 }

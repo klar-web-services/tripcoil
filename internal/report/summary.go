@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
-	"github.com/klar-web-services/tripcoil/internal/review"
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
@@ -29,6 +28,9 @@ func Summarize(in Input) run.Verdict {
 		c[t] = 0
 	}
 	c["gaps"] = len(Gaps(in.Inventory, in.Audit, in.Facts))
+	for k, n := range cardCounts(Cards(in)) {
+		c[k] = n
+	}
 	c["errors"] = len(in.Run.Errors)
 	if in.Audit != nil {
 		for _, f := range in.Audit.Findings {
@@ -45,20 +47,7 @@ func Summarize(in Input) run.Verdict {
 		return v
 	}
 	for _, e := range in.Review.Findings {
-		switch {
-		case e.Verdict == review.FalsePositive:
-			c["falsePositive"]++
-		case e.Exploitability == review.Exploitable:
-			c["exploitable"]++
-		case e.Exploitability == review.Conditional && (e.Priority == "now" || e.Priority == "soon"):
-			c["conditional"]++
-		case e.Exploitability == review.Conditional:
-			c["conditionalLower"]++
-		case e.Exploitability == review.NotExploitable:
-			c["notExploitable"]++
-		case e.Exploitability == review.Unknown:
-			c["unassessed"]++
-		}
+		c[sectionOf(e, true)]++
 	}
 	ids := map[string]bool{}
 	for _, f := range in.Audit.Findings {
