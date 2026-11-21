@@ -79,7 +79,7 @@ type auditor struct {
 func Run(ctx context.Context, d Deps, inv *inventory.Inventory) *Audit {
 	au := &auditor{d: d, inv: inv,
 		a: &Audit{SchemaVersion: "1", Status: Complete, Grype: GrypeInfo{Version: grype.Version},
-			Origins: []OriginResult{}, Findings: []Finding{}, Upgrades: []Upgrade{}, Errors: []problem.Problem{}, Warnings: []problem.Problem{}},
+			Origins: []OriginResult{}, Findings: []Finding{}, Upgrades: []Upgrade{}, Actions: []Action{}, Errors: []problem.Problem{}, Warnings: []problem.Problem{}},
 		rem:   newRemediation(d.Family, inv),
 		cache: sbomCache{root: filepath.Join(d.CacheDir, "sbom"), now: d.Now},
 		maps:  map[int][]procfs.Mapping{},
@@ -186,6 +186,7 @@ func (au *auditor) run(ctx context.Context) {
 		return
 	}
 	a.Upgrades = au.checkUpgrades(ctx, upgradeCandidates(a.Findings))
+	SetActions(d.Family, au.inv, a)
 	au.cache.prune()
 }
 

@@ -36,6 +36,7 @@ type Audit struct {
 	Origins       []OriginResult    `json:"origins"`
 	Findings      []Finding         `json:"findings"`
 	Upgrades      []Upgrade         `json:"upgrades"`
+	Actions       []Action          `json:"actions"`
 	Errors        []problem.Problem `json:"errors"`
 	Warnings      []problem.Problem `json:"warnings"`
 }
@@ -76,6 +77,7 @@ type Finding struct {
 	Items         []string      `json:"items"`
 	Risk          string        `json:"risk"`
 	Remediation   string        `json:"remediation"`
+	Action        string        `json:"action,omitempty"`
 	Raw           string        `json:"raw,omitempty"`
 }
 

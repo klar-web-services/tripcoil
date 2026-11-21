@@ -95,6 +95,20 @@ func (r remediation) line(f Finding) string {
 }
 
 func fixVersion(f Finding) (string, bool) {
+	above, _ := fixesAbove(f)
+	if len(above) == 0 {
+		return strings.Join(f.Fix.Versions, " or "), false
+	}
+	fix := above[0] + " or later"
+	if len(above) > 1 {
+		fix += " (also fixed in " + andList(above[1:]) + ")"
+	}
+	return fix, true
+}
+
+// fixesAbove lists a finding's fixed versions above the installed one, lowest first, and the key
+// under which such versions compare.
+func fixesAbove(f Finding) ([]string, func(string) string) {
 	installed, typ := f.Package.Version, f.Package.Type
 	// Debian's fixed versions are its source packages', which have no epoch where the binary
 	// package has one: bsdutils 1:2.38.1-5+b1 is fixed in util-linux 2.38.1-5+deb12u1.
@@ -112,15 +126,8 @@ func fixVersion(f Finding) (string, bool) {
 			above = append(above, v)
 		}
 	}
-	if len(above) == 0 {
-		return strings.Join(f.Fix.Versions, " or "), false
-	}
 	slices.SortStableFunc(above, func(x, y string) int { return compareVersions(typ, key(x), key(y)) })
-	fix := above[0] + " or later"
-	if len(above) > 1 {
-		fix += " (also fixed in " + andList(above[1:]) + ")"
-	}
-	return fix, true
+	return above, key
 }
 
 func andList(s []string) string {
@@ -156,32 +163,38 @@ func (r remediation) kernelPackaged() bool {
 // so a process below it is named instead. systemd as PID 1 re-executes itself instead, and so do
 // the users' managers, which run the same executable. Another init, such as busybox, is named.
 func (r remediation) restart(origin string) string {
-	var units, names []string
-	for _, it := range r.users[origin] {
-		if it.Kind != inventory.KindProcess {
-			continue
-		}
-		own := slices.DeleteFunc(slices.Clone(it.Units), func(u string) bool { return strings.HasPrefix(u, "user@") })
-		units = append(units, own...)
-		pid1 := slices.ContainsFunc(it.Processes, func(p inventory.Process) bool { return p.PID == 1 })
-		switch {
-		case pid1 && (it.Name == "systemd" || r.init == "systemd"):
-			how := "systemctl daemon-reexec"
-			if len(it.Processes) > 1 {
-				how += "; for each user manager: systemctl --user -M <user>@ daemon-reexec"
-			}
-			names = append(names, "systemd ("+how+")")
-		case len(own) == 0:
-			names = append(names, it.Name)
-		}
-	}
-	slices.Sort(units)
-	slices.Sort(names)
-	all := append(slices.Compact(units), slices.Compact(names)...)
+	all := r.restartNames(origin)
 	if len(all) == 0 {
 		return ""
 	}
 	return ", then restart " + list(all)
+}
+
+func (r remediation) restartNames(origins ...string) []string {
+	var units, names []string
+	for _, origin := range origins {
+		for _, it := range r.users[origin] {
+			if it.Kind != inventory.KindProcess {
+				continue
+			}
+			own := slices.DeleteFunc(slices.Clone(it.Units), func(u string) bool { return strings.HasPrefix(u, "user@") })
+			units = append(units, own...)
+			pid1 := slices.ContainsFunc(it.Processes, func(p inventory.Process) bool { return p.PID == 1 })
+			switch {
+			case pid1 && (it.Name == "systemd" || r.init == "systemd"):
+				how := "systemctl daemon-reexec"
+				if len(it.Processes) > 1 {
+					how += "; for each user manager: systemctl --user -M <user>@ daemon-reexec"
+				}
+				names = append(names, "systemd ("+how+")")
+			case len(own) == 0:
+				names = append(names, it.Name)
+			}
+		}
+	}
+	slices.Sort(units)
+	slices.Sort(names)
+	return append(slices.Compact(units), slices.Compact(names)...)
 }
 
 func (r remediation) recreate(origin string) string {
