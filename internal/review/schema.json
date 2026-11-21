@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "findings", "coverageNotes"],
+  "required": ["summary", "findings", "coverageNotes", "actions"],
   "properties": {
     "summary": {"type": "string"},
     "coverageNotes": {"type": "array", "items": {"type": "string"}},
@@ -26,6 +26,32 @@
             "properties": {"field": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}, "why": {"type": "string"}}}},
           "item": {"type": ["string", "null"]},
           "vulnerability": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "title", "changes", "also", "steps", "upstream", "why"],
+        "properties": {
+          "action": {"type": "string"},
+          "title": {"type": "string"},
+          "changes": {"type": "array", "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "from", "to"],
+            "properties": {"name": {"type": "string"}, "from": {"type": "string"}, "to": {"type": ["string", "null"]}}}},
+          "also": {"type": "array", "items": {"type": "string"}},
+          "steps": {"type": "array", "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["text", "command"],
+            "properties": {"text": {"type": "string"}, "command": {"type": ["string", "null"]}}}},
+          "upstream": {
+            "type": "object", "additionalProperties": false,
+            "required": ["state", "note", "source"],
+            "properties": {"state": {"type": "string", "enum": ["available", "none", "unknown"]}, "note": {"type": "string"}, "source": {"type": ["string", "null"]}}},
+          "why": {"type": "string"}
         }
       }
     }

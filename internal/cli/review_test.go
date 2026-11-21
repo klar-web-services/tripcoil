@@ -20,7 +20,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-const validReview = `{"summary":"The kernel CVE needs a local user.","coverageNotes":[],"findings":[
+const validReview = `{"summary":"The kernel CVE needs a local user.","coverageNotes":[],"actions":[],"findings":[
 {"findingId":"f:0000000000000001","verdict":"confirmed","exploitability":"conditional","priority":"soon","reasoning":"Needs a local user.",
  "evidence":["facts/users.json: alice can log in"],"fix":["pacman -Syu","reboot"],"sources":[],"corrections":[],"item":null,"vulnerability":null}]}`
 

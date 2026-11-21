@@ -154,7 +154,7 @@ func TestReviewClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	var r struct{ Summary string }
-	if json.Unmarshal(out.Data, &r) != nil || !strings.HasPrefix(r.Summary, "audit.json has two findings.") || out.CLI != "claude 2.1.309" || len(out.Warnings) != 0 {
+	if json.Unmarshal(out.Data, &r) != nil || !strings.HasPrefix(r.Summary, "audit.json has two findings") || out.CLI != "claude 2.1.309" || len(out.Warnings) != 0 {
 		t.Errorf("output %q %s %v", out.CLI, out.Data, out.Warnings)
 	}
 	if len(e.sb.specs) != 3 {

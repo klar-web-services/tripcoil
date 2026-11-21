@@ -13,7 +13,7 @@ import (
 
 // PromptVersion is the prompt's version. Change it with any change to the prompt
 // or the schema: it is part of the change check's fingerprint.
-const PromptVersion = "3"
+const PromptVersion = "4"
 
 // Prompt is the fixed task the agent gets. It holds no untrusted text: the agent reads the run's
 // files itself.
@@ -47,11 +47,14 @@ var (
 )
 
 type Review struct {
-	SchemaVersion string   `json:"schemaVersion"`
-	Summary       string   `json:"summary"`
-	Findings      []Entry  `json:"findings"`
-	CoverageNotes []string `json:"coverageNotes"`
-	NotReviewed   []string `json:"notReviewed"`
+	SchemaVersion string  `json:"schemaVersion"`
+	Summary       string  `json:"summary"`
+	Findings      []Entry `json:"findings"`
+	// Actions are the reviewer's texts for the audit's actions and for findings it added. A
+	// review from before prompt 4 has none.
+	Actions       []ActionEntry `json:"actions"`
+	CoverageNotes []string      `json:"coverageNotes"`
+	NotReviewed   []string      `json:"notReviewed"`
 }
 
 type Entry struct {
@@ -89,13 +92,24 @@ func Load(runDir string) (*Review, error) {
 
 func Carry(prev *Review, aud *audit.Audit, inv *inventory.Inventory) *Review {
 	ids, items := findingIDs(aud), itemIDs(inv)
-	out := &Review{SchemaVersion: "1", Summary: prev.Summary, Findings: []Entry{}, CoverageNotes: prev.CoverageNotes}
+	out := &Review{SchemaVersion: "1", Summary: prev.Summary, Findings: []Entry{}, Actions: []ActionEntry{}, CoverageNotes: prev.CoverageNotes}
 	if out.CoverageNotes == nil {
 		out.CoverageNotes = []string{}
 	}
 	for _, e := range prev.Findings {
 		if e.Verdict == Added && items[e.Item] || e.Verdict != Added && ids[e.FindingID] {
 			out.Findings = append(out.Findings, e)
+		}
+	}
+	known := actionPackages(aud)
+	for _, e := range out.Findings {
+		if e.Verdict == Added {
+			known[e.FindingID] = nil
+		}
+	}
+	for _, a := range prev.Actions {
+		if _, ok := known[a.Action]; ok {
+			out.Actions = append(out.Actions, a)
 		}
 	}
 	out.NotReviewed = notReviewed(aud, out.Findings)

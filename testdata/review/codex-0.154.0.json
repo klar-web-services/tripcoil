@@ -1,1 +1,100 @@
-{"summary":"Reviewed both findings: one affected package confirmed and one finding corrected to reflect configuration-dependent risk.","coverageNotes":["Assessment uses only audit.json and existing knowledge; no web research or runtime verification was performed."],"findings":[{"findingId":"f:0000000000000001","verdict":"confirmed","exploitability":"conditional","priority":"now","reasoning":"Log4j-core 2.14.1 is affected by Log4Shell, but exploitation depends on attacker-controlled input reaching vulnerable logging behavior and applicable runtime conditions.","evidence":["audit.json identifies log4j-core 2.14.1 on proc:aaaa."],"fix":["Upgrade to a supported Log4j release that fixes CVE-2021-44228 and subsequent related vulnerabilities."],"sources":["audit.json"],"corrections":[],"item":"proc:aaaa","vulnerability":"CVE-2021-44228"},{"findingId":"f:0000000000000002","verdict":"corrected","exploitability":"unknown","priority":"scheduled","reasoning":"BEAST concerns TLS 1.0 CBC usage and client-side attack conditions, so the OpenSSL 3.0.15 version alone does not establish exposure.","evidence":["audit.json identifies OpenSSL 3.0.15 on proc:bbbb but provides no TLS configuration or connection details."],"fix":["Verify negotiated TLS versions and disable TLS 1.0 and older protocols where enabled."],"sources":["audit.json"],"corrections":[{"field":"affected status","old":"CVE-2011-3389 associated with OpenSSL 3.0.15","new":"Exposure unverified; protocol configuration and client behavior require assessment","why":"The package version alone does not establish BEAST susceptibility."}],"item":"proc:bbbb","vulnerability":"CVE-2011-3389"}]}
+{
+  "summary": "Prioritize the Log4j upgrade; assess BEAST through TLS configuration rather than the OpenSSL version alone.",
+  "coverageNotes": [
+    "Reviewed audit.json only; no web research or runtime verification performed."
+  ],
+  "findings": [
+    {
+      "findingId": "f:0000000000000001",
+      "verdict": "corrected",
+      "exploitability": "conditional",
+      "priority": "now",
+      "reasoning": "Log4j-core 2.14.1 is affected by Log4Shell when attacker-controlled data reaches vulnerable lookup processing, but 2.15.0 is an inadequate upgrade target because subsequent Log4j vulnerabilities require further fixes.",
+      "evidence": [
+        "audit.json identifies log4j-core 2.14.1 in /srv/shop and marks CVE-2021-44228 as known exploited."
+      ],
+      "fix": [
+        "Upgrade to a maintained, Java-compatible Log4j release, using 2.17.1 as a minimum baseline for Java 8 or later, then restart shop.service."
+      ],
+      "sources": [
+        "audit.json"
+      ],
+      "corrections": [
+        {
+          "field": "fix.versions",
+          "old": "2.15.0",
+          "new": "Maintained Java-compatible release; minimum baseline 2.17.1 for Java 8+",
+          "why": "2.15.0 addresses the original CVE but leaves subsequent Log4j vulnerabilities."
+        }
+      ],
+      "item": "proc:aaaa",
+      "vulnerability": "CVE-2021-44228"
+    },
+    {
+      "findingId": "f:0000000000000002",
+      "verdict": "corrected",
+      "exploitability": "conditional",
+      "priority": "scheduled",
+      "reasoning": "BEAST depends on vulnerable SSL 3.0 or TLS 1.0 CBC usage and client behavior, so OpenSSL 3.0.15 alone neither establishes exposure nor supports the claim that no mitigation exists.",
+      "evidence": [
+        "audit.json supplies an OpenSSL version but no negotiated protocols, cipher suites, or client behavior."
+      ],
+      "fix": [
+        "Verify the application's TLS termination configuration and disable SSL 3.0 and TLS 1.0, requiring TLS 1.2 or later."
+      ],
+      "sources": [
+        "audit.json"
+      ],
+      "corrections": [
+        {
+          "field": "remediation",
+          "old": "No fix is known for openssl 3.0.15 yet.",
+          "new": "Assess protocol and cipher configuration; mitigate by requiring TLS 1.2 or later.",
+          "why": "BEAST is a protocol-dependent exposure, not an established unpatched defect in this package version."
+        }
+      ],
+      "item": "proc:bbbb",
+      "vulnerability": "CVE-2011-3389"
+    }
+  ],
+  "actions": [
+    {
+      "action": "a:111111111111",
+      "title": "Remediate /srv/shop",
+      "changes": [
+        {
+          "name": "log4j-core",
+          "from": "2.14.1",
+          "to": "Maintained Java-compatible release; minimum baseline 2.17.1 for Java 8+"
+        }
+      ],
+      "also": [
+        "Assess proc:bbbb for BEAST exposure through its actual TLS configuration."
+      ],
+      "steps": [
+        {
+          "text": "Upgrade the packages below in /srv/shop: replace log4j-core with a maintained release compatible with the application's Java runtime.",
+          "command": null
+        },
+        {
+          "text": "Inspect the application's TLS termination configuration and require TLS 1.2 or later where legacy protocols remain enabled.",
+          "command": null
+        },
+        {
+          "text": "Restart shop.service.",
+          "command": "systemctl restart shop.service"
+        },
+        {
+          "text": "Verify application health, the loaded Log4j version, and that the TLS endpoint rejects SSL 3.0 and TLS 1.0; reload any separate TLS terminator if its configuration changed.",
+          "command": null
+        }
+      ],
+      "upstream": {
+        "state": "available",
+        "note": "Log4j fixes exist; current maintained releases were not checked.",
+        "source": "audit.json"
+      },
+      "why": "Preserves the default upgrade-and-restart steps while correcting the Log4j target and replacing the unsupported OpenSSL no-fix claim with configuration assessment."
+    }
+  ]
+}

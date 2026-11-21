@@ -32,7 +32,7 @@ type agentEntry struct {
 }
 
 var (
-	topKeys        = []string{"summary", "findings", "coverageNotes"}
+	topKeys        = []string{"summary", "findings", "coverageNotes", "actions"}
 	entryKeys      = []string{"findingId", "verdict", "exploitability", "priority", "reasoning", "evidence", "fix", "sources", "corrections", "item", "vulnerability"}
 	correctionKeys = []string{"field", "old", "new", "why"}
 )
@@ -47,6 +47,9 @@ const (
 	maxReasoning = 16 << 10
 )
 
+// maxAddedID bounds the ID of a finding the review added: it is the ID of its card.
+const maxAddedID = 64
+
 const EntriesFile = "entries.jsonl"
 
 func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) (*Review, []problem.Problem, error) {
@@ -60,8 +63,8 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	if err := exactKeys("the review", top, topKeys); err != nil {
 		return nil, nil, err
 	}
-	out := &Review{SchemaVersion: "1", Findings: []Entry{}}
-	var rawEntries []json.RawMessage
+	out := &Review{SchemaVersion: "1", Findings: []Entry{}, Actions: []ActionEntry{}}
+	var rawEntries, rawActions []json.RawMessage
 	if err := strict(top["summary"], &out.Summary); err != nil || string(top["summary"]) == "null" {
 		return nil, nil, fmt.Errorf("%w: summary must be a string", ErrInvalid)
 	}
@@ -70,6 +73,9 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	}
 	if err := strict(top["findings"], &rawEntries); err != nil || rawEntries == nil {
 		return nil, nil, fmt.Errorf("%w: findings must be a list", ErrInvalid)
+	}
+	if err := strict(top["actions"], &rawActions); err != nil || rawActions == nil {
+		return nil, nil, fmt.Errorf("%w: actions must be a list", ErrInvalid)
 	}
 	var all []Entry
 	for i, raw := range rawEntries {
@@ -120,6 +126,8 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 			why = "it addresses a finding twice"
 		case e.Verdict == Added && !strings.HasPrefix(e.FindingID, "added:"):
 			why = "an added finding's ID must start with added:"
+		case e.Verdict == Added && len(e.FindingID) > maxAddedID:
+			why = fmt.Sprintf("an added finding's ID is longer than %d bytes", maxAddedID)
 		case e.Verdict != Added && !ids[e.FindingID]:
 			why = "audit.json has no such finding"
 		case e.Verdict == Added && !items[e.Item]:
@@ -133,6 +141,34 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 		}
 		seen[e.FindingID] = true
 		out.Findings = append(out.Findings, e)
+	}
+	packages := actionPackages(aud)
+	for _, e := range out.Findings {
+		if e.Verdict == Added {
+			packages[e.FindingID] = nil
+		}
+	}
+	done := map[string]bool{}
+	for i, raw := range rawActions {
+		a, err := decodeAction(raw)
+		if err != nil {
+			drop(fmt.Sprintf("actions[%d] (%s)", i, shorten(strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": "))))
+			continue
+		}
+		why := ""
+		if _, ok := packages[a.Action]; !ok {
+			why = "audit.json has no such action, and the review added no such finding"
+		} else if done[a.Action] {
+			why = "it addresses an action twice"
+		} else {
+			why = a.tidy(packages[a.Action])
+		}
+		if why != "" {
+			drop(fmt.Sprintf("action %s (%s)", shorten(a.Action), why))
+			continue
+		}
+		done[a.Action] = true
+		out.Actions = append(out.Actions, a)
 	}
 	out.NotReviewed = notReviewed(aud, out.Findings)
 	if len(ids) > 0 && len(out.NotReviewed) == len(ids) {
@@ -224,8 +260,10 @@ func (e Entry) broken() string {
 		return fmt.Sprintf("its reasoning is longer than %d KiB", maxReasoning>>10)
 	case max(len(e.Evidence), len(e.Fix), len(e.Sources), len(e.Corrections)) > maxListItems:
 		return fmt.Sprintf("its evidence, fix, sources or corrections have more than %d items", maxListItems)
-	case e.Verdict != FalsePositive && (e.Exploitability == "" || e.Priority == "" || len(e.Fix) == 0):
-		return "it needs exploitability, priority and fix steps"
+	case e.Verdict != FalsePositive && (e.Exploitability == "" || e.Priority == ""):
+		return "it needs exploitability and priority"
+	case e.Verdict == Added && len(e.Fix) == 0:
+		return "an added finding needs fix steps"
 	case e.Verdict == Corrected && len(e.Corrections) == 0:
 		return "a correction needs its corrections"
 	case e.Verdict == Added && (e.Vulnerability == "" || len(e.Sources) == 0):
