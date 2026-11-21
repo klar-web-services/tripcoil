@@ -73,6 +73,24 @@ func (c *Client) Inspect(ctx context.Context, id string) (Detail, error) {
 	return d, err
 }
 
+func (c *Client) Networks(ctx context.Context) ([]Network, error) {
+	var n []Network
+	err := c.get(ctx, "/networks", &n)
+	return n, err
+}
+
+// ErrNotManager says that this node cannot list Swarm services: it is a worker, or not in a swarm.
+var ErrNotManager = errors.New("this node is not a swarm manager")
+
+func (c *Client) Services(ctx context.Context) ([]Service, error) {
+	var s []Service
+	err := c.get(ctx, "/services", &s)
+	if err != nil && strings.Contains(err.Error(), "503") {
+		return nil, ErrNotManager
+	}
+	return s, err
+}
+
 func (c *Client) InspectImage(ctx context.Context, id string) (Image, error) {
 	var img Image
 	err := c.get(ctx, "/images/"+url.PathEscape(id)+"/json", &img)

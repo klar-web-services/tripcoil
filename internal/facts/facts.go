@@ -18,6 +18,8 @@ type Runner func(ctx context.Context, name string, args ...string) ([]byte, erro
 
 type Docker interface {
 	Inspect(ctx context.Context, id string) (dockerapi.Detail, error)
+	Networks(ctx context.Context) ([]dockerapi.Network, error)
+	Services(ctx context.Context) ([]dockerapi.Service, error)
 }
 
 type Deps struct {

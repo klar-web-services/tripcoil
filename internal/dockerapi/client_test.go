@@ -2,6 +2,7 @@ package dockerapi
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -124,5 +125,56 @@ func TestImageExists(t *testing.T) {
 	defer mu.Unlock()
 	if want := []string{"GET /images/sha256:1111/json", "GET /images/sha256:2222/json", "GET /images/sha256:3333/json"}; !slices.Equal(paths, want) {
 		t.Errorf("requests %q", paths)
+	}
+}
+
+// What the routes and the reach need from Docker: a container's names and addresses, the networks'
+// drivers, and a Swarm manager's services. Real answers of Docker 28 (API 1.56), shortened.
+func TestNetworksAndServices(t *testing.T) {
+	dir, err := os.MkdirTemp("", "tc-docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "docker.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := true
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/networks":
+			w.Write([]byte(`[{"Name":"host","Id":"h1","Driver":"host"},{"Name":"servarr_default","Id":"n1","Driver":"bridge"},{"Name":"lan","Id":"n2","Driver":"macvlan"}]`))
+		case r.URL.Path == "/services" && manager:
+			w.Write([]byte(`[{"ID":"s1","Spec":{"Name":"dokploy","Labels":{"traefik.enable":"true"}},"Endpoint":{"Ports":[{"Protocol":"tcp","TargetPort":3000,"PublishedPort":3000,"PublishMode":"host"},{"Protocol":"tcp","TargetPort":80,"PublishedPort":8080,"PublishMode":"ingress"}]}}]`))
+		case r.URL.Path == "/services":
+			http.Error(w, `{"message":"This node is not a swarm manager. Use \"docker swarm init\" or \"docker swarm join\" to connect this node to swarm and try again."}`, http.StatusServiceUnavailable)
+		case r.URL.Path == "/containers/c1/json":
+			w.Write([]byte(`{"Id":"c1","Name":"/sonarr","NetworkSettings":{"Networks":{"servarr_default":{"NetworkID":"n1","IPAddress":"172.20.0.5","GlobalIPv6Address":"","Aliases":["sonarr"],"DNSNames":["sonarr","0123456789ab"]}}}}`))
+		}
+	})}
+	go srv.Serve(l)
+	t.Cleanup(func() { srv.Close() })
+
+	c := New(sock)
+	ctx := context.Background()
+	nets, err := c.Networks(ctx)
+	if err != nil || len(nets) != 3 || nets[2] != (Network{ID: "n2", Name: "lan", Driver: "macvlan"}) {
+		t.Errorf("networks: %+v %v", nets, err)
+	}
+	svcs, err := c.Services(ctx)
+	if err != nil || len(svcs) != 1 || svcs[0].Spec.Name != "dokploy" || svcs[0].Spec.Labels["traefik.enable"] != "true" ||
+		!slices.Equal(svcs[0].Endpoint.Ports, []ServicePort{{"tcp", 3000, 3000, "host"}, {"tcp", 80, 8080, "ingress"}}) {
+		t.Errorf("services: %+v %v", svcs, err)
+	}
+	manager = false
+	if _, err := c.Services(ctx); !errors.Is(err, ErrNotManager) {
+		t.Errorf("a worker or a node outside a swarm: %v", err)
+	}
+	d, err := c.Inspect(ctx, "c1")
+	ep := d.NetworkSettings.Networks["servarr_default"]
+	if err != nil || ep.NetworkID != "n1" || ep.IPAddress != "172.20.0.5" || !slices.Equal(ep.DNSNames, []string{"sonarr", "0123456789ab"}) {
+		t.Errorf("a container's networks: %+v %v", d.NetworkSettings, err)
 	}
 }

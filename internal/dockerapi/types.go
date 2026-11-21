@@ -25,6 +25,46 @@ type Detail struct {
 	Config     Config     `json:"Config"`
 	HostConfig HostConfig `json:"HostConfig"`
 	Mounts     []Mount    `json:"Mounts"`
+	// NetworkSettings says on which networks the container is, and under which names and addresses.
+	NetworkSettings NetworkSettings `json:"NetworkSettings"`
+}
+
+type NetworkSettings struct {
+	Networks map[string]Endpoint `json:"Networks"`
+}
+
+type Endpoint struct {
+	NetworkID         string   `json:"NetworkID"`
+	IPAddress         string   `json:"IPAddress"`
+	GlobalIPv6Address string   `json:"GlobalIPv6Address"`
+	Aliases           []string `json:"Aliases"`
+	DNSNames          []string `json:"DNSNames"`
+}
+
+type Network struct {
+	ID     string `json:"Id"`
+	Name   string `json:"Name"`
+	Driver string `json:"Driver"`
+}
+
+// Service is a Swarm service, as a manager lists it.
+type Service struct {
+	ID   string `json:"ID"`
+	Spec struct {
+		Name   string            `json:"Name"`
+		Labels map[string]string `json:"Labels"`
+	} `json:"Spec"`
+	Endpoint struct {
+		Ports []ServicePort `json:"Ports"`
+	} `json:"Endpoint"`
+}
+
+type ServicePort struct {
+	Protocol      string `json:"Protocol"`
+	TargetPort    int    `json:"TargetPort"`
+	PublishedPort int    `json:"PublishedPort"`
+	// PublishMode is "host" (the port is on the task's container) or "ingress" (the routing mesh).
+	PublishMode string `json:"PublishMode"`
 }
 
 type Image struct {

@@ -124,6 +124,20 @@ func fixture(t *testing.T) (string, *inventory.Inventory) {
 
 type fakeDocker map[string]dockerapi.Detail
 
+func (f fakeDocker) Networks(context.Context) ([]dockerapi.Network, error) {
+	return []dockerapi.Network{{ID: "n1", Name: "shop_default", Driver: "bridge"}, {ID: "n2", Name: "lan", Driver: "macvlan"}}, nil
+}
+
+func (f fakeDocker) Services(context.Context) ([]dockerapi.Service, error) {
+	if _, manager := f["manager"]; !manager {
+		return nil, dockerapi.ErrNotManager
+	}
+	var s dockerapi.Service
+	s.Spec.Name, s.Spec.Labels = "shop_web", map[string]string{"traefik.http.services.web.loadbalancer.server.port": "80", "owner": "alice"}
+	s.Endpoint.Ports = []dockerapi.ServicePort{{Protocol: "tcp", TargetPort: 80, PublishedPort: 8080, PublishMode: "ingress"}, {Protocol: "tcp", TargetPort: 3000, PublishedPort: 3000, PublishMode: "host"}}
+	return []dockerapi.Service{s}, nil
+}
+
 func (f fakeDocker) Inspect(_ context.Context, id string) (dockerapi.Detail, error) {
 	d, ok := f[id]
 	if !ok {
@@ -136,6 +150,12 @@ type brokenDocker struct{ err error }
 
 func (b brokenDocker) Inspect(context.Context, string) (dockerapi.Detail, error) {
 	return dockerapi.Detail{}, b.err
+}
+
+func (b brokenDocker) Networks(context.Context) ([]dockerapi.Network, error) { return nil, nil }
+
+func (b brokenDocker) Services(context.Context) ([]dockerapi.Service, error) {
+	return nil, dockerapi.ErrNotManager
 }
 
 func fakeRun(t *testing.T, answers map[string]string, calls *[]string) Runner {
