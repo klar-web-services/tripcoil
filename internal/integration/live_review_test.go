@@ -50,6 +50,10 @@ func liveState(t *testing.T) (state, runDir string, aud *audit.Audit, inv *inven
 	aud = &audit.Audit{Findings: []audit.Finding{{ID: "f:0000000000000001", Items: []string{"proc:aaaa"}}, {ID: "f:0000000000000002", Items: []string{"proc:bbbb"}}}}
 	aud.Findings[0].Vulnerability.ID, aud.Findings[0].Package.Name, aud.Findings[0].Package.Version = "CVE-2021-44228", "log4j-core", "2.14.1"
 	aud.Findings[1].Vulnerability.ID, aud.Findings[1].Package.Name, aud.Findings[1].Package.Version = "CVE-2011-3389", "openssl", "3.0.15"
+	aud.Actions = []audit.Action{{ID: "a:111111111111", Kind: audit.ActionAppDir, Name: "/srv/shop", Target: "/srv/shop", Items: []string{"proc:aaaa", "proc:bbbb"},
+		Changes: []audit.Change{{Name: "log4j-core", From: "2.14.1", To: "2.15.0", Clears: 1}, {Name: "openssl", From: "3.0.15", Unfixed: 1}},
+		Steps:   []audit.Step{{Text: "Upgrade the packages below in /srv/shop"}, {Text: "Restart shop.service"}}}}
+	aud.Findings[0].Action, aud.Findings[1].Action = "a:111111111111", "a:111111111111"
 	inv = &inventory.Inventory{Items: []inventory.Item{{ID: "proc:aaaa"}, {ID: "proc:bbbb"}}}
 	if err := run.WriteJSON(filepath.Join(runDir, "audit.json"), aud, 0o640); err != nil {
 		t.Fatal(err)
@@ -124,6 +128,6 @@ func TestLiveReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%s in %v: %d entries, not reviewed %v, warnings %v %v\n%s", out.CLI, time.Since(start).Round(time.Second),
-		len(rev.Findings), rev.NotReviewed, warns, out.Warnings, rev.Summary)
+	t.Logf("%s in %v: %d entries, not reviewed %v, warnings %v %v\n%s\nactions: %+v", out.CLI, time.Since(start).Round(time.Second),
+		len(rev.Findings), rev.NotReviewed, warns, out.Warnings, rev.Summary, rev.Actions)
 }

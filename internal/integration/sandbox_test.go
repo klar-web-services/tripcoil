@@ -215,8 +215,8 @@ func TestSandbox(t *testing.T) {
 				}
 			}
 			for _, k := range []string{"first", "again", "codex"} {
-				if tc.full && !strings.Contains(checks[k], "groups=ok") || tc.full && !strings.Contains(checks[k], "entries=ok") {
-					t.Errorf("%s: the agent could not read groups.json or write its entries file: %q", k, checks[k])
+				if tc.full && !strings.Contains(checks[k], "groups=ok") || tc.full && !strings.Contains(checks[k], "entries=ok") || tc.full && !strings.Contains(checks[k], "actions=ok") {
+					t.Errorf("%s: the agent could not read groups.json or the audit's actions, or write its entries file: %q", k, checks[k])
 				}
 				if tc.full && !strings.Contains(checks[k], "pids=1 ") && !strings.Contains(checks[k], "pids=2 ") { // bubblewrap's own init counts
 					t.Errorf("%s: the agent sees other processes: %q", k, checks[k])

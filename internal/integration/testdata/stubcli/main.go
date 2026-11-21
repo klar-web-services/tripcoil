@@ -106,9 +106,23 @@ func review() map[string]any {
 		Findings []struct {
 			ID string `json:"id"`
 		} `json:"findings"`
+		Actions []struct {
+			ID string `json:"id"`
+		} `json:"actions"`
 	}
 	data, _ = os.ReadFile("audit.json")
 	json.Unmarshal(data, &aud)
+	actions := []map[string]any{}
+	for _, a := range aud.Actions {
+		actions = append(actions, map[string]any{"action": a.ID, "title": "Stub action", "changes": []any{}, "also": []string{},
+			"steps":    []any{map[string]any{"text": "stub step", "command": nil}},
+			"upstream": map[string]any{"state": "unknown", "note": "", "source": nil}, "why": "stub"})
+	}
+	if len(actions) > 0 {
+		checks = append(checks, "actions=ok")
+	} else {
+		checks = append(checks, "actions=none")
+	}
 	entry := func(id, reasoning string) map[string]any {
 		return map[string]any{"findingId": id, "verdict": "confirmed", "exploitability": "unknown", "priority": "scheduled",
 			"reasoning": reasoning, "evidence": []string{}, "fix": []string{"upgrade"}, "sources": []string{}, "corrections": []any{},
@@ -125,7 +139,7 @@ func review() map[string]any {
 	}
 	err = os.WriteFile(filepath.Join(os.Getenv("HOME"), "entries.jsonl"), file, 0o600)
 	checks = append(checks, "entries="+errText(err))
-	return map[string]any{"summary": strings.Join(checks, " "), "findings": findings, "coverageNotes": []string{}}
+	return map[string]any{"summary": strings.Join(checks, " "), "findings": findings, "coverageNotes": []string{}, "actions": actions}
 }
 
 func dial(addr string) string {
