@@ -123,6 +123,22 @@ func review() map[string]any {
 	} else {
 		checks = append(checks, "actions=none")
 	}
+	// One reach entry per item of facts/reach.json, as the default says.
+	var def struct {
+		Items []struct {
+			Item    string `json:"item"`
+			Default string `json:"default"`
+		} `json:"items"`
+	}
+	data, err = os.ReadFile("facts/reach.json")
+	if err == nil {
+		err = json.Unmarshal(data, &def)
+	}
+	reach := []map[string]any{}
+	for _, d := range def.Items {
+		reach = append(reach, map[string]any{"item": d.Item, "from": d.Default, "via": nil, "evidence": []string{"facts/reach.json: the default"}})
+	}
+	checks = append(checks, "reach="+errText(err))
 	entry := func(id, reasoning string) map[string]any {
 		return map[string]any{"findingId": id, "verdict": "confirmed", "exploitability": "unknown", "priority": "scheduled",
 			"reasoning": reasoning, "evidence": []string{}, "fix": []string{"upgrade"}, "sources": []string{}, "corrections": []any{},
@@ -131,15 +147,17 @@ func review() map[string]any {
 	findings := []map[string]any{}
 	file := []byte("not an entry\n")
 	for i, f := range aud.Findings {
-		if i == 0 {
-			findings = append(findings, entry(f.ID, "stub review"))
+		if i == 0 { // the output's entry has every key of the schema; the file's entries lack the two a script may forget
+			e := entry(f.ID, "stub review")
+			e["vector"], e["reach"] = "content", nil
+			findings = append(findings, e)
 		}
 		line, _ := json.Marshal(entry(f.ID, "stub review in the file"))
 		file = append(append(file, line...), '\n')
 	}
 	err = os.WriteFile(filepath.Join(os.Getenv("HOME"), "entries.jsonl"), file, 0o600)
 	checks = append(checks, "entries="+errText(err))
-	return map[string]any{"summary": strings.Join(checks, " "), "findings": findings, "coverageNotes": []string{}, "actions": actions}
+	return map[string]any{"summary": strings.Join(checks, " "), "findings": findings, "coverageNotes": []string{}, "actions": actions, "reach": reach}
 }
 
 func dial(addr string) string {

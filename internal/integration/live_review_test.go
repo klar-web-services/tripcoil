@@ -14,6 +14,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/agent"
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/config"
+	"github.com/klar-web-services/tripcoil/internal/facts"
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/probe"
 	"github.com/klar-web-services/tripcoil/internal/review"
@@ -59,6 +60,16 @@ func liveState(t *testing.T) (state, runDir string, aud *audit.Audit, inv *inven
 		t.Fatal(err)
 	}
 	if err := run.WriteJSON(filepath.Join(runDir, "inventory.json"), inv, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	reach := facts.Reach{Items: []facts.ItemReach{
+		{Item: "proc:aaaa", Default: facts.ReachLAN, Via: facts.ViaDirect, Sockets: []facts.ReachSocket{{Proto: "tcp", Address: "0.0.0.0", Port: 8443, Reach: facts.ReachLAN}}},
+		{Item: "proc:bbbb", Default: facts.ReachLocalhost, Via: facts.ViaDirect, Sockets: []facts.ReachSocket{{Proto: "tcp", Address: "127.0.0.1", Port: 5432, Reach: facts.ReachLocalhost}}},
+	}}
+	if _, err := run.CreateSubfolder(runDir, "facts"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.WriteJSON(filepath.Join(runDir, "facts", "reach.json"), reach, 0o640); err != nil {
 		t.Fatal(err)
 	}
 	return state, runDir, aud, inv
@@ -128,6 +139,9 @@ func TestLiveReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%s in %v: %d entries, not reviewed %v, warnings %v %v\n%s\nactions: %+v", out.CLI, time.Since(start).Round(time.Second),
-		len(rev.Findings), rev.NotReviewed, warns, out.Warnings, rev.Summary, rev.Actions)
+	t.Logf("%s in %v: %d entries, not reviewed %v, warnings %v %v\n%s\nactions: %+v\nreach: %+v", out.CLI, time.Since(start).Round(time.Second),
+		len(rev.Findings), rev.NotReviewed, warns, out.Warnings, rev.Summary, rev.Actions, rev.Reach)
+	for _, e := range rev.Findings {
+		t.Logf("%s: %s, vector %q, reach %q", e.FindingID, e.Exploitability, e.Vector, e.Reach)
+	}
 }

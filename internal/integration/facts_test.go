@@ -81,7 +81,7 @@ exit $code`
 	if err := json.Unmarshal(files["facts/index.json"], &idx); err != nil {
 		t.Fatal(err)
 	}
-	if len(idx.Collected) != 7 || len(idx.Missing) != 0 {
+	if len(idx.Collected) != 9 || len(idx.Missing) != 0 {
 		t.Fatalf("facts: %+v", idx)
 	}
 	var inv inventory.Inventory
@@ -102,6 +102,32 @@ exit $code`
 	}
 	if !ssh || net.LocalPortRangeStart == 0 {
 		t.Errorf("network.json: %s", files["facts/network.json"])
+	}
+	// The container's network card has a private address and no public one, so sshd on 0.0.0.0
+	// defaults to the LAN. The kinds and classes come from the container's own /sys and netlink. The
+	// container sees its host's DMI: on a cloud runner the same socket counts as public.
+	var addrs facts.Addresses
+	json.Unmarshal(files["facts/addresses.json"], &addrs)
+	var reach facts.Reach
+	json.Unmarshal(files["facts/reach.json"], &reach)
+	lo, private, sshReach := false, false, ""
+	for _, i := range addrs.Interfaces {
+		lo = lo || i.Kind == facts.KindLoopback && i.Up
+		for _, a := range i.Addresses {
+			private = private || a.Class == facts.ClassPrivate && i.BehindRouter != addrs.Cloud
+		}
+	}
+	wantReach := "lan direct"
+	if addrs.Cloud {
+		wantReach = "internet direct"
+	}
+	for _, r := range reach.Items {
+		if names[r.Item] == "sshd" {
+			sshReach = r.Default + " " + r.Via
+		}
+	}
+	if !lo || !private || sshReach != wantReach {
+		t.Errorf("addresses.json: %s\nreach.json: %s", files["facts/addresses.json"], files["facts/reach.json"])
 	}
 	if fw := string(files["facts/firewall.txt"]); !strings.HasPrefix(fw, "### nft -s list ruleset\n") || !strings.Contains(fw, "tcp dport 22 accept") {
 		t.Errorf("firewall.txt:\n%s", fw)
