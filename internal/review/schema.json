@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "findings", "coverageNotes", "actions"],
+  "required": ["summary", "findings", "coverageNotes", "actions", "reach"],
   "properties": {
     "summary": {"type": "string"},
     "coverageNotes": {"type": "array", "items": {"type": "string"}},
@@ -10,7 +10,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["findingId", "verdict", "exploitability", "priority", "reasoning", "evidence", "fix", "sources", "corrections", "item", "vulnerability"],
+        "required": ["findingId", "verdict", "exploitability", "priority", "reasoning", "evidence", "fix", "sources", "corrections", "item", "vulnerability", "vector", "reach"],
         "properties": {
           "findingId": {"type": "string"},
           "verdict": {"type": "string", "enum": ["confirmed", "corrected", "false_positive", "added"]},
@@ -25,7 +25,9 @@
             "required": ["field", "old", "new", "why"],
             "properties": {"field": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}, "why": {"type": "string"}}}},
           "item": {"type": ["string", "null"]},
-          "vulnerability": {"type": ["string", "null"]}
+          "vulnerability": {"type": ["string", "null"]},
+          "vector": {"type": ["string", "null"], "enum": ["inbound", "content", "local", null]},
+          "reach": {"type": ["string", "null"], "enum": ["lan", "tailnet", "localhost", "none", null]}
         }
       }
     },
@@ -52,6 +54,20 @@
             "required": ["state", "note", "source"],
             "properties": {"state": {"type": "string", "enum": ["available", "none", "unknown"]}, "note": {"type": "string"}, "source": {"type": ["string", "null"]}}},
           "why": {"type": "string"}
+        }
+      }
+    },
+    "reach": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "from", "via", "evidence"],
+        "properties": {
+          "item": {"type": "string"},
+          "from": {"type": "string", "enum": ["internet", "lan", "tailnet", "localhost", "none", "unknown"]},
+          "via": {"type": ["string", "null"], "enum": ["direct", "proxy", "tunnel", "forward", null]},
+          "evidence": {"type": "array", "items": {"type": "string"}}
         }
       }
     }

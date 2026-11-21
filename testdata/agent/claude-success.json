@@ -1,15 +1,15 @@
 {
- "duration_api_ms": 20073,
+ "duration_api_ms": 23523,
  "stop_reason": "tool_use",
- "session_id": "599bd48f-033b-4dbc-8bf3-0529cb79ce90",
- "total_cost_usd": 0.00418574,
+ "session_id": "cb5cde0d-6b2e-4c46-8e2f-295b9ab8c14e",
+ "total_cost_usd": 0.00480589,
  "usage": {
   "input_tokens": 4,
-  "cache_creation_input_tokens": 10589,
-  "cache_read_input_tokens": 9704,
-  "output_tokens": 3941,
+  "cache_creation_input_tokens": 10056,
+  "cache_read_input_tokens": 8329,
+  "output_tokens": 5422,
   "output_tokens_details": {
-   "thinking_tokens": 1802
+   "thinking_tokens": 2651
   },
   "server_tool_use": {
    "web_search_requests": 0,
@@ -17,27 +17,37 @@
   },
   "service_tier": "standard",
   "cache_creation": {
-   "ephemeral_1h_input_tokens": 10589,
+   "ephemeral_1h_input_tokens": 10056,
    "ephemeral_5m_input_tokens": 0
   },
   "inference_geo": "global",
-  "iterations": [],
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 5055,
+    "cache_read_input_tokens": 8329,
+    "cache_creation_input_tokens": 1727,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1727
+    },
+    "type": "message"
+   }
+  ],
   "speed": "standard",
   "fallback_credit": null
  },
  "modelUsage": {
   "claude-haiku-5-5": {
    "inputTokens": 4,
-   "outputTokens": 3941,
-   "cacheReadInputTokens": 9704,
-   "cacheCreationInputTokens": 10589,
+   "outputTokens": 5422,
+   "cacheReadInputTokens": 8329,
+   "cacheCreationInputTokens": 10056,
    "webSearchRequests": 0,
-   "costUSD": 0.00418574,
+   "costUSD": 0.00480589,
    "contextWindow": 1000000,
    "maxOutputTokens": 128000,
-   "thinkingTokens": 1802,
-   "cacheCreationEphemeral5mInputTokens": 0,
-   "cacheCreationEphemeral1hInputTokens": 10589,
+   "thinkingTokens": 2651,
    "canonicalModel": "claude-haiku-5-5",
    "provider": "firstParty",
    "costBasis": "list"
@@ -73,84 +83,83 @@
  },
  "safety_stops": 0,
  "is_error": false,
- "num_turns": 3,
+ "num_turns": 5,
  "subtype": "success",
  "api_error_status": null,
- "result": "{\"summary\":\"audit.json has two findings, both on /srv/shop. The log4j-core 2.14.1 Log4Shell finding is confirmed, critical, known-exploited, and needs action now. The openssl 3.0.15 finding (CVE-2011-3389) is low risk and is mitigated by configuration rather than a patch. The single action (a:111111111111) is kept with its default steps and given a corrected log4j target of 2.17.1 or later, because 2.15.0 is itself affected by follow-up CVEs. Research was not done per the instructions, so the reasoning relies on the file and general knowledge.\",\"findings\":[{\"findingId\":\"f:0000000000000001\",\"verdict\":\"corrected\",\"exploitability\":\"exploitable\",\"priority\":\"now\",\"item\":\"proc:aaaa\",\"vulnerability\":\"CVE-2021-44228\",\"reasoning\":\"Log4j-core 2.14.1 is inside the Log4Shell JNDI lookup vulnerable range, the CVE is marked as known-exploited, and the finding is critical, so it should be remediated immediately; the file's fix target of 2.15.0 is also insufficient because 2.15.0 has follow-up CVE-2021-45046, so 2.17.1 or later should be used instead.\",\"evidence\":[\"vulnerability.id=CVE-2021-44228, severity=Critical, knownExploited=true\",\"package log4j-core version 2.14.1 (java-archive) in appdir:/srv/shop\",\"fix.versions=[2.15.0], risk=critical\"],\"fix\":[\"Upgrade log4j-core in /srv/shop to 2.17.1 or later, not 2.15.0\",\"Restart shop.service after the upgrade and confirm the loaded jar version\",\"Check logs for JNDI lookup attempts since exposure began, given known exploitation\"],\"sources\":[\"audit.json findings[0]\"],\"corrections\":[{\"field\":\"fix.versions / remediation\",\"old\":\"2.15.0 or later\",\"new\":\"2.17.1 or later\",\"why\":\"2.15.0 was followed by CVE-2021-45046 and 2.16.0 by CVE-2021-45105 and CVE-2021-44832 in later 2.x releases, so 2.15.0 does not fully close the risk.\"}]},{\"findingId\":\"f:0000000000000002\",\"verdict\":\"corrected\",\"exploitability\":\"conditional\",\"priority\":\"soon\",\"item\":\"proc:bbbb\",\"vulnerability\":\"CVE-2011-3389\",\"reasoning\":\"This is a BEAST-style weakness in CBC cipher suites under TLS 1.0 and SSL 3, so it is only exploitable if the service still negotiates those protocols, and the remedy is disabling them rather than waiting for a package fix, so the 'no fix known' wording is misleading and the risk stays low.\",\"evidence\":[\"vulnerability.id=CVE-2011-3389, severity=Medium, knownExploited=false\",\"package openssl 3.0.15 (deb), fix.state=not-fixed\",\"risk=low\"],\"fix\":[\"Confirm shop.service does not enable TLS 1.0 or SSL 3 (for example via a minimum protocol setting)\",\"Set OpenSSL minimum protocol to TLSv1.2 in the app or system config if it is not already set\",\"Re-check the finding after configuration change; no package upgrade is required for this item\"],\"sources\":[\"audit.json findings[1]\"],\"corrections\":[{\"field\":\"remediation\",\"old\":\"No fix is known for openssl 3.0.15 yet.\",\"new\":\"Mitigate by disabling TLS 1.0 and SSL 3 (minimum TLS 1.2); a configuration change, not a package patch, addresses this.\",\"why\":\"The issue is a protocol-level weakness that is mitigated by configuration, so the absence of a package fix does not mean the item is unaddressable.\"}]}],\"coverageNotes\":[\"Read only audit.json; no web research performed, per instructions.\",\"Fix versions for log4j follow-up CVEs are from background knowledge, not verified online.\",\"audit.json was not modified; the action entry is returned in this structured output only.\",\"No package manager or build tool was inspected, so commands are left null.\"],\"actions\":[{\"action\":\"a:111111111111\",\"title\":\"Upgrade log4j-core to 2.17.1+ and mitigate TLS 1.0 for openssl in /srv/shop, then restart shop.service\",\"changes\":[{\"name\":\"log4j-core\",\"from\":\"2.14.1\",\"to\":\"2.17.1\"},{\"name\":\"openssl\",\"from\":\"3.0.15\",\"to\":null}],\"also\":[\"f:0000000000000001\",\"f:0000000000000002\"],\"steps\":[{\"text\":\"Upgrade log4j-core in /srv/shop to 2.17.1 or later (not 2.15.0)\",\"command\":null},{\"text\":\"Disable TLS 1.0 and SSL 3 for the service (minimum TLS 1.2); openssl 3.0.15 has no package fix yet\",\"command\":null},{\"text\":\"Restart shop.service\",\"command\":null}],\"upstream\":{\"state\":\"unknown\",\"note\":\"Not researched per instructions; fix versions beyond 2.15.0 come from background knowledge.\",\"source\":null},\"why\":\"The log4j upgrade clears the known-exploited critical finding, and the openssl item is handled by configuration, so both are addressed by the same action on /srv/shop; the target version was raised from 2.15.0 to 2.17.1 because 2.15.0 has follow-up CVEs.\"}]}",
+ "result": "{\"summary\":\"audit.json holds a complete scan of the app directory /srv/shop (action a:111111111111) with two findings against proc:aaaa (the shop Java service on 0.0.0.0:8443): Log4Shell (CVE-2021-44228) in log4j-core 2.14.1, critical and known exploited, and BEAST (CVE-2011-3389) in openssl 3.0.15, low with no known fix. The review corrects the Log4Shell fix target: audit.json says 2.15.0, but 2.15.0 is incomplete, so the upgrade should go to 2.17.1. Log4Shell should be fixed now. BEAST is a scheduled, conditional risk. Both findings are inbound because the attack needs a connection to the shop service. The reach entries for proc:aaaa (lan) and proc:bbbb (localhost) match facts/reach.json.\",\"findings\":[{\"findingId\":\"f:0000000000000001\",\"verdict\":\"corrected\",\"exploitability\":\"exploitable\",\"priority\":\"now\",\"reasoning\":\"CVE-2021-44228 (Log4Shell) is critical and marked knownExploited in audit.json. proc:aaaa listens on 0.0.0.0:8443 (facts/reach.json), so a remote client can reach it. The audit's fix version 2.15.0 is not sufficient: it left related JNDI/lookup issues open (CVE-2021-45046, and CVE-2021-45105 for DoS), so the fix target is corrected to 2.17.1.\",\"evidence\":[\"audit.json: findings[0] risk critical, knownExploited true, package log4j-core 2.14.1, fix.versions [2.15.0]\",\"facts/reach.json: proc:aaaa default lan, tcp 0.0.0.0:8443 reach lan\",\"inventory.json: proc:aaaa runs java -jar /srv/shop/shop.jar --port=8443 under shop.service\"],\"fix\":[\"Replace log4j-core 2.14.1 with 2.17.1 in /srv/shop, including any copy shaded into shop.jar\",\"Restart shop.service with systemctl restart shop.service\",\"Confirm no log4j-core 2.14.1 jar or class remains under /srv/shop\"],\"sources\":[\"audit.json\",\"inventory.json\",\"facts/reach.json\",\"Apache Log4j security advisories (from memory, not fetched in this review)\"],\"corrections\":[{\"field\":\"fix.versions[0]\",\"old\":\"2.15.0\",\"new\":\"2.17.1\",\"why\":\"2.15.0 does not fully close the Log4Shell family: CVE-2021-45046 and CVE-2021-45105 were found afterwards, and 2.17.1 is the release that covers the later CVE-2021-44832 as well.\"}],\"item\":\"proc:aaaa\",\"vulnerability\":\"CVE-2021-44228\",\"vector\":\"inbound\",\"reach\":null},{\"findingId\":\"f:0000000000000002\",\"verdict\":\"confirmed\",\"exploitability\":\"conditional\",\"priority\":\"scheduled\",\"reasoning\":\"CVE-2011-3389 (BEAST) is rated low and is not known to be exploited. It needs a network attacker who can observe and tamper with TLS traffic to the shop service on 8443. Modern clients and disabled TLS 1.0 / CBC suites reduce it. audit.json reports no fix for openssl 3.0.15, so the practical action is to confirm the TLS configuration and accept the risk.\",\"evidence\":[\"audit.json: findings[1] risk low, knownExploited false, package openssl 3.0.15, fix.state not-fixed\",\"facts/reach.json: proc:aaaa default lan, tcp 0.0.0.0:8443 reach lan\"],\"fix\":[\"Confirm the shop service does not offer TLS 1.0 or CBC-mode cipher suites, and prefer TLS 1.2+ AEAD ciphers\",\"Record the openssl 3.0.15 finding as an accepted low risk, since no fixed version is listed\"],\"sources\":[\"audit.json\",\"facts/reach.json\"],\"corrections\":[],\"item\":\"proc:aaaa\",\"vulnerability\":\"CVE-2011-3389\",\"vector\":\"inbound\",\"reach\":null}],\"coverageNotes\":[\"No web research was done. The Log4j fix version 2.17.1 and the CVE relationships come from memory and were not checked against live advisories.\",\"Only audit.json, inventory.json and facts/reach.json were read. No other files were read or written.\",\"The review does not verify that /srv/shop actually contains log4j-core 2.14.1 or the openssl binary. It relies on the audit's data.\",\"proc:bbbb (postgres) has no findings in audit.json and is covered only by its reach entry.\"],\"actions\":[{\"action\":\"a:111111111111\",\"title\":\"Upgrade log4j-core in /srv/shop to 2.17.1 and restart shop.service\",\"changes\":[{\"name\":\"log4j-core\",\"from\":\"2.14.1\",\"to\":\"2.17.1\"},{\"name\":\"openssl\",\"from\":\"3.0.15\",\"to\":null}],\"also\":[\"f:0000000000000001\",\"f:0000000000000002\"],\"steps\":[{\"text\":\"Replace log4j-core 2.14.1 with 2.17.1 in /srv/shop, including any copy shaded into shop.jar (audit.json says 2.15.0; use 2.17.1 instead)\",\"command\":null},{\"text\":\"Restart the shop service\",\"command\":\"systemctl restart shop.service\"},{\"text\":\"Confirm that no log4j-core 2.14.1 jar or class remains under /srv/shop and that shop.service is running\",\"command\":null},{\"text\":\"Record openssl 3.0.15 (CVE-2011-3389) as an accepted low risk, since no fixed version is listed; confirm TLS 1.0 and CBC suites are off\",\"command\":null}],\"upstream\":{\"state\":\"available\",\"note\":\"Log4j 2.17.1 is the fixed release per Apache's advisories (from memory, not fetched). No upstream fix is listed for openssl 3.0.15 in audit.json.\",\"source\":\"Apache Log4j security advisories (not fetched in this review)\"},\"why\":\"Log4Shell is critical and known exploited, and proc:aaaa is reachable on the LAN at 8443. Upgrading to 2.17.1 instead of the audit's 2.15.0 closes the later Log4j CVEs in the same family. The openssl item has no fix and is low, so it is recorded as accepted rather than blocking.\"}],\"reach\":[{\"item\":\"proc:aaaa\",\"from\":\"lan\",\"via\":\"direct\",\"evidence\":[\"facts/reach.json: proc:aaaa default lan; tcp 0.0.0.0:8443 reach lan\"]},{\"item\":\"proc:bbbb\",\"from\":\"localhost\",\"via\":\"direct\",\"evidence\":[\"facts/reach.json: proc:bbbb default localhost; tcp 127.0.0.1:5432 reach localhost\"]}]}",
  "structured_output": {
-  "summary": "audit.json has two findings, both on /srv/shop. The log4j-core 2.14.1 Log4Shell finding is confirmed, critical, known-exploited, and needs action now. The openssl 3.0.15 finding (CVE-2011-3389) is low risk and is mitigated by configuration rather than a patch. The single action (a:111111111111) is kept with its default steps and given a corrected log4j target of 2.17.1 or later, because 2.15.0 is itself affected by follow-up CVEs. Research was not done per the instructions, so the reasoning relies on the file and general knowledge.",
+  "summary": "audit.json holds a complete scan of the app directory /srv/shop (action a:111111111111) with two findings against proc:aaaa (the shop Java service on 0.0.0.0:8443): Log4Shell (CVE-2021-44228) in log4j-core 2.14.1, critical and known exploited, and BEAST (CVE-2011-3389) in openssl 3.0.15, low with no known fix. The review corrects the Log4Shell fix target: audit.json says 2.15.0, but 2.15.0 is incomplete, so the upgrade should go to 2.17.1. Log4Shell should be fixed now. BEAST is a scheduled, conditional risk. Both findings are inbound because the attack needs a connection to the shop service. The reach entries for proc:aaaa (lan) and proc:bbbb (localhost) match facts/reach.json.",
   "findings": [
    {
     "findingId": "f:0000000000000001",
     "verdict": "corrected",
     "exploitability": "exploitable",
     "priority": "now",
-    "item": "proc:aaaa",
-    "vulnerability": "CVE-2021-44228",
-    "reasoning": "Log4j-core 2.14.1 is inside the Log4Shell JNDI lookup vulnerable range, the CVE is marked as known-exploited, and the finding is critical, so it should be remediated immediately; the file's fix target of 2.15.0 is also insufficient because 2.15.0 has follow-up CVE-2021-45046, so 2.17.1 or later should be used instead.",
+    "reasoning": "CVE-2021-44228 (Log4Shell) is critical and marked knownExploited in audit.json. proc:aaaa listens on 0.0.0.0:8443 (facts/reach.json), so a remote client can reach it. The audit's fix version 2.15.0 is not sufficient: it left related JNDI/lookup issues open (CVE-2021-45046, and CVE-2021-45105 for DoS), so the fix target is corrected to 2.17.1.",
     "evidence": [
-     "vulnerability.id=CVE-2021-44228, severity=Critical, knownExploited=true",
-     "package log4j-core version 2.14.1 (java-archive) in appdir:/srv/shop",
-     "fix.versions=[2.15.0], risk=critical"
+     "audit.json: findings[0] risk critical, knownExploited true, package log4j-core 2.14.1, fix.versions [2.15.0]",
+     "facts/reach.json: proc:aaaa default lan, tcp 0.0.0.0:8443 reach lan",
+     "inventory.json: proc:aaaa runs java -jar /srv/shop/shop.jar --port=8443 under shop.service"
     ],
     "fix": [
-     "Upgrade log4j-core in /srv/shop to 2.17.1 or later, not 2.15.0",
-     "Restart shop.service after the upgrade and confirm the loaded jar version",
-     "Check logs for JNDI lookup attempts since exposure began, given known exploitation"
+     "Replace log4j-core 2.14.1 with 2.17.1 in /srv/shop, including any copy shaded into shop.jar",
+     "Restart shop.service with systemctl restart shop.service",
+     "Confirm no log4j-core 2.14.1 jar or class remains under /srv/shop"
     ],
     "sources": [
-     "audit.json findings[0]"
+     "audit.json",
+     "inventory.json",
+     "facts/reach.json",
+     "Apache Log4j security advisories (from memory, not fetched in this review)"
     ],
     "corrections": [
      {
-      "field": "fix.versions / remediation",
-      "old": "2.15.0 or later",
-      "new": "2.17.1 or later",
-      "why": "2.15.0 was followed by CVE-2021-45046 and 2.16.0 by CVE-2021-45105 and CVE-2021-44832 in later 2.x releases, so 2.15.0 does not fully close the risk."
+      "field": "fix.versions[0]",
+      "old": "2.15.0",
+      "new": "2.17.1",
+      "why": "2.15.0 does not fully close the Log4Shell family: CVE-2021-45046 and CVE-2021-45105 were found afterwards, and 2.17.1 is the release that covers the later CVE-2021-44832 as well."
      }
-    ]
+    ],
+    "item": "proc:aaaa",
+    "vulnerability": "CVE-2021-44228",
+    "vector": "inbound",
+    "reach": null
    },
    {
     "findingId": "f:0000000000000002",
-    "verdict": "corrected",
+    "verdict": "confirmed",
     "exploitability": "conditional",
-    "priority": "soon",
-    "item": "proc:bbbb",
-    "vulnerability": "CVE-2011-3389",
-    "reasoning": "This is a BEAST-style weakness in CBC cipher suites under TLS 1.0 and SSL 3, so it is only exploitable if the service still negotiates those protocols, and the remedy is disabling them rather than waiting for a package fix, so the 'no fix known' wording is misleading and the risk stays low.",
+    "priority": "scheduled",
+    "reasoning": "CVE-2011-3389 (BEAST) is rated low and is not known to be exploited. It needs a network attacker who can observe and tamper with TLS traffic to the shop service on 8443. Modern clients and disabled TLS 1.0 / CBC suites reduce it. audit.json reports no fix for openssl 3.0.15, so the practical action is to confirm the TLS configuration and accept the risk.",
     "evidence": [
-     "vulnerability.id=CVE-2011-3389, severity=Medium, knownExploited=false",
-     "package openssl 3.0.15 (deb), fix.state=not-fixed",
-     "risk=low"
+     "audit.json: findings[1] risk low, knownExploited false, package openssl 3.0.15, fix.state not-fixed",
+     "facts/reach.json: proc:aaaa default lan, tcp 0.0.0.0:8443 reach lan"
     ],
     "fix": [
-     "Confirm shop.service does not enable TLS 1.0 or SSL 3 (for example via a minimum protocol setting)",
-     "Set OpenSSL minimum protocol to TLSv1.2 in the app or system config if it is not already set",
-     "Re-check the finding after configuration change; no package upgrade is required for this item"
+     "Confirm the shop service does not offer TLS 1.0 or CBC-mode cipher suites, and prefer TLS 1.2+ AEAD ciphers",
+     "Record the openssl 3.0.15 finding as an accepted low risk, since no fixed version is listed"
     ],
     "sources": [
-     "audit.json findings[1]"
+     "audit.json",
+     "facts/reach.json"
     ],
-    "corrections": [
-     {
-      "field": "remediation",
-      "old": "No fix is known for openssl 3.0.15 yet.",
-      "new": "Mitigate by disabling TLS 1.0 and SSL 3 (minimum TLS 1.2); a configuration change, not a package patch, addresses this.",
-      "why": "The issue is a protocol-level weakness that is mitigated by configuration, so the absence of a package fix does not mean the item is unaddressable."
-     }
-    ]
+    "corrections": [],
+    "item": "proc:aaaa",
+    "vulnerability": "CVE-2011-3389",
+    "vector": "inbound",
+    "reach": null
    }
   ],
   "coverageNotes": [
-   "Read only audit.json; no web research performed, per instructions.",
-   "Fix versions for log4j follow-up CVEs are from background knowledge, not verified online.",
-   "audit.json was not modified; the action entry is returned in this structured output only.",
-   "No package manager or build tool was inspected, so commands are left null."
+   "No web research was done. The Log4j fix version 2.17.1 and the CVE relationships come from memory and were not checked against live advisories.",
+   "Only audit.json, inventory.json and facts/reach.json were read. No other files were read or written.",
+   "The review does not verify that /srv/shop actually contains log4j-core 2.14.1 or the openssl binary. It relies on the audit's data.",
+   "proc:bbbb (postgres) has no findings in audit.json and is covered only by its reach entry."
   ],
   "actions": [
    {
     "action": "a:111111111111",
-    "title": "Upgrade log4j-core to 2.17.1+ and mitigate TLS 1.0 for openssl in /srv/shop, then restart shop.service",
+    "title": "Upgrade log4j-core in /srv/shop to 2.17.1 and restart shop.service",
     "changes": [
      {
       "name": "log4j-core",
@@ -169,35 +178,87 @@
     ],
     "steps": [
      {
-      "text": "Upgrade log4j-core in /srv/shop to 2.17.1 or later (not 2.15.0)",
+      "text": "Replace log4j-core 2.14.1 with 2.17.1 in /srv/shop, including any copy shaded into shop.jar (audit.json says 2.15.0; use 2.17.1 instead)",
       "command": null
      },
      {
-      "text": "Disable TLS 1.0 and SSL 3 for the service (minimum TLS 1.2); openssl 3.0.15 has no package fix yet",
+      "text": "Restart the shop service",
+      "command": "systemctl restart shop.service"
+     },
+     {
+      "text": "Confirm that no log4j-core 2.14.1 jar or class remains under /srv/shop and that shop.service is running",
       "command": null
      },
      {
-      "text": "Restart shop.service",
+      "text": "Record openssl 3.0.15 (CVE-2011-3389) as an accepted low risk, since no fixed version is listed; confirm TLS 1.0 and CBC suites are off",
       "command": null
      }
     ],
     "upstream": {
-     "state": "unknown",
-     "note": "Not researched per instructions; fix versions beyond 2.15.0 come from background knowledge.",
-     "source": null
+     "state": "available",
+     "note": "Log4j 2.17.1 is the fixed release per Apache's advisories (from memory, not fetched). No upstream fix is listed for openssl 3.0.15 in audit.json.",
+     "source": "Apache Log4j security advisories (not fetched in this review)"
     },
-    "why": "The log4j upgrade clears the known-exploited critical finding, and the openssl item is handled by configuration, so both are addressed by the same action on /srv/shop; the target version was raised from 2.15.0 to 2.17.1 because 2.15.0 has follow-up CVEs."
+    "why": "Log4Shell is critical and known exploited, and proc:aaaa is reachable on the LAN at 8443. Upgrading to 2.17.1 instead of the audit's 2.15.0 closes the later Log4j CVEs in the same family. The openssl item has no fix and is low, so it is recorded as accepted rather than blocking."
+   }
+  ],
+  "reach": [
+   {
+    "item": "proc:aaaa",
+    "from": "lan",
+    "via": "direct",
+    "evidence": [
+     "facts/reach.json: proc:aaaa default lan; tcp 0.0.0.0:8443 reach lan"
+    ]
+   },
+   {
+    "item": "proc:bbbb",
+    "from": "localhost",
+    "via": "direct",
+    "evidence": [
+     "facts/reach.json: proc:bbbb default localhost; tcp 127.0.0.1:5432 reach localhost"
+    ]
    }
   ]
  },
- "ttft_ms": 2386,
+ "ttft_ms": 1393,
  "type": "result",
- "duration_ms": 20163,
- "uuid": "ebf777e9-c073-4863-b18d-214d8af24ebd",
- "ttft_stream_ms": 1535,
- "time_to_request_ms": 87,
- "first_content_frame_ms": 1535,
+ "duration_ms": 23650,
+ "uuid": "0b8c4e2f-c996-4947-9531-b37561ec6ba3",
+ "ttft_stream_ms": 1009,
+ "time_to_request_ms": 103,
+ "time_to_request_phases_ms": {
+  "other": 13,
+  "system_prompt": 14,
+  "resume_other": 0,
+  "process_user_input": 2,
+  "input_attachments": 6,
+  "input_hooks": 2,
+  "tool_pool_refresh": 1,
+  "init_message": 4,
+  "engine_pickup": 1,
+  "message_prep": 0,
+  "model_config_wait": 45,
+  "autocompact": 1,
+  "query_setup": 1,
+  "model_gates": 0,
+  "tool_schema_build": 3,
+  "message_normalization": 2,
+  "client_creation": 3,
+  "request_build": 5
+ },
+ "turn_start_resume_kind": "none",
+ "process_turn_index": 0,
+ "time_to_request_loop_lag_ms": 53,
+ "time_to_request_cpu_ms": 132,
+ "time_to_request_major_faults": 0,
+ "input_attachments_detail": {
+  "slowest_producer": "model",
+  "slowest_producer_ms": 4,
+  "cpu_ms": 9,
+  "major_faults": 0
+ },
+ "first_content_frame_ms": 1009,
  "queued_turn_count": 0,
- "result_index": 0,
- "credential_expires_at": "2026-11-22T10:12:46.843Z"
+ "result_index": 0
 }

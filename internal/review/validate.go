@@ -29,12 +29,16 @@ type agentEntry struct {
 	Corrections    []Correction `json:"corrections"`
 	Item           *string      `json:"item"`
 	Vulnerability  *string      `json:"vulnerability"`
+	Vector         *string      `json:"vector"`
+	Reach          *string      `json:"reach"`
 }
 
 var (
-	topKeys        = []string{"summary", "findings", "coverageNotes", "actions"}
+	topKeys        = []string{"summary", "findings", "coverageNotes", "actions", "reach"}
 	entryKeys      = []string{"findingId", "verdict", "exploitability", "priority", "reasoning", "evidence", "fix", "sources", "corrections", "item", "vulnerability"}
 	correctionKeys = []string{"field", "old", "new", "why"}
+	// optionalKeys may be missing from an entry: a script that forgets them must not cost every entry.
+	optionalKeys = []string{"vector", "reach"}
 )
 
 const MaxEntriesFile = 64 << 20
@@ -63,8 +67,8 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	if err := exactKeys("the review", top, topKeys); err != nil {
 		return nil, nil, err
 	}
-	out := &Review{SchemaVersion: "1", Findings: []Entry{}, Actions: []ActionEntry{}}
-	var rawEntries, rawActions []json.RawMessage
+	out := &Review{SchemaVersion: "1", Findings: []Entry{}, Actions: []ActionEntry{}, Reach: []ReachEntry{}}
+	var rawEntries, rawActions, rawReach []json.RawMessage
 	if err := strict(top["summary"], &out.Summary); err != nil || string(top["summary"]) == "null" {
 		return nil, nil, fmt.Errorf("%w: summary must be a string", ErrInvalid)
 	}
@@ -76,6 +80,9 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	}
 	if err := strict(top["actions"], &rawActions); err != nil || rawActions == nil {
 		return nil, nil, fmt.Errorf("%w: actions must be a list", ErrInvalid)
+	}
+	if err := strict(top["reach"], &rawReach); err != nil || rawReach == nil {
+		return nil, nil, fmt.Errorf("%w: reach must be a list", ErrInvalid)
 	}
 	var all []Entry
 	for i, raw := range rawEntries {
@@ -170,6 +177,28 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 		done[a.Action] = true
 		out.Actions = append(out.Actions, a)
 	}
+	reached := map[string]bool{}
+	for i, raw := range rawReach {
+		r, err := decodeReach(raw)
+		if err != nil {
+			drop(fmt.Sprintf("reach[%d] (%s)", i, shorten(strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": "))))
+			continue
+		}
+		why := ""
+		if !items[r.Item] {
+			why = "inventory.json has no such item"
+		} else if reached[r.Item] {
+			why = "it addresses an item twice"
+		} else {
+			why = r.tidy()
+		}
+		if why != "" {
+			drop(fmt.Sprintf("reach of %s (%s)", shorten(r.Item), why))
+			continue
+		}
+		reached[r.Item] = true
+		out.Reach = append(out.Reach, r)
+	}
 	out.NotReviewed = notReviewed(aud, out.Findings)
 	if len(ids) > 0 && len(out.NotReviewed) == len(ids) {
 		return nil, nil, fmt.Errorf("%w: it addresses none of the %d findings in audit.json (%d entries dropped%s%s)", ErrInvalid, len(ids), ndropped, firstReasons(dropped), rest)
@@ -204,6 +233,9 @@ func decodeEntry(raw json.RawMessage) (Entry, error) {
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &keys); err != nil {
 		return Entry{}, err
+	}
+	for _, k := range optionalKeys {
+		delete(keys, k)
 	}
 	if err := exactKeys("an entry", keys, entryKeys); err != nil {
 		return Entry{}, err
@@ -247,9 +279,17 @@ func decodeEntry(raw json.RawMessage) (Entry, error) {
 		}
 		return *s
 	}
+	// A vector or reach the review does not know is as good as none: the entry stays, and the reach
+	// rule leaves it alone.
+	known := func(s *string, values []string) string {
+		if s != nil && slices.Contains(values, *s) {
+			return *s
+		}
+		return ""
+	}
 	return Entry{FindingID: a.FindingID, Verdict: a.Verdict, Exploitability: deref(a.Exploitability), Priority: deref(a.Priority),
 		Reasoning: a.Reasoning, Evidence: a.Evidence, Fix: a.Fix, Sources: a.Sources, Corrections: a.Corrections,
-		Item: deref(a.Item), Vulnerability: deref(a.Vulnerability)}, nil
+		Item: deref(a.Item), Vulnerability: deref(a.Vulnerability), Vector: known(a.Vector, vectors), Reach: known(a.Reach, narrower)}, nil
 }
 
 func (e Entry) broken() string {

@@ -20,7 +20,7 @@ import (
 	"github.com/klar-web-services/tripcoil/internal/run"
 )
 
-const validReview = `{"summary":"The kernel CVE needs a local user.","coverageNotes":[],"actions":[],"findings":[
+const validReview = `{"summary":"The kernel CVE needs a local user.","coverageNotes":[],"reach":[],"actions":[],"findings":[
 {"findingId":"f:0000000000000001","verdict":"confirmed","exploitability":"conditional","priority":"soon","reasoning":"Needs a local user.",
  "evidence":["facts/users.json: alice can log in"],"fix":["pacman -Syu","reboot"],"sources":[],"corrections":[],"item":null,"vulnerability":null}]}`
 
@@ -404,4 +404,65 @@ func TestCountReviewLowerPriorityConditional(t *testing.T) {
 	if rec.Counts["reviewConditional"] != 3 || rec.Counts["reviewConditionalLowerPriority"] != 2 || rec.Counts["reviewExploitable"] != 1 {
 		t.Errorf("%v", rec.Counts)
 	}
+}
+
+// The reach rule is applied to a fresh review and again to a carried one, so the owner's
+// exposure.lan takes effect without a new review.
+func TestRunAppliesReach(t *testing.T) {
+	calls := 0
+	out := strings.Replace(validReview, `"reach":[]`, `"reach":[{"item":"proc:web","from":"lan","via":"direct","evidence":["facts/firewall.txt: no rule for 8080"]}]`, 1)
+	out = strings.Replace(out, `"vulnerability":null}`, `"vulnerability":null,"vector":"inbound","reach":null}`, 1)
+	d := reviewDeps(t, fakeAgent{out: out, calls: &calls})
+	inv := sampleInventory()
+	inv.Items = append(inv.Items, inventory.Item{ID: "proc:web", Kind: inventory.KindProcess, Name: "web"})
+	d.collect = func(context.Context, string) (*inventory.Inventory, error) { return inv, nil }
+	d.audit = func(context.Context, *inventory.Inventory, string, string, config.Config) *audit.Audit {
+		a := sampleAudit(audit.Complete)
+		a.Findings[0].Items, a.Findings[0].Source = []string{"proc:web"}, ""
+		return a
+	}
+	d.facts = func(_ context.Context, _ *inventory.Inventory, dir string, _ config.Config) (*facts.Index, error) {
+		if err := os.MkdirAll(filepath.Join(dir, "facts"), 0o750); err != nil {
+			return nil, err
+		}
+		reach := `{"items":[{"item":"proc:web","default":"lan","via":"direct","sockets":[]}]}`
+		if err := os.WriteFile(filepath.Join(dir, "facts", "reach.json"), []byte(reach), 0o640); err != nil {
+			return nil, err
+		}
+		return &facts.Index{Collected: []string{"reach.json"}, Missing: []facts.Missing{}}, nil
+	}
+	check := func(what string, rec *run.Record, exploitability, priority string) {
+		t.Helper()
+		rev, err := review.Load(filepath.Join(d.stateDir, "runs", rec.RunID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := rev.Findings[0]
+		noticed := false
+		for _, n := range rec.Notices {
+			noticed = noticed || n.Code == problem.ReviewReachApplied
+		}
+		if e.Exploitability != exploitability || e.Priority != priority || e.Adjusted == nil ||
+			*e.Adjusted != (review.Adjusted{Exploitability: "conditional", Priority: "soon", Rule: "lan"}) || !noticed || len(rev.Reach) != 1 {
+			t.Errorf("%s: %+v, adjusted %+v, noticed %v, reach %+v", what, e, e.Adjusted, noticed, rev.Reach)
+		}
+	}
+	_, rec, _ := runOnce(t, d)
+	check("a fresh review", rec, "conditional", "scheduled")
+	if rec.Counts["reviewConditionalLowerPriority"] != 1 {
+		t.Errorf("counts follow the rule: %+v", rec.Counts)
+	}
+	_, rec, _ = runOnce(t, d)
+	if calls != 1 || rec.CarriedFrom == "" {
+		t.Fatalf("the second run carries the review: calls %d", calls)
+	}
+	check("a carried review", rec, "conditional", "scheduled")
+	if err := os.WriteFile(d.configPath, []byte("version: 1\nexposure:\n  lan: trusted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, rec, _ = runOnce(t, d)
+	if calls != 1 || rec.CarriedFrom == "" || rec.Counts["reviewNotExploitable"] != 1 {
+		t.Fatalf("exposure.lan needs no new review: calls %d, %+v", calls, rec.Counts)
+	}
+	check("with a trusted LAN", rec, "not_exploitable", "none")
 }

@@ -133,19 +133,21 @@ func unprintable(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicod
 
 func hasUnprintable(s string) bool { return strings.ContainsFunc(s, unprintable) }
 
+// oneLine makes a text safe to show on one line and cuts it to n bytes.
+func oneLine(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if unprintable(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	return audit.Cut(strings.Join(strings.Fields(s), " "), n)
+}
+
 // tidy applies the limits to an entry: changes that match no finding of the action or repeat one go, lists
 // are cut to their lengths, texts to their limits, and a command or a source that cannot be
 // shown safely is removed. It says why when nothing usable is left.
 func (e *ActionEntry) tidy(packages map[string]bool) string {
-	oneLine := func(s string, n int) string {
-		s = strings.Map(func(r rune) rune {
-			if unprintable(r) {
-				return ' '
-			}
-			return r
-		}, s)
-		return audit.Cut(strings.Join(strings.Fields(s), " "), n)
-	}
 	if e.Title = oneLine(e.Title, audit.MaxTitle); e.Title == "" {
 		return "it has no title"
 	}

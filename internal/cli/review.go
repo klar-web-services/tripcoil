@@ -79,6 +79,7 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	prev := review.LastReviewed(r.d.stateDir)
 	if review.NeedsReview(prev, rec.Fingerprint, now, time.Duration(r.cfg.Review.MaxAge), r.force) == "" {
 		rev := review.Carry(prev.Review, r.aud, r.inv)
+		r.applyReach(rev)
 		if err := run.WriteJSON(filepath.Join(r.dir, "review.json"), rev, 0o640); err != nil {
 			rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write review.json: %v", err))
 			rec.Stages["review"] = run.StageFailed
@@ -140,6 +141,7 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 		rec.Stages["review"] = run.StageFailed
 		return nil, "AI review failed: " + code
 	}
+	r.applyReach(rev)
 	if err := run.WriteJSON(filepath.Join(r.dir, "review.json"), rev, 0o640); err != nil {
 		rec.Add(problem.New(problem.Error, problem.RunFolderUnwritable, "", "cannot write review.json: %v", err))
 		rec.Stages["review"] = run.StageFailed
@@ -149,6 +151,15 @@ func (r *reviewRun) run(ctx context.Context) (*review.Review, string) {
 	rec.Stages["review"] = run.StageOK
 	countReview(rec, rev)
 	return rev, ""
+}
+
+// applyReach lowers the findings that need a connection nobody outside can make (review.ApplyReach)
+// and notes how many: the report says which.
+func (r *reviewRun) applyReach(rev *review.Review) {
+	if n := review.ApplyReach(rev, r.aud, r.reach, r.cfg.Exposure.LAN); n > 0 {
+		r.rec.Add(problem.New(problem.Notice, problem.ReviewReachApplied, "review",
+			"%d findings were lowered because the items they affect cannot be reached from the internet", n))
+	}
 }
 
 func countReview(rec *run.Record, rev *review.Review) {

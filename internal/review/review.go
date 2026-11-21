@@ -13,7 +13,7 @@ import (
 
 // PromptVersion is the prompt's version. Change it with any change to the prompt
 // or the schema: it is part of the change check's fingerprint.
-const PromptVersion = "4"
+const PromptVersion = "5"
 
 // Prompt is the fixed task the agent gets. It holds no untrusted text: the agent reads the run's
 // files itself.
@@ -52,9 +52,12 @@ type Review struct {
 	Findings      []Entry `json:"findings"`
 	// Actions are the reviewer's texts for the audit's actions and for findings it added. A
 	// review from before prompt 4 has none.
-	Actions       []ActionEntry `json:"actions"`
-	CoverageNotes []string      `json:"coverageNotes"`
-	NotReviewed   []string      `json:"notReviewed"`
+	Actions []ActionEntry `json:"actions"`
+	// Reach is what the reviewer found out about who can reach each item, as it wrote it. A review
+	// from before prompt 5 has none.
+	Reach         []ReachEntry `json:"reach"`
+	CoverageNotes []string     `json:"coverageNotes"`
+	NotReviewed   []string     `json:"notReviewed"`
 }
 
 type Entry struct {
@@ -69,6 +72,12 @@ type Entry struct {
 	Corrections    []Correction `json:"corrections,omitempty"`
 	Item           string       `json:"item,omitempty"`
 	Vulnerability  string       `json:"vulnerability,omitempty"`
+	// Vector says how the finding is attacked; empty when the reviewer did not say.
+	Vector string `json:"vector,omitempty"`
+	// Reach is set when the vulnerable part can be reached from fewer places than its item.
+	Reach string `json:"reach,omitempty"`
+	// Adjusted is set when ApplyReach lowered the finding.
+	Adjusted *Adjusted `json:"adjusted,omitempty"`
 }
 
 type Correction struct {
@@ -92,7 +101,7 @@ func Load(runDir string) (*Review, error) {
 
 func Carry(prev *Review, aud *audit.Audit, inv *inventory.Inventory) *Review {
 	ids, items := findingIDs(aud), itemIDs(inv)
-	out := &Review{SchemaVersion: "1", Summary: prev.Summary, Findings: []Entry{}, Actions: []ActionEntry{}, CoverageNotes: prev.CoverageNotes}
+	out := &Review{SchemaVersion: "1", Summary: prev.Summary, Findings: []Entry{}, Actions: []ActionEntry{}, Reach: []ReachEntry{}, CoverageNotes: prev.CoverageNotes}
 	if out.CoverageNotes == nil {
 		out.CoverageNotes = []string{}
 	}
@@ -110,6 +119,11 @@ func Carry(prev *Review, aud *audit.Audit, inv *inventory.Inventory) *Review {
 	for _, a := range prev.Actions {
 		if _, ok := known[a.Action]; ok {
 			out.Actions = append(out.Actions, a)
+		}
+	}
+	for _, r := range prev.Reach {
+		if items[r.Item] {
+			out.Reach = append(out.Reach, r)
 		}
 	}
 	out.NotReviewed = notReviewed(aud, out.Findings)

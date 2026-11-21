@@ -1,7 +1,9 @@
 {
-  "summary": "Prioritize the Log4j upgrade; assess BEAST through TLS configuration rather than the OpenSSL version alone.",
+  "summary": "audit.json holds two findings for /srv/shop and one shared remediation action: a critical Log4Shell finding and a low-severity BEAST finding. Correct the Log4j remediation baseline and prioritize it now; the BEAST finding requires protocol and configuration verification rather than an unsupported OpenSSL package-fix claim.",
   "coverageNotes": [
-    "Reviewed audit.json only; no web research or runtime verification performed."
+    "No web or external research was done. This review uses only audit.json, inventory.json, facts/reach.json and existing knowledge.",
+    "No files were written and no services were changed.",
+    "The supplied files establish package versions and reported network reach, but do not establish logging behavior, Java runtime compatibility, or negotiated TLS protocols and cipher suites."
   ],
   "findings": [
     {
@@ -9,92 +11,130 @@
       "verdict": "corrected",
       "exploitability": "conditional",
       "priority": "now",
-      "reasoning": "Log4j-core 2.14.1 is affected by Log4Shell when attacker-controlled data reaches vulnerable lookup processing, but 2.15.0 is an inadequate upgrade target because subsequent Log4j vulnerabilities require further fixes.",
+      "reasoning": "The audit reports vulnerable log4j-core 2.14.1 in the shop application. For the assessed request-driven attack path, exploitation requires a connection to shop's own service and attacker-controlled request data reaching a vulnerable logging path. LAN reach is reported, but the logging path and relevant runtime settings are not supplied. Although 2.15.0 was the original Log4Shell fix, it is not a sufficient overall remediation baseline because of subsequent Log4j vulnerabilities. Use 2.17.1 as a historical Java 8+ security baseline, not as a claim about the latest release.",
       "evidence": [
-        "audit.json identifies log4j-core 2.14.1 in /srv/shop and marks CVE-2021-44228 as known exploited."
+        "audit.json reports CVE-2021-44228, log4j-core 2.14.1, critical risk and known exploitation.",
+        "inventory.json identifies proc:aaaa as the Java shop process in /srv/shop, managed by shop.service.",
+        "facts/reach.json reports direct LAN reach to proc:aaaa on TCP port 8443."
       ],
       "fix": [
-        "Upgrade to a maintained, Java-compatible Log4j release, using 2.17.1 as a minimum baseline for Java 8 or later, then restart shop.service."
+        "Verify the Java runtime and upgrade bundled log4j-core from 2.14.1 to at least the Java 8+ baseline 2.17.1, or a compatible maintained release; do not stop at 2.15.0.",
+        "Check the application artifact and runtime classpath for remaining vulnerable Log4j copies, restart shop.service, and verify the loaded version and application health."
       ],
       "sources": [
-        "audit.json"
+        "audit.json",
+        "inventory.json",
+        "facts/reach.json"
       ],
       "corrections": [
         {
-          "field": "fix.versions",
+          "field": "fix.versions[0]",
           "old": "2.15.0",
-          "new": "Maintained Java-compatible release; minimum baseline 2.17.1 for Java 8+",
-          "why": "2.15.0 addresses the original CVE but leaves subsequent Log4j vulnerabilities."
+          "new": "2.17.1",
+          "why": "Replace the original Log4Shell fix with a historical Java 8+ baseline addressing subsequent Log4j vulnerabilities. Runtime compatibility and the currently maintained release were not researched."
         }
       ],
       "item": "proc:aaaa",
-      "vulnerability": "CVE-2021-44228"
+      "vulnerability": "CVE-2021-44228",
+      "vector": "inbound",
+      "reach": null
     },
     {
       "findingId": "f:0000000000000002",
       "verdict": "corrected",
-      "exploitability": "conditional",
+      "exploitability": "unknown",
       "priority": "scheduled",
-      "reasoning": "BEAST depends on vulnerable SSL 3.0 or TLS 1.0 CBC usage and client behavior, so OpenSSL 3.0.15 alone neither establishes exposure nor supports the claim that no mitigation exists.",
+      "reasoning": "OpenSSL 3.0.15 alone does not establish BEAST exposure. Applicability depends on legacy SSL/TLS CBC negotiation, affected client behavior and an active network attacker. The files do not show that shop uses this OpenSSL binary or negotiates affected protocols. For the service-side scenario being assessed, a client connection to shop's own TLS service is required, so the vector is inbound. Replace the blanket 'no fix is known' remediation with verification and protocol hardening; neither confirmed exploitability nor a definite false positive is established.",
       "evidence": [
-        "audit.json supplies an OpenSSL version but no negotiated protocols, cipher suites, or client behavior."
+        "audit.json associates CVE-2011-3389 with openssl 3.0.15 without supplying TLS configuration or negotiation evidence.",
+        "inventory.json identifies shop as a Java process but does not establish its TLS provider or use of the reported OpenSSL binary.",
+        "facts/reach.json reports a listener on port 8443 but does not identify its protocol or cipher suites."
       ],
       "fix": [
-        "Verify the application's TLS termination configuration and disable SSL 3.0 and TLS 1.0, requiring TLS 1.2 or later."
+        "Identify the TLS termination point and provider, then inspect enabled protocols and negotiated cipher suites.",
+        "If affected legacy SSL/TLS CBC negotiation is possible, disable the affected legacy protocols and require TLS 1.2 or newer; validate client compatibility and retest."
       ],
       "sources": [
-        "audit.json"
+        "audit.json",
+        "inventory.json",
+        "facts/reach.json"
       ],
       "corrections": [
         {
           "field": "remediation",
-          "old": "No fix is known for openssl 3.0.15 yet.",
-          "new": "Assess protocol and cipher configuration; mitigate by requiring TLS 1.2 or later.",
-          "why": "BEAST is a protocol-dependent exposure, not an established unpatched defect in this package version."
+          "old": "No fix is known for openssl 3.0.15 in /srv/shop.",
+          "new": "Verify BEAST applicability at the actual TLS termination point and disable affected legacy protocol negotiation if present.",
+          "why": "The supplied package version does not establish this protocol- and configuration-dependent vulnerability or justify a blanket no-fix claim."
         }
       ],
-      "item": "proc:bbbb",
-      "vulnerability": "CVE-2011-3389"
+      "item": "proc:aaaa",
+      "vulnerability": "CVE-2011-3389",
+      "vector": "inbound",
+      "reach": null
     }
   ],
   "actions": [
     {
       "action": "a:111111111111",
-      "title": "Remediate /srv/shop",
+      "title": "Remediate shop Log4j and verify TLS configuration",
       "changes": [
         {
           "name": "log4j-core",
           "from": "2.14.1",
-          "to": "Maintained Java-compatible release; minimum baseline 2.17.1 for Java 8+"
+          "to": "2.17.1"
+        },
+        {
+          "name": "openssl",
+          "from": "3.0.15",
+          "to": null
         }
       ],
       "also": [
-        "Assess proc:bbbb for BEAST exposure through its actual TLS configuration."
+        "Treat 2.17.1 as a historical Java 8+ baseline, not a verified latest release.",
+        "Do not claim the BEAST finding is resolved by the Log4j upgrade or that an OpenSSL version change is established as necessary."
       ],
       "steps": [
         {
-          "text": "Upgrade the packages below in /srv/shop: replace log4j-core with a maintained release compatible with the application's Java runtime.",
+          "text": "Verify Java runtime compatibility and locate all bundled Log4j artifacts in /srv/shop and its runtime dependencies.",
           "command": null
         },
         {
-          "text": "Inspect the application's TLS termination configuration and require TLS 1.2 or later where legacy protocols remain enabled.",
+          "text": "Upgrade log4j-core to the 2.17.1 baseline or a compatible maintained release, align related Log4j dependencies, and remove superseded vulnerable copies.",
           "command": null
         },
         {
-          "text": "Restart shop.service.",
+          "text": "Restart shop.service after deploying the updated application.",
           "command": "systemctl restart shop.service"
         },
         {
-          "text": "Verify application health, the loaded Log4j version, and that the TLS endpoint rejects SSL 3.0 and TLS 1.0; reload any separate TLS terminator if its configuration changed.",
+          "text": "Verify application health and the loaded Log4j version; inspect the actual TLS termination configuration and disable affected legacy protocols if present.",
           "command": null
         }
       ],
       "upstream": {
-        "state": "available",
-        "note": "Log4j fixes exist; current maintained releases were not checked.",
-        "source": "audit.json"
+        "state": "unknown",
+        "note": "Current upstream release availability and maintenance status were not checked because no research was performed.",
+        "source": null
       },
-      "why": "Preserves the default upgrade-and-restart steps while correcting the Log4j target and replacing the unsupported OpenSSL no-fix claim with configuration assessment."
+      "why": "Both findings share /srv/shop and proc:aaaa. Prioritize the critical Log4j remediation while separately verifying the unsupported BEAST applicability claim."
+    }
+  ],
+  "reach": [
+    {
+      "item": "proc:aaaa",
+      "from": "lan",
+      "via": "direct",
+      "evidence": [
+        "facts/reach.json shows default LAN reach and a TCP listener at 0.0.0.0:8443."
+      ]
+    },
+    {
+      "item": "proc:bbbb",
+      "from": "localhost",
+      "via": "direct",
+      "evidence": [
+        "facts/reach.json shows default localhost reach and a TCP listener at 127.0.0.1:5432."
+      ]
     }
   ]
 }

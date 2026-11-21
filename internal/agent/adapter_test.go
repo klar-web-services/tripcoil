@@ -87,7 +87,7 @@ func TestClaudeParse(t *testing.T) {
 		t.Errorf("the structured output does not validate: %v", err)
 	}
 	var r map[string]any
-	if json.Unmarshal(data, &r) != nil || !strings.HasPrefix(r["summary"].(string), "audit.json has two findings") {
+	if json.Unmarshal(data, &r) != nil || !strings.HasPrefix(r["summary"].(string), "audit.json holds") {
 		t.Errorf("got %s", data)
 	}
 	cases := []struct {

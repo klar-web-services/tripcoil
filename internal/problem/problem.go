@@ -46,6 +46,7 @@ const (
 	AgentOutputInvalid   = "AGENT_OUTPUT_INVALID"
 	ReviewUnsupported    = "REVIEW_UNSUPPORTED"
 	ReviewEntriesDropped = "REVIEW_ENTRIES_DROPPED"
+	ReviewReachApplied   = "REVIEW_REACH_APPLIED"
 	AgentNetworkRestored = "AGENT_NETWORK_RESTORED"
 	AgentUnitLeft        = "AGENT_UNIT_LEFT"
 )

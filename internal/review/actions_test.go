@@ -38,7 +38,7 @@ func action(over map[string]any) map[string]any {
 }
 
 func withActions(actions ...map[string]any) []byte {
-	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(nil)}, "coverageNotes": []string{}, "actions": actions})
+	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(nil)}, "coverageNotes": []string{}, "reach": []any{}, "actions": actions})
 	return data
 }
 
@@ -149,7 +149,7 @@ func TestValidateTidiesActions(t *testing.T) {
 func TestValidateActionForAnAddedFinding(t *testing.T) {
 	aud, inv := actionsAudit()
 	added := entry(map[string]any{"findingId": "added:1", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-1", "sources": []string{"https://x"}})
-	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(nil), added}, "coverageNotes": []string{},
+	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(nil), added}, "coverageNotes": []string{}, "reach": []any{},
 		"actions": []any{action(map[string]any{"action": "added:1"})}})
 	r, warns, err := Validate(data, nil, aud, inv)
 	if err != nil || len(warns) != 0 || len(r.Actions) != 1 {
@@ -163,7 +163,7 @@ func TestValidateActionForAnAddedFinding(t *testing.T) {
 func TestValidateAddedIDIsShort(t *testing.T) {
 	aud, inv := actionsAudit()
 	long := entry(map[string]any{"findingId": "added:" + strings.Repeat("x", 60), "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-1", "sources": []string{"https://x"}})
-	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(nil), long}, "coverageNotes": []string{}, "actions": []any{}})
+	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(nil), long}, "coverageNotes": []string{}, "reach": []any{}, "actions": []any{}})
 	r, warns, err := Validate(data, nil, aud, inv)
 	if err != nil || len(r.Findings) != 1 || len(warns) != 1 || !strings.Contains(warns[0].Message, "an added finding's ID is longer than 64 bytes") {
 		t.Errorf("%v %+v %+v", err, r, warns)
@@ -173,7 +173,7 @@ func TestValidateAddedIDIsShort(t *testing.T) {
 func TestValidateFixIsOptional(t *testing.T) {
 	aud, inv := actionsAudit()
 	added := entry(map[string]any{"findingId": "added:1", "verdict": "added", "item": "proc:aaaa", "vulnerability": "CVE-2026-1", "sources": []string{"https://x"}, "fix": []string{}})
-	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(map[string]any{"fix": []string{}}), added}, "coverageNotes": []string{}, "actions": []any{}})
+	data, _ := json.Marshal(map[string]any{"summary": "s", "findings": []any{entry(map[string]any{"fix": []string{}}), added}, "coverageNotes": []string{}, "reach": []any{}, "actions": []any{}})
 	r, warns, err := Validate(data, nil, aud, inv)
 	if err != nil || len(r.Findings) != 1 || r.Findings[0].FindingID != "f:0000000000000001" {
 		t.Fatalf("%v %+v", err, r)
@@ -207,7 +207,7 @@ func TestSchemaActions(t *testing.T) {
 	if err := json.Unmarshal(Schema, &s); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(s["required"], []any{"summary", "findings", "coverageNotes", "actions"}) {
+	if !reflect.DeepEqual(s["required"], []any{"summary", "findings", "coverageNotes", "actions", "reach"}) {
 		t.Errorf("required %v", s["required"])
 	}
 	check := func(what string, obj any, keys []string) {
