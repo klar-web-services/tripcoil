@@ -214,7 +214,7 @@ func TestDistros(t *testing.T) {
 			if err := json.Unmarshal(idxOut, &idx); err != nil {
 				t.Fatalf("no facts/index.json: %v\n%s", err, idxOut)
 			}
-			want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "users.json", "addresses.json", "reach.json"}
+			want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "users.json", "addresses.json", "routes.json", "reach.json"}
 			if len(idx.Missing) == 1 && idx.Missing[0].Fact == "firewall.txt" && strings.Contains(idx.Missing[0].Reason, "Operation not permitted") {
 				want = slices.DeleteFunc(want, func(f string) bool { return f == "firewall.txt" })
 				idx.Missing = nil

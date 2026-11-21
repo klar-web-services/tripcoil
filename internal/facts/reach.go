@@ -3,13 +3,8 @@ package facts
 import (
 	"fmt"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-
-	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
 // Where an attacker can connect to an item from, narrowest first.
@@ -39,13 +34,14 @@ func wider(a, b string) string {
 	return a
 }
 
-// Reach is facts/reach.json: the default reach of each item that has a socket or a published port,
-// judged by its bind addresses alone, and of each tunnel's own program. It ignores the firewall and
-// is never enough to lower a finding.
+// Reach is facts/reach.json: the default reach of each item that has a socket or a published port
+// or that a proxy or tunnel routes to, judged by the bind addresses and by facts/routes.json. It
+// ignores the firewall and a proxy's own rules, and is never enough to lower a finding.
 type Reach struct {
 	Items []ItemReach `json:"items"`
-	// Routers are the proxies and tunnels that run here. Each may publish an item, with or without
-	// sockets of its own, further than this fact says.
+	// Routers are the proxies and tunnels that run here, with the place each takes requests from. One
+	// that is not complete may publish an item, with or without sockets of its own, further than
+	// this fact says.
 	Routers []Router `json:"routers"`
 }
 
@@ -55,6 +51,8 @@ type Router struct {
 	// Kind is ViaProxy or ViaTunnel.
 	Kind  string `json:"kind"`
 	Reach string `json:"reach"`
+	// Complete: Tripcoil read all of its routing, and facts/routes.json names everything it routes to.
+	Complete bool `json:"complete"`
 }
 
 type ItemReach struct {
@@ -64,7 +62,9 @@ type ItemReach struct {
 	// Unsure says why the item may be reachable from further away than Default.
 	Unsure string `json:"unsure,omitempty"`
 	// Stated: the owner's exposure.internetPorts decided between lan and internet.
-	Stated  bool          `json:"stated,omitempty"`
+	Stated bool `json:"stated,omitempty"`
+	// Through are the items of the proxies and tunnels that route to it.
+	Through []string      `json:"through,omitempty"`
 	Sockets []ReachSocket `json:"sockets"`
 }
 
@@ -124,31 +124,7 @@ func (a Addresses) reachThrough(i Interface, class string) string {
 	return ReachLAN
 }
 
-// routers are the programs that pass outside requests on to other items: their kind by executable name.
-var routers = map[string]string{
-	"traefik": ViaProxy, "caddy": ViaProxy, "nginx": ViaProxy, "haproxy": ViaProxy, "envoy": ViaProxy,
-	"cloudflared": ViaTunnel, "ngrok": ViaTunnel, "frpc": ViaTunnel,
-}
-
-// programs names what an item runs: its executable, and the command of each of its processes.
-func (c collector) programs(it inventory.Item) []string {
-	var out []string
-	if it.Exe != "" {
-		out = append(out, filepath.Base(it.Exe))
-	}
-	pids := slices.Clone(it.PIDs)
-	for _, p := range it.Processes {
-		pids = append(pids, p.PID)
-	}
-	for _, pid := range pids {
-		if data, err := os.ReadFile(filepath.Join(c.d.Root, "proc", strconv.Itoa(pid), "comm")); err == nil {
-			out = append(out, strings.TrimSpace(string(data)))
-		}
-	}
-	return out
-}
-
-func (c collector) reach(n Network, conts []Container, a Addresses) Reach {
+func (c collector) reach(n Network, conts []Container, a Addresses, routes Routes) Reach {
 	byItem := map[string]*ItemReach{}
 	add := func(item string, s ReachSocket, port int) {
 		r := byItem[item]
@@ -180,38 +156,79 @@ func (c collector) reach(n Network, conts []Container, a Addresses) Reach {
 		}
 	}
 
-	// Until Tripcoil reads what proxies and tunnels route to, each of them puts in doubt every item it
-	// could publish further. A proxy without a socket of its own may listen where Tripcoil cannot
-	// see it (Swarm's routing mesh), so it counts as public.
-	out := Reach{Items: []ItemReach{}, Routers: []Router{}}
-	for _, it := range c.inv.Items {
-		for _, name := range c.programs(it) {
-			kind, ok := routers[name]
-			if !ok {
-				continue
-			}
-			r := Router{Item: it.ID, Program: name, Kind: kind, Reach: ReachInternet}
-			own := byItem[it.ID]
-			switch {
-			case kind == ViaProxy && own != nil:
-				r.Reach = own.Default
-			case kind == ViaTunnel: // what comes through the tunnel reaches the tunnel's own program first
-				if own == nil {
-					own = &ItemReach{Item: it.ID, Sockets: []ReachSocket{}}
-					byItem[it.ID] = own
-				}
-				own.Default, own.Via = ReachInternet, ViaTunnel
-			}
-			out.Routers = append(out.Routers, r)
-			break
+	for _, ct := range conts {
+		for _, p := range ct.MeshPorts { // Swarm's routing mesh publishes these on every address of every node
+			add(ct.Item, ReachSocket{Proto: p.Protocol, Port: p.HostPort, Published: true, Reach: a.reachOf("")}, p.HostPort)
 		}
 	}
+
+	entry := func(item string) *ItemReach {
+		r := byItem[item]
+		if r == nil {
+			r = &ItemReach{Item: item, Default: ReachNone, Sockets: []ReachSocket{}}
+			byItem[item] = r
+		}
+		return r
+	}
+	// From where a routing program takes requests. A tunnel takes them from the internet, whatever
+	// its sockets say, and what comes through reaches the tunnel's own program first. A proxy without
+	// a socket of its own may listen where Tripcoil cannot see it, so it counts as public.
+	reachOf := func(p RouteProgram) string {
+		switch own := byItem[p.Item]; {
+		case p.Kind == ViaTunnel:
+			return ReachInternet
+		case p.Tailnet:
+			return ReachTailnet
+		case own != nil:
+			return own.Default
+		}
+		return ReachInternet
+	}
+	for _, p := range routes.Programs {
+		if p.Kind == ViaTunnel {
+			e := entry(p.Item)
+			e.Default, e.Via = ReachInternet, ViaTunnel
+		}
+	}
+	// An item a program routes to is reachable from wherever the program is. Programs route to each
+	// other (a tunnel to a proxy to an application), so this repeats until nothing widens.
+	for widened, pass := true, 0; widened && pass < 16; pass++ {
+		widened = false
+		for _, p := range routes.Programs {
+			from := reachOf(p)
+			for _, t := range p.Targets {
+				if t.Item == "" || t.Item == p.Item {
+					continue
+				}
+				e := entry(t.Item)
+				if !slices.Contains(e.Through, p.Item) {
+					e.Through = append(e.Through, p.Item)
+				}
+				if ReachRank(from) > ReachRank(e.Default) {
+					e.Default, e.Via, widened = from, p.Kind, true
+				}
+			}
+		}
+	}
+	out := Reach{Items: []ItemReach{}, Routers: []Router{}}
+	for _, p := range routes.Programs {
+		out.Routers = append(out.Routers, Router{Item: p.Item, Program: p.Program, Kind: p.Kind, Reach: reachOf(p), Complete: p.Complete})
+	}
+	// A program whose routing is not fully known may publish any item further than this fact says.
 	for _, r := range byItem {
-		for _, rt := range out.Routers {
-			if rt.Item != r.Item && ReachRank(rt.Reach) > ReachRank(r.Default) {
-				r.Unsure = fmt.Sprintf("%s runs here and could pass requests from the %s on to this item; Tripcoil does not read what it routes to", rt.Program, describeReach(rt.Reach))
+		for _, p := range routes.Programs {
+			if from := reachOf(p); !p.Complete && p.Item != r.Item && ReachRank(from) > ReachRank(r.Default) {
+				r.Unsure = fmt.Sprintf("%s runs here and could pass requests from the %s on to this item; Tripcoil could not read all of its routing (%s)", p.Program, describeReach(from), p.Gaps[0])
 				break
 			}
+		}
+	}
+	for _, ct := range conts {
+		switch {
+		case ct.MeshUnknown:
+			entry(ct.Item).Unsure = "its Swarm service may publish ports through the routing mesh, which this node cannot list"
+		case ct.OwnAddress:
+			entry(ct.Item).Unsure = "it is on a macvlan or ipvlan network, with an address of its own on the LAN"
 		}
 	}
 

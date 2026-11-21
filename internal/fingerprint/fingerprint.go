@@ -122,7 +122,7 @@ func Compute(in Input) string {
 			c.Reach = append(c.Reach, fmt.Sprintf("%s %s %s unsure=%v stated=%v", r.Item, r.Default, r.Via, r.Unsure != "", r.Stated))
 		}
 		for _, r := range in.Reach.Routers {
-			c.Reach = append(c.Reach, fmt.Sprintf("router %s %s %s", r.Item, r.Program, r.Reach))
+			c.Reach = append(c.Reach, fmt.Sprintf("router %s %s %s complete=%v", r.Item, r.Program, r.Reach, r.Complete))
 		}
 	}
 	for _, l := range [][]string{c.Findings, c.RestartNeeded, c.RebootPending, c.Containers, c.Users, c.ContainerSec, c.Sysctls, c.Reach} {

@@ -214,7 +214,7 @@ func TestCollect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "sshd.txt", "users.json", "addresses.json", "reach.json"}
+	want := []string{"network.json", "firewall.txt", "processes.json", "containers.json", "kernel.json", "sshd.txt", "users.json", "addresses.json", "routes.json", "reach.json"}
 	if !reflect.DeepEqual(idx.Collected, want) || len(idx.Missing) != 0 {
 		t.Fatalf("index %+v", idx)
 	}
@@ -327,12 +327,13 @@ func TestCollectMissingFacts(t *testing.T) {
 	for _, m := range idx.Missing {
 		reasons[m.Fact] = m.Reason
 	}
-	if len(reasons) != 6 || !strings.Contains(reasons["addresses.json"], "interfaces") || !strings.Contains(reasons["reach.json"], "network.json") ||
+	if len(reasons) != 7 || !strings.Contains(reasons["addresses.json"], "interfaces") || !strings.Contains(reasons["reach.json"], "network.json") ||
+		!strings.Contains(reasons["routes.json"], "network.json") ||
 		!strings.Contains(reasons["network.json"], "proc/net/tcp") || !strings.Contains(reasons["firewall.txt"], "Operation not permitted") ||
 		!strings.Contains(reasons["containers.json"], "no Docker") || !strings.Contains(reasons["kernel.json"], "cmdline") {
 		t.Errorf("missing: %+v", idx.Missing)
 	}
-	for _, name := range []string{"network.json", "firewall.txt", "kernel.json", "addresses.json", "reach.json"} {
+	for _, name := range []string{"network.json", "firewall.txt", "kernel.json", "addresses.json", "routes.json", "reach.json"} {
 		if _, err := os.Stat(filepath.Join(runDir, "facts", name)); err == nil {
 			t.Errorf("%s written although it is missing", name)
 		}

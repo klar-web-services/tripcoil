@@ -279,7 +279,7 @@ func summary(r Reach) map[string]string {
 func TestDefaultReach(t *testing.T) {
 	c, n, conts := reachFixture(t)
 	home := homeAddresses(t, false)
-	r := c.reach(n, conts, home)
+	r := c.reach(n, conts, home, Routes{})
 	want := map[string]string{"proc:sshd": "lan direct", "proc:local": "localhost direct", "proc:tail": "tailnet direct",
 		"container:web": "lan direct", "container:db": "localhost direct"}
 	if got := summary(r); !reflect.DeepEqual(got, want) {
@@ -295,56 +295,108 @@ func TestDefaultReach(t *testing.T) {
 	c.d.InternetPorts = &[]int{8080}
 	want = map[string]string{"proc:sshd": "lan direct stated", "proc:local": "localhost direct", "proc:tail": "tailnet direct",
 		"container:web": "internet direct stated", "container:db": "localhost direct"}
-	if got := summary(c.reach(n, conts, home)); !reflect.DeepEqual(got, want) {
+	if got := summary(c.reach(n, conts, home, Routes{})); !reflect.DeepEqual(got, want) {
 		t.Errorf("stated ports:\n got %v\nwant %v", got, want)
 	}
 	c.d.InternetPorts = &[]int{}
-	if got := summary(c.reach(n, conts, homeAddresses(t, true)))["proc:sshd"]; got != "lan direct stated" {
+	if got := summary(c.reach(n, conts, homeAddresses(t, true), Routes{}))["proc:sshd"]; got != "lan direct stated" {
 		t.Errorf("an empty list closes a cloud machine's ports too: %s", got)
 	}
 	c.d.InternetPorts = nil
+}
 
-	// A proxy or tunnel puts in doubt whatever it could publish further than the item's own reach.
-	c.inv.Items = append(c.inv.Items,
-		inventory.Item{ID: "container:caddy", Kind: inventory.KindContainer, PIDs: []int{700}},
-		inventory.Item{ID: "proc:cloudflared", Kind: inventory.KindProcess, Exe: "/home/u/bin/cloudflared", Processes: []inventory.Process{{PID: 710}}})
-	conts = append(conts, Container{Item: "container:caddy", Ports: []inventory.Port{{IP: "0.0.0.0", HostPort: 443, ContainerPort: 443, Protocol: "tcp"}}})
-	want = map[string]string{"proc:sshd": "lan direct unsure", "proc:local": "localhost direct unsure", "proc:tail": "tailnet direct unsure",
-		"container:web": "lan direct unsure", "container:db": "localhost direct unsure", "container:caddy": "lan direct unsure",
-		"proc:cloudflared": "internet tunnel"} // the tunnel's own program is what the internet reaches first
-	r = c.reach(n, conts, home)
-	if got := summary(r); !reflect.DeepEqual(got, want) {
-		t.Errorf("with a proxy and a tunnel:\n got %v\nwant %v", got, want)
+// What a proxy or tunnel routes to is reachable from wherever that program is; a program whose
+// routing is not fully known puts in doubt whatever it could publish further.
+func TestReachThroughRoutes(t *testing.T) {
+	c, n, conts := workstation(t)
+	home := homeAddresses(t, false)
+	routes := c.routes(n, conts, home)
+	r := c.reach(n, conts, home, routes)
+	want := map[string]string{
+		// The tunnel publishes the user's Caddy and the api, and through that Caddy the MCP server: a chain.
+		"proc:cloudflared": "internet tunnel", "proc:caddy": "internet tunnel", "proc:api": "internet tunnel", "proc:mcp": "internet proxy",
+		// The stack's Caddy is on the LAN, and so is what it routes to; what it does not route to keeps its own reach.
+		"container:caddy": "lan direct", "container:sonarr": "lan direct", "container:arr-dashboard": "lan proxy", "container:gluetun": "lan proxy",
+		"container:jellyfin": "lan proxy", "container:flaresolverr": "localhost direct", "proc:editor": "localhost direct",
 	}
-	wantRouters := []Router{{Item: "container:caddy", Program: "caddy", Kind: ViaProxy, Reach: ReachLAN}, {Item: "proc:cloudflared", Program: "cloudflared", Kind: ViaTunnel, Reach: ReachInternet}}
+	if got := summary(r); !reflect.DeepEqual(got, want) {
+		t.Errorf("\n got %v\nwant %v", got, want)
+	}
+	wantRouters := []Router{
+		{Item: "container:caddy", Program: "caddy", Kind: ViaProxy, Reach: ReachLAN, Complete: true},
+		{Item: "proc:caddy", Program: "caddy", Kind: ViaProxy, Reach: ReachInternet, Complete: true},
+		{Item: "proc:cloudflared", Program: "cloudflared", Kind: ViaTunnel, Reach: ReachInternet, Complete: true},
+	}
 	if !reflect.DeepEqual(r.Routers, wantRouters) {
 		t.Errorf("routers %+v", r.Routers)
 	}
-	// An item without a socket has no entry, so a program that starts or stops changes nothing here:
-	// the doubt about it is said once, by the routers.
-	c.inv.Items = append(c.inv.Items, inventory.Item{ID: "proc:editor", Kind: inventory.KindProcess, Exe: "/usr/bin/editor"})
-	if again := c.reach(n, conts, home); !reflect.DeepEqual(again, r) {
-		t.Errorf("an unrelated program changed the fact:\n%+v\n%+v", again, r)
+	for _, i := range r.Items {
+		if i.Item == "proc:mcp" && !reflect.DeepEqual(i.Through, []string{"proc:caddy"}) {
+			t.Errorf("through: %+v", i.Through)
+		}
 	}
-	c.inv.Items = c.inv.Items[:len(c.inv.Items)-1]
-	// Without the tunnel the proxy, itself on the LAN, puts only what is narrower in doubt.
-	c.inv.Items = c.inv.Items[:len(c.inv.Items)-1]
-	want = map[string]string{"proc:sshd": "lan direct", "proc:local": "localhost direct unsure", "proc:tail": "tailnet direct unsure",
-		"container:web": "lan direct", "container:db": "localhost direct unsure", "container:caddy": "lan direct"}
-	r = c.reach(n, conts, home)
+	// A program that starts or stops and has no socket changes nothing here.
+	c.inv.Items = append(c.inv.Items, inventory.Item{ID: "proc:idle", Kind: inventory.KindProcess})
+	if again := c.reach(n, conts, home, c.routes(n, conts, home)); !reflect.DeepEqual(again, r) {
+		t.Errorf("an unrelated program changed the fact")
+	}
+
+	// The tunnel's routing is not known: everything that is not public already is in doubt. The
+	// tunnel's own program is what the internet reaches first.
+	for i := range routes.Programs {
+		if routes.Programs[i].Kind == ViaTunnel {
+			routes.Programs[i].Complete, routes.Programs[i].Gaps, routes.Programs[i].Targets = false, []string{"the tunnel is started with a token"}, nil
+		}
+	}
+	r = c.reach(n, conts, home, routes)
+	want = map[string]string{
+		"proc:cloudflared": "internet tunnel", "proc:caddy": "localhost direct unsure", "proc:api": "localhost direct unsure", "proc:mcp": "localhost direct unsure",
+		"container:caddy": "lan direct unsure", "container:sonarr": "lan direct unsure", "container:arr-dashboard": "lan proxy unsure", "container:gluetun": "lan proxy unsure",
+		"container:jellyfin": "lan proxy unsure", "container:flaresolverr": "localhost direct unsure", "proc:editor": "localhost direct unsure",
+	}
 	if got := summary(r); !reflect.DeepEqual(got, want) {
-		t.Errorf("with a proxy only:\n got %v\nwant %v", got, want)
+		t.Errorf("an unread tunnel:\n got %v\nwant %v", got, want)
 	}
 	for _, i := range r.Items {
-		if i.Item == "proc:local" && !strings.Contains(i.Unsure, "caddy runs here and could pass requests from the LAN on") {
+		if i.Item == "proc:editor" && i.Unsure != "cloudflared runs here and could pass requests from the internet on to this item; Tripcoil could not read all of its routing (the tunnel is started with a token)" {
 			t.Errorf("unsure must say why: %q", i.Unsure)
 		}
 	}
-	// A proxy without a socket of its own may listen where Tripcoil cannot see it: it counts as public.
-	conts = conts[:len(conts)-1]
-	r = c.reach(n, conts, home)
-	if len(r.Routers) != 1 || r.Routers[0].Reach != ReachInternet || summary(r)["proc:sshd"] != "lan direct unsure" {
-		t.Errorf("a proxy without sockets: %+v, %v", r.Routers, summary(r))
+
+	// An unread proxy on the LAN puts only what is narrower than the LAN in doubt; one without a
+	// socket of its own may listen where Tripcoil cannot see it, and counts as public.
+	lan := Routes{Programs: []RouteProgram{{Item: "container:caddy", Program: "caddy", Kind: ViaProxy, Gaps: []string{"its configuration was not found"}}}}
+	got := summary(c.reach(n, conts, home, lan))
+	if got["container:sonarr"] != "lan direct" || got["container:flaresolverr"] != "localhost direct unsure" || got["proc:editor"] != "localhost direct unsure" || got["container:caddy"] != "lan direct" {
+		t.Errorf("an unread proxy on the LAN: %v", got)
+	}
+	hidden := Routes{Programs: []RouteProgram{{Item: "container:gluetun", Program: "traefik", Kind: ViaProxy, Gaps: []string{"its configuration was not found"}}}}
+	r = c.reach(n, conts, home, hidden)
+	if got := summary(r); got["container:sonarr"] != "lan direct unsure" || r.Routers[0].Reach != ReachInternet {
+		t.Errorf("a proxy without a socket: %v, %+v", got, r.Routers)
+	}
+
+	// Tailscale Serve offers a port to the tailnet, whatever tailscaled's own sockets say.
+	serve := Routes{Programs: []RouteProgram{{Item: "proc:cloudflared", Program: "tailscaled", Kind: ViaProxy, Tailnet: true, Complete: true, Targets: []RouteTarget{{Target: "127.0.0.1:6000", Item: "proc:editor"}}}}}
+	if got := summary(c.reach(n, conts, home, serve)); got["proc:editor"] != "tailnet proxy" {
+		t.Errorf("Tailscale Serve: %v", got)
+	}
+}
+
+// A Swarm service's mesh ports are on every node; where they cannot be listed, and for a container
+// with an address of its own on the LAN, the default is in doubt.
+func TestReachOfSwarmAndMacvlan(t *testing.T) {
+	c := collector{ctx: context.Background(), inv: &inventory.Inventory{}, d: Deps{}}
+	conts := []Container{
+		{Item: "container:web", Service: "shop_web", MeshPorts: []inventory.Port{{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}}},
+		{Item: "container:worker", Service: "shop_worker", MeshUnknown: true},
+		{Item: "container:cam", OwnAddress: true, Ports: []inventory.Port{{IP: "127.0.0.1", HostPort: 9000, ContainerPort: 80, Protocol: "tcp"}}},
+		{Item: "container:plain"},
+	}
+	r := c.reach(Network{}, conts, homeAddresses(t, true), Routes{})
+	want := map[string]string{"container:web": "internet direct", "container:worker": "none unsure", "container:cam": "localhost direct unsure"}
+	if got := summary(r); !reflect.DeepEqual(got, want) {
+		t.Errorf("\n got %v\nwant %v", got, want)
 	}
 }
 
@@ -360,10 +412,12 @@ func TestCollectWritesReach(t *testing.T) {
 	var r Reach
 	readJSON(t, filepath.Join(runDir, "facts/reach.json"), &r)
 	got := summary(r)
-	// nginx is a proxy on a port the owner calls public, so it puts the others in doubt.
+	// No process of the fixture is a proxy or a tunnel, and an item without a socket has no entry.
 	_, shop := got["proc:shop"]
-	if got["proc:nginx"] != "internet direct stated" || got["proc:sshd"] != "lan direct stated unsure" || got["container:web"] != "lan direct stated unsure" ||
-		shop || len(r.Routers) != 1 || r.Routers[0].Program != "nginx" {
+	var routes Routes
+	readJSON(t, filepath.Join(runDir, "facts/routes.json"), &routes)
+	if got["proc:nginx"] != "internet direct stated" || got["proc:sshd"] != "lan direct stated" || got["container:web"] != "lan direct stated" ||
+		shop || len(r.Routers) != 0 || routes.Programs == nil || len(routes.Programs) != 0 {
 		t.Errorf("reach.json: %v", got)
 	}
 	var a Addresses

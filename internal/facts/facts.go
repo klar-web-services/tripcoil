@@ -117,12 +117,19 @@ func Collect(ctx context.Context, d Deps, inv *inventory.Inventory, runDir strin
 	if err := add("addresses.json", addrErr, func() error { return writeJSON("addresses.json", addrs) }); err != nil {
 		return nil, err
 	}
-	// The default reach needs all three; without it the review lowers nothing.
+	// The routes and the default reach need all three; without them the review lowers nothing.
 	reachErr := errors.Join(netErr, contErr, addrErr)
 	if reachErr != nil {
 		reachErr = errors.New("it needs network.json, containers.json and addresses.json")
 	}
-	if err := add("reach.json", reachErr, func() error { return writeJSON("reach.json", c.reach(net, conts, addrs)) }); err != nil {
+	var routes Routes
+	if reachErr == nil {
+		routes = c.routes(net, conts, addrs)
+	}
+	if err := add("routes.json", reachErr, func() error { return writeJSON("routes.json", routes) }); err != nil {
+		return nil, err
+	}
+	if err := add("reach.json", reachErr, func() error { return writeJSON("reach.json", c.reach(net, conts, addrs, routes)) }); err != nil {
 		return nil, err
 	}
 	if err := writeJSON("index.json", idx); err != nil {
