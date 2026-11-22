@@ -237,7 +237,8 @@ func TestPromptNamesTheActionLimits(t *testing.T) {
 	if MaxCardChanges != 6 || audit.MaxAlsoLines != 4 || audit.MaxSteps != 12 {
 		t.Fatal("the limits changed: change the prompt's words with them")
 	}
-	for _, want := range []string{"six at most", "four at most", "twelve at most", "Never write a version in `to` that you did not see published", "at most three sentences"} {
+	for _, want := range []string{"six at most", "four at most", "twelve at most", "Never write a version in `to` that you did not see published", "at most three sentences",
+		"Give the command for everything a person can type", "A step does one thing", "names the file and what to change"} {
 		if !strings.Contains(Prompt, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}
