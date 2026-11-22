@@ -78,7 +78,8 @@ func TestActions(t *testing.T) {
 		t.Errorf("packages changes: %+v", pkgs.Changes)
 	}
 	if want := []Step{{Text: "Upgrade the packages", Command: "apt-get update && apt-get install --only-upgrade libssl3"},
-		{Text: "Restart nginx.service, php8.2-fpm.service, shop.service, api"}}; !reflect.DeepEqual(pkgs.Steps, want) {
+		{Text: "Restart nginx.service, php8.2-fpm.service, shop.service", Command: "systemctl restart nginx.service php8.2-fpm.service shop.service"},
+		{Text: "Restart api"}}; !reflect.DeepEqual(pkgs.Steps, want) {
 		t.Errorf("packages steps: %+v", pkgs.Steps)
 	}
 	if want := []string{"proc:api", "proc:nginx", "proc:php", "proc:shop"}; !slices.Equal(pkgs.Items, want) {
@@ -109,7 +110,7 @@ func TestActions(t *testing.T) {
 	if want := []Change{{Name: "minimist", From: "1.2.5", To: "1.2.8", Clears: 1}}; !reflect.DeepEqual(app.Changes, want) {
 		t.Errorf("app directory changes take the verified upgrade line: %+v", app.Changes)
 	}
-	if want := []Step{{Text: "Upgrade the packages below in /srv/shop"}, {Text: "Restart shop.service"}}; !reflect.DeepEqual(app.Steps, want) {
+	if want := []Step{{Text: "Upgrade the packages below in /srv/shop"}, {Text: "Restart shop.service", Command: "systemctl restart shop.service"}}; !reflect.DeepEqual(app.Steps, want) {
 		t.Errorf("app directory steps: %+v", app.Steps)
 	}
 

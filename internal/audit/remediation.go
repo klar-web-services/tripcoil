@@ -171,7 +171,12 @@ func (r remediation) restart(origin string) string {
 }
 
 func (r remediation) restartNames(origins ...string) []string {
-	var units, names []string
+	units, names := r.restartParts(origins...)
+	return append(units, names...)
+}
+
+// restartParts are the systemd units to restart, and the programs that run under no unit of their own.
+func (r remediation) restartParts(origins ...string) (units, names []string) {
 	for _, origin := range origins {
 		for _, it := range r.users[origin] {
 			if it.Kind != inventory.KindProcess {
@@ -194,7 +199,7 @@ func (r remediation) restartNames(origins ...string) []string {
 	}
 	slices.Sort(units)
 	slices.Sort(names)
-	return append(slices.Compact(units), slices.Compact(names)...)
+	return slices.Compact(units), slices.Compact(names)
 }
 
 func (r remediation) recreate(origin string) string {

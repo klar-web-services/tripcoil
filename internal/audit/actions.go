@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -292,6 +293,9 @@ func upgradeFor(upgrades []Upgrade, f Finding) (Upgrade, bool) {
 	return Upgrade{}, false
 }
 
+// unitName is a systemd unit name that is safe to put into a command.
+var unitName = regexp.MustCompile(`^[A-Za-z0-9:_.@\\-]+$`)
+
 // steps are an action's default instructions. o is its origin (the first of several for the
 // system's packages).
 func (r remediation) steps(kind string, o inventory.Origin, origins []string, all []Change) []Step {
@@ -299,9 +303,24 @@ func (r remediation) steps(kind string, o inventory.Origin, origins []string, al
 	add := func(text, command string) {
 		steps = append(steps, Step{Text: Cut(text, MaxStepText), Command: command})
 	}
+	// Services restart with one command; what runs under no unit of its own has none that Tripcoil knows.
 	restart := func() {
-		if names := r.restartNames(origins...); len(names) > 0 {
-			add("Restart "+list(names), "")
+		units, names := r.restartParts(origins...)
+		var services, rest []string
+		for _, u := range units {
+			if strings.HasSuffix(u, ".service") && unitName.MatchString(u) {
+				services = append(services, u)
+			} else {
+				rest = append(rest, u)
+			}
+		}
+		if cmd := "systemctl restart " + strings.Join(services, " "); len(services) > 0 && len(cmd) <= MaxCommand {
+			add("Restart "+list(services), cmd)
+		} else {
+			rest = append(services, rest...)
+		}
+		if rest = append(rest, names...); len(rest) > 0 {
+			add("Restart "+list(rest), "")
 		}
 	}
 	switch kind {

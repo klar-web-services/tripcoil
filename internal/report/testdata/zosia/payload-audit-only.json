@@ -457,7 +457,11 @@
           "command": "apt-get update \u0026\u0026 apt-get install --only-upgrade libssl3"
         },
         {
-          "text": "Restart nginx.service, shop.service, python3.11"
+          "text": "Restart nginx.service, shop.service",
+          "command": "systemctl restart nginx.service shop.service"
+        },
+        {
+          "text": "Restart python3.11"
         }
       ],
       "upstream": {
@@ -545,7 +549,8 @@
           "text": "Upgrade the packages below in /srv/shop"
         },
         {
-          "text": "Restart shop.service"
+          "text": "Restart shop.service",
+          "command": "systemctl restart shop.service"
         }
       ],
       "upstream": {
