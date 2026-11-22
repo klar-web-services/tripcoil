@@ -53,6 +53,9 @@ type Router struct {
 	Reach string `json:"reach"`
 	// Complete: Tripcoil read all of its routing, and facts/routes.json names everything it routes to.
 	Complete bool `json:"complete"`
+	// NamesPointTo sums up where the hostnames it serves resolve to: "global", "private", or nothing
+	// when none resolved.
+	NamesPointTo string `json:"namesPointTo,omitempty"`
 }
 
 type ItemReach struct {
@@ -212,7 +215,7 @@ func (c collector) reach(n Network, conts []Container, a Addresses, routes Route
 	}
 	out := Reach{Items: []ItemReach{}, Routers: []Router{}}
 	for _, p := range routes.Programs {
-		out.Routers = append(out.Routers, Router{Item: p.Item, Program: p.Program, Kind: p.Kind, Reach: reachOf(p), Complete: p.Complete})
+		out.Routers = append(out.Routers, Router{Item: p.Item, Program: p.Program, Kind: p.Kind, Reach: reachOf(p), Complete: p.Complete, NamesPointTo: p.pointTo()})
 	}
 	// A program whose routing is not fully known may publish any item further than this fact says.
 	for _, r := range byItem {

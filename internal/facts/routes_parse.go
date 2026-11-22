@@ -296,6 +296,15 @@ func caddyfileWith(text string, env map[string]string, snippets map[string]bool)
 					}
 				}
 			}
+		case len(f) >= 3 && strings.HasPrefix(f[0], "@") && f[1] == "host", len(f) >= 2 && f[0] == "host" && depth > 0:
+			// A host matcher names the hosts a wildcard site tells apart: names that can be looked up.
+			for _, name := range f[1:] {
+				if v, _ := expand(name, env); v != "" {
+					if h, ok := hostname(v); ok {
+						p.hostnames = append(p.hostnames, h)
+					}
+				}
+			}
 		case len(f) > 0 && (f[0] == "reverse_proxy" || f[0] == "php_fastcgi" || f[0] == "forward_auth"):
 			args := f[1:]
 			if len(args) > 0 && (strings.HasPrefix(args[0], "/") || strings.HasPrefix(args[0], "@") || args[0] == "*") {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,8 @@ type Deps struct {
 	Interfaces func() ([]NetInterface, error)
 	// InternetPorts is the owner's exposure.internetPorts; nil when the owner states nothing.
 	InternetPorts *[]int
+	// ResolveHost looks a hostname up (ResolveHost); nil when no name is to be looked up.
+	ResolveHost func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type Index struct {

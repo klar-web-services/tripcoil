@@ -260,7 +260,7 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 }
 
 func factsHost(ctx context.Context, inv *inventory.Inventory, runDir string, cfg config.Config) (*facts.Index, error) {
-	d := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath, Interfaces: facts.SystemInterfaces, InternetPorts: cfg.Exposure.Ports()}
+	d := facts.Deps{Root: "/", Run: facts.Exec, LookPath: facts.LookPath, Interfaces: facts.SystemInterfaces, InternetPorts: cfg.Exposure.Ports(), ResolveHost: facts.ResolveHost}
 	if socket, err := dockerapi.Socket(os.Getenv("DOCKER_HOST")); err == nil {
 		d.Docker, d.DockerSocket = dockerapi.New(socket), socket
 	}

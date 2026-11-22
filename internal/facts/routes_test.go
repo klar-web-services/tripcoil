@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,8 +73,34 @@ func workstation(t *testing.T) (collector, Network, []Container) {
 		{Item: "container:flaresolverr", Name: "flaresolverr", Names: []string{"flaresolverr"}, Addresses: []string{"172.20.0.7"}, Ports: []inventory.Port{{IP: "127.0.0.1", HostPort: 8891, ContainerPort: 8191, Protocol: "tcp"}}},
 	}
 	c := collector{ctx: context.Background(), inv: inv, d: Deps{Root: root, LookPath: func(string) (string, error) { return "", errNotFound },
-		Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("not run") }}}
+		Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("not run") }, ResolveHost: homeResolver}}
 	return c, n, conts
+}
+
+// homeResolver answers like the resolver of a home network: the stack's names point at the machine's
+// LAN address, the tunnel's API at its provider, and one name is not known.
+func homeResolver(_ context.Context, host string) ([]netip.Addr, error) {
+	switch {
+	case strings.HasSuffix(host, ".home.example.net"):
+		return []netip.Addr{netip.MustParseAddr("192.168.178.100"), netip.MustParseAddr("fd00::100")}, nil
+	case host == "api.example.com":
+		return []netip.Addr{netip.MustParseAddr("203.0.113.50"), netip.MustParseAddr("192.168.178.100")}, nil
+	case host == "slow.example.com":
+		return nil, errors.New("i/o timeout")
+	}
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+func resolvedOf(p RouteProgram) string {
+	var out []string
+	for _, r := range p.Resolved {
+		s := r.Hostname + "=" + strings.Join(r.Classes, ",")
+		if r.Unanswered {
+			s += "?"
+		}
+		out = append(out, s)
+	}
+	return strings.Join(out, " ")
 }
 
 func routesOf(r Routes) map[string]string {
@@ -110,9 +138,20 @@ func TestRoutes(t *testing.T) {
 			if !reflect.DeepEqual(p.Hostnames, []string{"api.example.com", "obsidian-mcp.example.com"}) {
 				t.Errorf("the tunnel's hostnames: %v", p.Hostnames)
 			}
+			if want := "api.example.com=global,private obsidian-mcp.example.com="; resolvedOf(p) != want || p.pointTo() != "global" {
+				t.Errorf("the tunnel's names point to %q (%s)", resolvedOf(p), p.pointTo())
+			}
+		case "proc:caddy/caddy":
+			if len(p.Resolved) != 0 || p.pointTo() != "" {
+				t.Errorf("a program without hostnames: %+v", p.Resolved)
+			}
 		case "container:caddy/caddy":
-			if !reflect.DeepEqual(p.Hostnames, []string{"*.home.example.net", "jelly.home.example.net"}) {
+			if !reflect.DeepEqual(p.Hostnames, []string{"*.home.example.net", "arr.home.example.net", "auth.home.example.net", "jelly.home.example.net", "qbittorrent.home.example.net", "sonarr.home.example.net"}) {
 				t.Errorf("the stack's hostnames: %v", p.Hostnames)
+			}
+			// Where the names point, as this machine's resolver answers; a wildcard cannot be looked up.
+			if want := "arr.home.example.net=private auth.home.example.net=private jelly.home.example.net=private qbittorrent.home.example.net=private sonarr.home.example.net=private"; resolvedOf(p) != want || p.pointTo() != "private" {
+				t.Errorf("the stack's names point to %q (%s)", resolvedOf(p), p.pointTo())
 			}
 		}
 		for _, v := range append(p.Hostnames, p.Gaps...) {
@@ -476,6 +515,28 @@ func TestRoutesOfEveryProcess(t *testing.T) {
 		t.Errorf("a program read after its time: %+v", p)
 	}
 	src.r.close()
+
+	// Names are looked up a few at a time and within the run's time; a lookup that got no answer says so,
+	// and without a resolver nothing is looked up.
+	var many strings.Builder
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&many, "server { server_name n%02d.home.example.net; }\n", i)
+	}
+	write(t, root, "etc/nginx/names.conf", many.String()+"server { server_name slow.example.com; }\n")
+	proc(t, root, 870, "nginx", root, []string{"nginx: master process nginx -c /etc/nginx/names.conf"})
+	names := collector{ctx: context.Background(), inv: &inventory.Inventory{Items: []inventory.Item{item("proc:names", 870)}}, d: Deps{Root: root, ResolveHost: homeResolver}}
+	p := names.routes(Network{}, nil, Addresses{}).Programs[0]
+	if len(p.Hostnames) != 41 || len(p.Resolved) != maxResolved || p.Resolved[0].Hostname != "n00.home.example.net" || p.pointTo() != "private" {
+		t.Errorf("%d hostnames, %d looked up: %s", len(p.Hostnames), len(p.Resolved), resolvedOf(p))
+	}
+	write(t, root, "etc/nginx/names.conf", "server { server_name slow.example.com; }\n")
+	if p := names.routes(Network{}, nil, Addresses{}).Programs[0]; resolvedOf(p) != "slow.example.com=?" || p.pointTo() != "" {
+		t.Errorf("a lookup without an answer: %s (%s)", resolvedOf(p), p.pointTo())
+	}
+	names.d.ResolveHost = nil
+	if p := names.routes(Network{}, nil, Addresses{}).Programs[0]; len(p.Resolved) != 0 {
+		t.Errorf("without a resolver: %s", resolvedOf(p))
+	}
 
 	// A Tailscale in a container cannot be asked with this machine's command.
 	proc(t, root, 850, "tailscaled", root, []string{"tailscaled"})

@@ -136,7 +136,8 @@ func TestCaddyfile(t *testing.T) {
 	if want := []string{"arr-dashboard:3000", "authelia:9091", "gluetun:8080", "gluetun:8081", "jellyfin:8096", "sonarr:8989"}; !reflect.DeepEqual(sorted(p.targets), want) {
 		t.Errorf("targets %v", sorted(p.targets))
 	}
-	if !reflect.DeepEqual(p.hostnames, []string{"*.home.example.net"}) || !reflect.DeepEqual(p.includes, []string{"sites/*.caddy"}) || len(p.gaps) != 0 {
+	// The site's address, and the names its host matchers tell apart: those are the ones that can be looked up.
+	if want := []string{"*.home.example.net", "arr.home.example.net", "auth.home.example.net", "qbittorrent.home.example.net", "sonarr.home.example.net"}; !reflect.DeepEqual(sorted(p.hostnames), want) || !reflect.DeepEqual(p.includes, []string{"sites/*.caddy"}) || len(p.gaps) != 0 {
 		t.Errorf("hostnames %v, includes %v, gaps %v", p.hostnames, p.includes, p.gaps)
 	}
 	for _, v := range append(append(p.targets, p.hostnames...), p.includes...) {

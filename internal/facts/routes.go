@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"net"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
@@ -39,6 +40,72 @@ type RouteProgram struct {
 	Gaps      []string      `json:"gaps,omitempty"`
 	Hostnames []string      `json:"hostnames"`
 	Targets   []RouteTarget `json:"targets"`
+	// Resolved says where the hostnames point, as this machine's resolver answers. Behind a router a
+	// program whose names all point at private addresses cannot be reached from outside by them.
+	Resolved []Resolved `json:"resolved"`
+}
+
+// Resolved is one hostname that was looked up.
+type Resolved struct {
+	Hostname string `json:"hostname"`
+	// Classes are the classes of its addresses (ClassPrivate, ClassGlobal, …); none when it has no address.
+	Classes []string `json:"classes"`
+	// Unanswered: the lookup failed for another reason than that the name does not exist.
+	Unanswered bool `json:"unanswered,omitempty"`
+}
+
+// pointTo sums up where the program's names point: "global" when one has a public address,
+// "private" when those that resolved have none, "" when none resolved.
+func (p RouteProgram) pointTo() string {
+	out := ""
+	for _, r := range p.Resolved {
+		switch {
+		case slices.Contains(r.Classes, ClassGlobal):
+			return ClassGlobal
+		case len(r.Classes) > 0:
+			out = ClassPrivate
+		}
+	}
+	return out
+}
+
+// ResolveHost asks the system's resolver for a name's addresses.
+func ResolveHost(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
+
+// lookup finds where hostnames point: the first few that are no wildcards, until the time is up.
+func (c collector) lookup(names []string, until time.Time) []Resolved {
+	out := []Resolved{}
+	if c.d.ResolveHost == nil {
+		return out
+	}
+	for _, name := range names {
+		if strings.HasPrefix(name, "*.") {
+			continue
+		}
+		if len(out) >= maxResolved {
+			break
+		}
+		r := Resolved{Hostname: name, Classes: []string{}}
+		if time.Now().After(until) {
+			r.Unanswered = true
+			out = append(out, r)
+			continue
+		}
+		ctx, cancel := context.WithTimeout(c.ctx, resolveTimeout)
+		addrs, err := c.d.ResolveHost(ctx, name)
+		cancel()
+		var notFound *net.DNSError
+		r.Unanswered = err != nil && !(errors.As(err, &notFound) && notFound.IsNotFound)
+		for _, a := range addrs {
+			r.Classes = append(r.Classes, classOf(a.Unmap()))
+		}
+		slices.Sort(r.Classes)
+		r.Classes = slices.Compact(r.Classes)
+		out = append(out, r)
+	}
+	return out
 }
 
 type RouteTarget struct {
@@ -62,6 +129,10 @@ const (
 	maxRouteBytes = 16 << 20
 	maxRouteTime  = 10 * time.Second
 	maxRoutesTime = 60 * time.Second
+	// How many of a program's hostnames are looked up, how long one lookup may take, and all of them.
+	maxResolved    = 16
+	resolveTimeout = 2 * time.Second
+	maxResolveTime = 10 * time.Second
 )
 
 var tooMuch = fmt.Sprintf("its configuration is more than Tripcoil reads of one program (%d files, %d MiB, %d seconds)", maxRouteFiles, maxRouteBytes>>20, int(maxRouteTime.Seconds()))
@@ -493,7 +564,8 @@ func (s *routeSource) cloudflared() (p parsed, ok bool) {
 // routes reads every proxy and tunnel among the items.
 func (c collector) routes(n Network, conts []Container, a Addresses) Routes {
 	out := Routes{Programs: []RouteProgram{}}
-	var stop time.Time // when reading the programs ends; set with the first one
+	var stop time.Time    // when reading the programs ends; set with the first one
+	var lookups time.Time // when looking names up ends; set with the first program that has names
 	byItem := map[string]Container{}
 	for _, ct := range conts {
 		byItem[ct.Item] = ct
@@ -544,6 +616,10 @@ func (c collector) routes(n Network, conts []Container, a Addresses) Routes {
 		slices.Sort(p.gaps)
 		rp.Gaps = slices.Compact(p.gaps)
 		rp.Complete = len(rp.Gaps) == 0
+		if lookups.IsZero() && len(rp.Hostnames) > 0 {
+			lookups = time.Now().Add(maxResolveTime)
+		}
+		rp.Resolved = c.lookup(rp.Hostnames, lookups)
 		out.Programs = append(out.Programs, rp)
 	}
 	for _, it := range c.inv.Items {

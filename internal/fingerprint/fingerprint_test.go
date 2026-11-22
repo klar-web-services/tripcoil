@@ -225,3 +225,18 @@ func TestCompute(t *testing.T) {
 		}
 	}
 }
+
+// Where a router's names point decides whether a port forward is assumed, so a change is reviewed.
+func TestComputeWithRoutersNames(t *testing.T) {
+	a, b := base(), base()
+	for _, in := range []*Input{&a, &b} {
+		in.Reach.Routers = append(in.Reach.Routers, facts.Router{Item: "proc:nginx", Program: "nginx", Kind: facts.ViaProxy, Reach: facts.ReachLAN, Complete: true, NamesPointTo: "private"})
+	}
+	if Compute(a) != Compute(b) {
+		t.Error("the same routers gave two fingerprints")
+	}
+	b.Reach.Routers[len(b.Reach.Routers)-1].NamesPointTo = "global"
+	if Compute(a) == Compute(b) {
+		t.Error("names that now point to a public address did not change the fingerprint")
+	}
+}

@@ -323,9 +323,9 @@ func TestReachThroughRoutes(t *testing.T) {
 		t.Errorf("\n got %v\nwant %v", got, want)
 	}
 	wantRouters := []Router{
-		{Item: "container:caddy", Program: "caddy", Kind: ViaProxy, Reach: ReachLAN, Complete: true},
+		{Item: "container:caddy", Program: "caddy", Kind: ViaProxy, Reach: ReachLAN, Complete: true, NamesPointTo: "private"},
 		{Item: "proc:caddy", Program: "caddy", Kind: ViaProxy, Reach: ReachInternet, Complete: true},
-		{Item: "proc:cloudflared", Program: "cloudflared", Kind: ViaTunnel, Reach: ReachInternet, Complete: true},
+		{Item: "proc:cloudflared", Program: "cloudflared", Kind: ViaTunnel, Reach: ReachInternet, Complete: true, NamesPointTo: "global"},
 	}
 	if !reflect.DeepEqual(r.Routers, wantRouters) {
 		t.Errorf("routers %+v", r.Routers)
@@ -385,6 +385,20 @@ func TestReachThroughRoutes(t *testing.T) {
 
 // A Swarm service's mesh ports are on every node; where they cannot be listed, and for a container
 // with an address of its own on the LAN, the default is in doubt.
+// The routers of the reach fact say where each one's names point, for the fingerprint and the reviewer.
+func TestRoutersSayWhereTheirNamesPoint(t *testing.T) {
+	c, n, conts := workstation(t)
+	home := homeAddresses(t, false)
+	r := c.reach(n, conts, home, c.routes(n, conts, home))
+	got := map[string]string{}
+	for _, rt := range r.Routers {
+		got[rt.Item+"/"+rt.Program] = rt.NamesPointTo
+	}
+	if want := map[string]string{"container:caddy/caddy": "private", "proc:caddy/caddy": "", "proc:cloudflared/cloudflared": "global"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestReachOfSwarmAndMacvlan(t *testing.T) {
 	c := collector{ctx: context.Background(), inv: &inventory.Inventory{}, d: Deps{}}
 	conts := []Container{

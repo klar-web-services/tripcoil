@@ -308,7 +308,8 @@ func TestEstablishedWithAStatement(t *testing.T) {
 func TestPromptExplainsReach(t *testing.T) {
 	for _, want := range []string{"Establish who can reach each item", "`facts/reach.json`", "`addresses.json`", "When more than one applies, or in doubt, `content`",
 		"A protection that is already in place is no measure", "leave `reach` empty", "A proxy or tunnel still widens it", "`routers` lists a program that is not `complete`",
-		"Do not write a `from` narrower than the reach of a program that routes to the item", "`routes.json` (what the proxies and tunnels that run here route to"} {
+		"Do not write a `from` narrower than the reach of a program that routes to the item", "`routes.json` (what the proxies and tunnels that run here route to",
+		"resolve only to private or tailnet addresses are evidence that there is no forward", "`resolved`"} {
 		if !strings.Contains(Prompt, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}
