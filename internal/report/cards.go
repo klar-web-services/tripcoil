@@ -45,8 +45,78 @@ type Card struct {
 	Reach  string         `json:"reach,omitempty"`
 	Via    string         `json:"via,omitempty"`
 	Counts map[string]int `json:"counts"`
+	// Update says, for an image, what pulling its tag brings; nil when that was not looked at.
+	Update *CardUpdate `json:"update,omitempty"`
 
 	tier int
+}
+
+// CardUpdate is an image action's audit.Update as a card carries it: the state, and for a scanned
+// newer image how many of the card's findings it no longer has and how many stay.
+type CardUpdate struct {
+	State            string `json:"state"`
+	Note             string `json:"note,omitempty"`
+	Clears           int    `json:"clears"`
+	Remains          int    `json:"remains"`
+	RemainsExploited int    `json:"remainsExploited"`
+}
+
+// imageChanges makes an image card's changes say only what is known. `to` is the version the newer
+// image has, when it was scanned; `needs` is the version that fixes the package, where the update
+// does not bring it or what it brings was not checked. The version that would fix a package is
+// never shown as what pulling the image brings.
+func imageChanges(changes []review.ActionChange, a audit.Action) []review.ActionChange {
+	known := map[string]audit.Change{}
+	for _, ch := range a.Changes {
+		known[audit.Cut(ch.Name, audit.MaxChangeName)+"\x00"+audit.Cut(ch.From, audit.MaxVersion)] = ch
+	}
+	scanned := a.Update != nil && a.Update.State == audit.UpdateScanned
+	out := []review.ActionChange{}
+	for _, c := range changes {
+		n := review.ActionChange{Name: c.Name, From: c.From, Needs: c.To}
+		if ch, ok := known[c.Name+"\x00"+c.From]; ok {
+			n.Needs = audit.Cut(ch.To, audit.MaxVersion)
+			switch {
+			case !scanned:
+			case ch.Gone:
+				n.To, n.Needs = "removed", ""
+			case ch.Gets != "" && ch.Gets != ch.From:
+				if n.To = audit.Cut(ch.Gets, audit.MaxVersion); ch.Reaches {
+					n.Needs = ""
+				}
+			}
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+func cardUpdate(u *audit.Update) *CardUpdate {
+	if u == nil {
+		return nil
+	}
+	return &CardUpdate{State: u.State, Note: audit.Cut(oneLine(u.Reason), audit.MaxNote), Clears: u.Clears, Remains: u.Remains, RemainsExploited: u.RemainsExploited}
+}
+
+// updateLine says in one sentence what an image card's update brings, or that it was not checked.
+func updateLine(u *CardUpdate) string {
+	switch {
+	case u == nil:
+		return "What the newer image holds was not checked."
+	case u.State == audit.UpdateScanned && u.Remains == 0:
+		return fmt.Sprintf("The newer image was scanned: it clears all %s.", plural(u.Clears, "finding", "findings"))
+	case u.State == audit.UpdateScanned:
+		s := fmt.Sprintf("The newer image was scanned: it clears %d of %s; %d still open", u.Clears, plural(u.Clears+u.Remains, "finding", "findings"), u.Remains)
+		if u.RemainsExploited > 0 {
+			s += fmt.Sprintf(", %d of them known exploited", u.RemainsExploited)
+		}
+		return s + "."
+	case u.State == audit.UpdateCurrent:
+		return "The tag still points to the running image, so pulling changes nothing. What another tag holds was not checked."
+	case u.Note != "":
+		return "What the newer image holds was not checked: " + u.Note + "."
+	}
+	return "What the newer image holds was not checked."
 }
 
 // sectionOf is the report section a finding's review entry puts it in. A finding without an
@@ -141,6 +211,9 @@ func Cards(in Input) []Card {
 			for _, ch := range a.Changes[:min(len(a.Changes), review.MaxCardChanges)] {
 				c.Changes = append(c.Changes, review.ActionChange{Name: audit.Cut(ch.Name, audit.MaxChangeName), From: audit.Cut(ch.From, audit.MaxVersion), To: audit.Cut(ch.To, audit.MaxVersion)})
 			}
+		}
+		if a.Kind == audit.ActionImage {
+			c.Changes, c.Update = imageChanges(c.Changes, a), cardUpdate(a.Update)
 		}
 		c.MoreChanges = max(0, len(a.Changes)+a.MoreChanges-len(c.Changes))
 		byID[a.ID] = &c
@@ -324,9 +397,14 @@ func writeActions(b *strings.Builder, cards []Card) {
 			}
 			var changes []string
 			for _, ch := range c.Changes {
-				if ch.To == "" {
+				switch {
+				case ch.To == "" && ch.Needs == "":
 					changes = append(changes, md(ch.Name+" "+ch.From)+", no fix yet")
-				} else {
+				case ch.To == "":
+					changes = append(changes, md(ch.Name+" "+ch.From)+", fixed in "+md(ch.Needs))
+				case ch.Needs != "":
+					changes = append(changes, md(ch.Name+" "+ch.From)+" → "+md(ch.To)+" (fixed in "+md(ch.Needs)+")")
+				default:
 					changes = append(changes, md(ch.Name+" "+ch.From)+" → "+md(ch.To))
 				}
 			}
@@ -340,6 +418,9 @@ func writeActions(b *strings.Builder, cards []Card) {
 				b.WriteString(": " + strings.Join(changes, "; "))
 			}
 			b.WriteString("\n")
+			if c.Kind == audit.ActionImage {
+				b.WriteString("  - " + md(updateLine(c.Update)) + "\n")
+			}
 			for _, a := range c.Also {
 				b.WriteString("  - Also: " + escapeBlockStart(md(a)) + "\n")
 			}

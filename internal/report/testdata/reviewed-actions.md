@@ -30,7 +30,8 @@ nginx's TLS is exploitable from the internet now. The kernel CVE needs a local u
 
 ### Not assessed (1)
 
-- **Update the shop-web-1 image**: libssl3 3.0.11-1\~deb12u2 → 9.9; zlib1g 1:1.2.13.dfsg-1, no fix yet
+- **Update the shop-web-1 image**: libssl3 3.0.11-1\~deb12u2, fixed in 9.9; zlib1g 1:1.2.13.dfsg-1, no fix yet
+  - What the newer image holds was not checked.
   - Step 1: Pull or rebuild ghcr.io/acme/shop:2026.11.3
   - Step 2: Recreate the container shop-web-1
   - Not reviewed: these are the default steps.

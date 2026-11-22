@@ -36,6 +36,10 @@ type ActionChange struct {
 	Name string `json:"name"`
 	From string `json:"from"`
 	To   string `json:"to,omitempty"`
+	// Needs is set on a report's card only, for an image: the version that fixes the package, where
+	// the update does not bring it or what it brings was not checked. To is then what the update
+	// brings, or empty.
+	Needs string `json:"needs,omitempty"`
 }
 
 type Upstream struct {

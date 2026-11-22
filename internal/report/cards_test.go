@@ -78,8 +78,60 @@ func TestCards(t *testing.T) {
 	if image.Title != "Update the shop-web-1 image" || image.Target != "ghcr.io/acme/shop:2026.11.3" || image.Counts["falsePositive"] != 1 || image.Counts["open"] != 2 || image.Counts["findings"] != 3 {
 		t.Errorf("the image's card: %+v", image)
 	}
-	if !reflect.DeepEqual(image.Changes, []review.ActionChange{{Name: "libssl3", From: "3.0.11-1~deb12u2", To: "9.9"}, {Name: "zlib1g", From: "1:1.2.13.dfsg-1"}}) || image.MoreChanges != 0 {
+	// Nothing looked into a newer image here, so the version that fixes libssl3 is what it needs,
+	// not what pulling brings.
+	if !reflect.DeepEqual(image.Changes, []review.ActionChange{{Name: "libssl3", From: "3.0.11-1~deb12u2", Needs: "9.9"}, {Name: "zlib1g", From: "1:1.2.13.dfsg-1"}}) || image.MoreChanges != 0 || image.Update != nil {
 		t.Errorf("the image's changes: %+v", image.Changes)
+	}
+}
+
+// An image card says what the scanned newer image brings, and never shows the version that would
+// fix a package as the result of pulling.
+func TestImageCardSaysWhatTheUpdateBrings(t *testing.T) {
+	a := audit.Action{ID: "a:1", Kind: audit.ActionImage, Changes: []audit.Change{
+		{Name: "chromium", From: "148", To: "156", Gets: "152"},
+		{Name: "libbrotli1", From: "1.0.9-2+b6", To: "1.0.9-2+deb12u1", Gets: "1.0.9-2+deb12u1", Reaches: true},
+		{Name: "zlib1g", From: "1.2.13", To: "1.2.14", Gets: "1.2.13"},
+		{Name: "libold", From: "1.0", To: "1.1", Gone: true},
+		{Name: "openssl", From: "3.0", Gets: "3.1"},
+	}, Update: &audit.Update{State: audit.UpdateScanned, Ref: "ghcr.io/acme/shop@sha256:ab", Clears: 7, Remains: 3, RemainsExploited: 2}}
+	// What the reviewer wrote as `to` does not matter for an image.
+	named := []review.ActionChange{{Name: "chromium", From: "148", To: "156"}, {Name: "libbrotli1", From: "1.0.9-2+b6", To: "9"}, {Name: "zlib1g", From: "1.2.13", To: "9"},
+		{Name: "libold", From: "1.0", To: "9"}, {Name: "openssl", From: "3.0"}, {Name: "beyond", From: "1", To: "2"}}
+	want := []review.ActionChange{
+		{Name: "chromium", From: "148", To: "152", Needs: "156"},        // a step forward, short of the fix
+		{Name: "libbrotli1", From: "1.0.9-2+b6", To: "1.0.9-2+deb12u1"}, // fixed by the update
+		{Name: "zlib1g", From: "1.2.13", Needs: "1.2.14"},               // unchanged in the newer image
+		{Name: "libold", From: "1.0", To: "removed"},                    // no longer in the newer image
+		{Name: "openssl", From: "3.0", To: "3.1"},                       // no fix known, but a newer version
+		{Name: "beyond", From: "1", Needs: "2"},                         // not among the audit's changes
+	}
+	if got := imageChanges(named, a); !reflect.DeepEqual(got, want) {
+		t.Errorf("scanned:\n got %+v\nwant %+v", got, want)
+	}
+	for _, state := range []string{audit.UpdateCurrent, audit.UpdateWaiting, audit.UpdateFailed, audit.UpdateUnknown, ""} {
+		b := a
+		b.Update = &audit.Update{State: state, Reason: "the registry could not be asked"}
+		if state == "" {
+			b.Update = nil
+		}
+		for _, c := range imageChanges(named, b) {
+			if c.To != "" {
+				t.Errorf("state %q: %s claims to become %s", state, c.Name, c.To)
+			}
+		}
+	}
+	for want, u := range map[string]*CardUpdate{
+		"What the newer image holds was not checked.":                                                                            nil,
+		"The newer image was scanned: it clears all 4 findings.":                                                                 {State: audit.UpdateScanned, Clears: 4},
+		"The newer image was scanned: it clears 7 of 10 findings; 3 still open, 2 of them known exploited.":                      cardUpdate(a.Update),
+		"The newer image was scanned: it clears 0 of 1 finding; 1 still open.":                                                   {State: audit.UpdateScanned, Remains: 1},
+		"The tag still points to the running image, so pulling changes nothing. What another tag holds was not checked.":         {State: audit.UpdateCurrent},
+		"What the newer image holds was not checked: one run downloads at most 3 newer images; this one waits for the next run.": {State: audit.UpdateWaiting, Note: "one run downloads at most 3 newer images; this one waits for the next run"},
+	} {
+		if got := updateLine(u); got != want {
+			t.Errorf("got  %q\nwant %q", got, want)
+		}
 	}
 }
 
