@@ -164,9 +164,14 @@ exit $code`
 	}
 	// The fake proxies have no socket of their own, so they may listen where Tripcoil cannot see it
 	// and count as public: sshd, which they forward to, is reachable from the internet through them.
+	// On a cloud runner sshd's own socket is public already, and equally wide counts as direct.
+	wantVia := facts.ViaProxy
+	if addrs.Cloud {
+		wantVia = facts.ViaDirect
+	}
 	through := false
 	for _, r := range reach.Items {
-		through = through || names[r.Item] == "sshd" && len(r.Through) == 2 && r.Default == facts.ReachInternet && r.Via == facts.ViaProxy
+		through = through || names[r.Item] == "sshd" && len(r.Through) == 2 && r.Default == facts.ReachInternet && r.Via == wantVia
 	}
 	if len(routes.Programs) != 3 || !asRoot || !asAlice || !refused || !through {
 		t.Errorf("routes.json: %s\nreach.json: %s", files["facts/routes.json"], files["facts/reach.json"])
