@@ -3,6 +3,7 @@ package grype
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -379,4 +380,23 @@ func running(pid int) bool {
 	}
 	i := bytes.LastIndexByte(data, ')')
 	return i+2 < len(data) && data[i+2] != 'Z'
+}
+
+// An image that is read from its registry is not allowed to fill the disk: its size is watched
+// while Grype downloads it. Other sources are not watched this way.
+func TestRegistryScanStopsAtTheSizeLimit(t *testing.T) {
+	oldMax, oldEvery := MaxDownload, sizeCheckEvery
+	MaxDownload, sizeCheckEvery = 1<<20, 20*time.Millisecond
+	defer func() { MaxDownload, sizeCheckEvery = oldMax, oldEvery }()
+	r, dir, _ := newRunner(t, "FAKE_GRYPE_FILL=4194304", "FAKE_GRYPE_SLEEP=5")
+	start := time.Now()
+	_, err := r.Scan(context.Background(), "registry:ghcr.io/acme/shop@sha256:ab", filepath.Join(dir, "a"), filepath.Join(dir, "b"))
+	if err == nil || !errors.Is(err, errTooLarge) || time.Since(start) > 4*time.Second {
+		t.Fatalf("a download over the limit: %v after %s", err, time.Since(start))
+	}
+	noWorkDirs(t, r)
+	r, dir, _ = newRunner(t, "FAKE_GRYPE_FILL=4194304")
+	if _, err := r.Scan(context.Background(), "dir:/src", filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+		t.Fatalf("a directory scan is not limited this way: %v", err)
+	}
 }

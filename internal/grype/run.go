@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -21,7 +22,13 @@ import (
 var (
 	errGrypeTimeout = errors.New("grype timeout")
 	errLowSpace     = errors.New("the cache file system ran low on space while Grype ran")
+	errTooLarge     = errors.New("the image is larger than Tripcoil downloads for a scan")
 )
+
+// MaxDownload is how much an image read from its registry may take on disk while it is scanned.
+var MaxDownload int64 = 3 << 30
+
+var sizeCheckEvery = time.Second
 
 var (
 	maxReportSize       int64 = 128 << 20
@@ -210,6 +217,17 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 			<-watched
 		}()
 	}
+	if slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "registry:") }) {
+		sized := make(chan struct{})
+		go func() {
+			defer close(sized)
+			watchSize(ctx, work, MaxDownload, sizeCheckEvery, stop)
+		}()
+		defer func() {
+			cancel()
+			<-sized
+		}()
+	}
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = work
 	cmd.Env = isolatedEnv(environ, work)
@@ -232,6 +250,8 @@ func (r *Runner) runFor(ctx context.Context, args []string, stdout io.Writer, ti
 		return fmt.Errorf("Grype timed out after %s", timeout)
 	case context.Cause(ctx) == errLowSpace:
 		return errLowSpace
+	case context.Cause(ctx) == errTooLarge:
+		return fmt.Errorf("%w (%d GiB)", errTooLarge, MaxDownload>>30)
 	case ctx.Err() != nil:
 		return ctx.Err()
 	}
@@ -252,6 +272,33 @@ func (r *Runner) watchSpace(ctx context.Context, dir string, interval time.Durat
 		case <-tick.C:
 			if !r.HasRoom(dir) {
 				stop(errLowSpace)
+				return
+			}
+		}
+	}
+}
+
+// watchSize stops Grype when the files below dir take more than limit bytes: an image that is read
+// from its registry lands there, and its size is not known beforehand.
+func watchSize(ctx context.Context, dir string, limit int64, interval time.Duration, stop context.CancelCauseFunc) {
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			var size int64
+			filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+				if err == nil && d.Type().IsRegular() {
+					if fi, err := d.Info(); err == nil {
+						size += fi.Size()
+					}
+				}
+				return nil
+			})
+			if size > limit {
+				stop(errTooLarge)
 				return
 			}
 		}

@@ -44,6 +44,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -n "$FAKE_GRYPE_STDERR" ]; then printf '%s\n' "$FAKE_GRYPE_STDERR" >&2; fi
 if [ -n "$FAKE_GRYPE_PID" ]; then echo $$ > "$FAKE_GRYPE_PID"; fi
+if [ -n "$FAKE_GRYPE_FILL" ]; then head -c "$FAKE_GRYPE_FILL" /dev/zero > "$TMPDIR/layer.tar"; fi
 if [ -n "$FAKE_GRYPE_SLEEP" ]; then exec sleep "$FAKE_GRYPE_SLEEP"; fi
 exit "${FAKE_GRYPE_EXIT:-0}"
 `
