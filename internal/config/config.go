@@ -51,6 +51,9 @@ type Review struct {
 
 type Audit struct {
 	MaxDatabaseAgeHours WholeNumber `yaml:"maxDatabaseAgeHours"`
+	// NewImages: when an image's tag points to a newer image, download and scan that one too, so
+	// that the report says what the update brings. On unless set to false.
+	NewImages bool `yaml:"newImages"`
 }
 
 type Retention struct {
@@ -102,7 +105,7 @@ func Default() Config {
 			MemoryMax: "2G",
 			CPUQuota:  "100%",
 		},
-		Audit:     Audit{MaxDatabaseAgeHours: 48},
+		Audit:     Audit{MaxDatabaseAgeHours: 48, NewImages: true},
 		Retention: Retention{KeepRuns: 30},
 		Zosia:     Zosia{SecretFile: DefaultZosiaSecretFile},
 		Exposure:  Exposure{LAN: LANLower},

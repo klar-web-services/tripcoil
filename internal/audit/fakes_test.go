@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -204,9 +205,24 @@ func (f *fakeScanner) Lookup(_ context.Context, ids []string) (map[string]grype.
 type fakeImages struct {
 	ids map[string]bool
 	err error
+	// tags are the digests the registry names for references; digests those an image was pulled under.
+	tags    map[string]string
+	digests map[string][]string
+	tagErr  error
 }
 
 func (f fakeImages) ImageExists(_ context.Context, id string) (bool, error) { return f.ids[id], f.err }
+
+func (f fakeImages) TagDigest(_ context.Context, ref string) (string, error) {
+	if d, ok := f.tags[ref]; ok {
+		return d, f.tagErr
+	}
+	return "", cmp.Or(f.tagErr, errors.New("GET /distribution/"+ref+"/json: 401 Unauthorized"))
+}
+
+func (f fakeImages) RepoDigests(_ context.Context, id string) ([]string, error) {
+	return f.digests[id], f.err
+}
 
 type fakeKernel struct {
 	data *kernelcna.Data

@@ -34,10 +34,16 @@ type Deps struct {
 	Kernel   KernelSource
 	Proc     ProcFiles
 	Images   Images
+	// NewImages: when an image's tag points to a newer image, scan that one too (audit.newImages).
+	NewImages bool
 }
 
 type Images interface {
 	ImageExists(ctx context.Context, id string) (bool, error)
+	// TagDigest is the digest a tagged reference points to in its registry; RepoDigests are the
+	// digests an image was pulled under.
+	TagDigest(ctx context.Context, ref string) (string, error)
+	RepoDigests(ctx context.Context, id string) ([]string, error)
 }
 
 type ProcFiles interface {
@@ -74,6 +80,9 @@ type auditor struct {
 	mounts     []string
 	mountsErr  error
 	mountsRead bool
+
+	// newImages counts the newer images this run downloaded.
+	newImages int
 }
 
 func Run(ctx context.Context, d Deps, inv *inventory.Inventory) *Audit {
@@ -187,6 +196,7 @@ func (au *auditor) run(ctx context.Context) {
 	}
 	a.Upgrades = au.checkUpgrades(ctx, upgradeCandidates(a.Findings))
 	SetActions(d.Family, au.inv, a)
+	au.setUpdates(ctx)
 	au.cache.prune()
 }
 

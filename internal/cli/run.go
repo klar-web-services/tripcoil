@@ -280,6 +280,8 @@ func auditHost(ctx context.Context, inv *inventory.Inventory, cacheDir, runDir s
 		Kernel:   kernelcna.NewSource(cacheDir),
 		Proc:     procfs.FS{Root: "/"},
 		Images:   dockerImages(os.Getenv("DOCKER_HOST")),
+
+		NewImages: cfg.Audit.NewImages,
 	}, inv)
 }
 

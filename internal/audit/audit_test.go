@@ -1021,3 +1021,130 @@ func TestAuditKernelByUpstreamVersion(t *testing.T) {
 		t.Fatalf("a failed lookup: %+v", a)
 	}
 }
+
+// When an image's tag points to a newer image, that image is scanned too: once, read from the
+// registry and not through Docker, and from then on from its cached package list. The action says
+// what pulling would bring.
+func TestAuditScansTheNewerImage(t *testing.T) {
+	root, cache, inv := host(t)
+	g := hostScanner(root, cache)
+	deb := func(name, version string) grype.Component {
+		return grype.Component{Name: name, Version: version, PURL: "pkg:deb/debian/" + name + "@" + version + "?arch=amd64&distro=debian-12"}
+	}
+	early, late := vuln("CVE-2026-0101", "Critical", "fixed", "149.0-1"), vuln("CVE-2026-0102", "Critical", "fixed", "156.0-1")
+	early.KnownExploited, late.KnownExploited = true, true
+	g.sboms["docker:sha256:1111"] = []grype.Component{deb("chromium", "148.0-1"), deb("zlib1g", "1:1.2.13.dfsg-1"), deb("libold", "1.0")}
+	g.vulns["chromium@148.0-1"] = []grype.Vulnerability{early, late}
+	g.vulns["chromium@152.0-1"] = []grype.Vulnerability{late}
+	g.vulns["libold@1.0"] = []grype.Vulnerability{vuln("CVE-2026-0103", "High", "fixed", "1.1")}
+	// The newer image: a Chromium that fixes one of the two, the same zlib, and libold is gone.
+	const digest = "sha256:" + "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
+	newer := "registry:ghcr.io/acme/shop@" + digest
+	g.sboms[newer] = []grype.Component{deb("chromium", "152.0-1"), deb("zlib1g", "1:1.2.13.dfsg-1")}
+	images := fakeImages{ids: map[string]bool{"sha256:1111": true}, tags: map[string]string{"ghcr.io/acme/shop:2026.11.3": digest},
+		digests: map[string][]string{"sha256:1111": {"sha256:" + strings.Repeat("0", 64)}}}
+	audit := func(im fakeImages, on bool) (*Audit, Action) {
+		t.Helper()
+		g.catalogs = nil
+		d := deps(root, cache, t.TempDir(), g, fakeKernel{})
+		d.Images, d.NewImages = im, on
+		a := Run(context.Background(), d, inv)
+		if statuses(a)[imageO] != Scanned {
+			t.Fatalf("statuses %v, errors %+v", statuses(a), a.Errors)
+		}
+		return a, actionByKind(t, a.Actions, ActionImage)
+	}
+
+	a, act := audit(images, true)
+	if want := (Update{State: UpdateScanned, Ref: "ghcr.io/acme/shop@" + digest, Clears: 2, Remains: 2, RemainsExploited: 1}); act.Update == nil || *act.Update != want {
+		t.Fatalf("update %+v, want %+v", act.Update, want)
+	}
+	changes := map[string]Change{}
+	for _, c := range act.Changes {
+		changes[c.Name] = c
+	}
+	// Chromium gets 152, which is short of the 156 that fixes everything; libold is gone; zlib stays as it is.
+	if c := changes["chromium"]; c.From != "148.0-1" || c.To != "156.0-1" || c.Gets != "152.0-1" || c.Reaches || c.Gone {
+		t.Errorf("chromium: %+v", c)
+	}
+	if c := changes["libold"]; !c.Gone || c.Gets != "" {
+		t.Errorf("libold: %+v", c)
+	}
+	if c := changes["zlib1g"]; c.Gets != "1:1.2.13.dfsg-1" || c.Reaches || c.Gone {
+		t.Errorf("zlib1g: %+v", c)
+	}
+	after := map[string]string{}
+	for _, f := range a.Findings {
+		if f.Action == act.ID {
+			after[f.Vulnerability.ID] = f.AfterUpdate
+		} else if f.AfterUpdate != "" {
+			t.Errorf("%s is no finding of the image and says %q", f.ID, f.AfterUpdate)
+		}
+	}
+	if want := map[string]string{"CVE-2026-0101": AfterCleared, "CVE-2026-0102": AfterRemains, "CVE-2026-0103": AfterCleared, "CVE-2026-3000": AfterRemains}; !maps.Equal(after, want) {
+		t.Errorf("after the update: %v", after)
+	}
+	if !slices.Contains(g.catalogs, newer) {
+		t.Errorf("the newer image was not read from its registry: %q", g.catalogs)
+	}
+
+	// The second run matches the cached package list and downloads nothing.
+	if _, act := audit(images, true); slices.Contains(g.catalogs, newer) || act.Update == nil || act.Update.Clears != 2 {
+		t.Errorf("the second run: scanned %q, update %+v", g.catalogs, act.Update)
+	}
+
+	for name, tc := range map[string]struct {
+		change func(*fakeImages)
+		state  string
+		reason string
+	}{
+		"the tag still points to the running image": {func(im *fakeImages) { im.digests = map[string][]string{"sha256:1111": {digest}} }, UpdateCurrent, ""},
+		"an image that was built here":              {func(im *fakeImages) { im.digests = nil }, UpdateUnknown, "built or loaded"},
+		"a registry that does not answer":           {func(im *fakeImages) { im.tagErr = errors.New("Get \"https://ghcr.io/v2/\": dial tcp: i/o timeout") }, UpdateUnknown, "could not be asked"},
+		"a digest that is none":                     {func(im *fakeImages) { im.tags = map[string]string{"ghcr.io/acme/shop:2026.11.3": "sha256:../../x"} }, UpdateUnknown, "no usable digest"},
+	} {
+		im := images
+		tc.change(&im)
+		_, act := audit(im, true)
+		if act.Update == nil || act.Update.State != tc.state || !strings.Contains(act.Update.Reason, tc.reason) || act.Update.Clears+act.Update.Remains != 0 {
+			t.Errorf("%s: %+v", name, act.Update)
+		}
+		if slices.ContainsFunc(act.Changes, func(c Change) bool { return c.Gets != "" || c.Gone || c.Reaches }) {
+			t.Errorf("%s: the changes claim to know the newer image: %+v", name, act.Changes)
+		}
+	}
+
+	// A newer image that is not cached yet: one that cannot be scanned says why; beyond the run's
+	// limit it waits; with the switch off nothing is asked.
+	const other = "sha256:" + "cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34"
+	moved := images
+	moved.tags = map[string]string{"ghcr.io/acme/shop:2026.11.3": other}
+	if _, act := audit(moved, true); act.Update == nil || act.Update.State != UpdateFailed || !strings.Contains(act.Update.Reason, "could not be scanned") {
+		t.Errorf("an image the registry does not give out: %+v", act.Update)
+	}
+	limit := maxNewImages
+	maxNewImages = 0
+	if _, act := audit(moved, true); act.Update == nil || act.Update.State != UpdateWaiting || slices.Contains(g.catalogs, "registry:ghcr.io/acme/shop@"+other) {
+		t.Errorf("beyond the limit: %+v, scanned %q", act.Update, g.catalogs)
+	}
+	maxNewImages = limit
+	if _, act := audit(images, false); act.Update != nil {
+		t.Errorf("switched off: %+v", act.Update)
+	}
+}
+
+func TestRepository(t *testing.T) {
+	for ref, want := range map[string]string{
+		"ghcr.io/acme/shop:1.2":         "ghcr.io/acme/shop",
+		"nginx:latest":                  "nginx",
+		"registry.local:5000/app:prod":  "registry.local:5000/app",
+		"registry.local:5000/app":       "",
+		"nginx":                         "",
+		"ghcr.io/acme/shop@sha256:abcd": "",
+		"shop:1.2@sha256:abcd":          "",
+	} {
+		if got, _ := repository(ref); got != want {
+			t.Errorf("%s: %q, want %q", ref, got, want)
+		}
+	}
+}

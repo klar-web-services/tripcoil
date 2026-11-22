@@ -58,6 +58,8 @@ type Action struct {
 	MoreChanges int          `json:"moreChanges,omitempty"`
 	Steps       []Step       `json:"steps"`
 	Counts      ActionCounts `json:"counts"`
+	// Update is, for an image, what pulling its tag would bring; nil when that was not looked at.
+	Update *Update `json:"update,omitempty"`
 }
 
 // Change is one package inside the thing: the installed version and the lowest version that
@@ -68,6 +70,12 @@ type Change struct {
 	To      string `json:"to,omitempty"`
 	Clears  int    `json:"clears"`
 	Unfixed int    `json:"unfixed"`
+	// For an image whose newer image was scanned: Gets is the package's version there (when it has
+	// one version), Reaches says that it leaves no fixable finding of the package, and Gone that the
+	// newer image no longer has the package.
+	Gets    string `json:"gets,omitempty"`
+	Reaches bool   `json:"reaches,omitempty"`
+	Gone    bool   `json:"gone,omitempty"`
 }
 
 type Step struct {

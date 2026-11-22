@@ -79,6 +79,9 @@ type Finding struct {
 	Remediation   string        `json:"remediation"`
 	Action        string        `json:"action,omitempty"`
 	Raw           string        `json:"raw,omitempty"`
+	// AfterUpdate says, for a finding of an image whose newer image was scanned, whether that image
+	// still has it: AfterCleared or AfterRemains.
+	AfterUpdate string `json:"afterUpdate,omitempty"`
 }
 
 type Vulnerability struct {
