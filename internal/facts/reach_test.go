@@ -414,6 +414,35 @@ func TestReachOfSwarmAndMacvlan(t *testing.T) {
 	}
 }
 
+// A container that uses another container's network has no port of its own: it answers on that
+// one's ports, and is reached wherever that one is.
+func TestReachOfSharedNetwork(t *testing.T) {
+	inv := &inventory.Inventory{Items: []inventory.Item{
+		{ID: "container:vpn", Kind: inventory.KindContainer, Name: "vpn", ContainerID: "v1"},
+		{ID: "container:torrent", Kind: inventory.KindContainer, Name: "torrent", NetworkMode: "container:v1"},
+		{ID: "container:orphan", Kind: inventory.KindContainer, Name: "orphan", NetworkMode: "container:gone"},
+		{ID: "container:proxy", Kind: inventory.KindContainer, Name: "proxy"},
+	}}
+	c := collector{ctx: context.Background(), inv: inv, d: Deps{}}
+	conts := []Container{
+		{Item: "container:vpn", Name: "vpn", Ports: []inventory.Port{{IP: "127.0.0.1", HostPort: 8880, ContainerPort: 8080, Protocol: "tcp"}}},
+		{Item: "container:torrent", Name: "torrent"},
+		{Item: "container:orphan", Name: "orphan"},
+		{Item: "container:proxy", Name: "proxy", Ports: []inventory.Port{{IP: "0.0.0.0", HostPort: 443, ContainerPort: 443, Protocol: "tcp"}}},
+	}
+	routes := Routes{Programs: []RouteProgram{{Item: "container:proxy", Program: "caddy", Kind: ViaProxy, Complete: true, Targets: []RouteTarget{{Target: "vpn:8080", Item: "container:vpn"}}}}}
+	r := c.reach(Network{}, conts, homeAddresses(t, false), routes)
+	want := map[string]string{"container:proxy": "lan direct", "container:vpn": "lan proxy", "container:torrent": "lan proxy", "container:orphan": "none unsure"}
+	if got := summary(r); !reflect.DeepEqual(got, want) {
+		t.Errorf("\n got %v\nwant %v", got, want)
+	}
+	for _, i := range r.Items {
+		if i.Item == "container:torrent" && (!reflect.DeepEqual(i.Through, []string{"container:proxy"}) || len(i.Sockets) != 1 || i.Sockets[0].Port != 8880) {
+			t.Errorf("the sharing container: %+v", i)
+		}
+	}
+}
+
 func TestCollectWritesReach(t *testing.T) {
 	root, inv := fixture(t)
 	homeSys(t, root)

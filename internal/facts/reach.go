@@ -5,6 +5,8 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+
+	"github.com/klar-web-services/tripcoil/internal/inventory"
 )
 
 // Where an attacker can connect to an item from, narrowest first.
@@ -232,6 +234,28 @@ func (c collector) reach(n Network, conts []Container, a Addresses, routes Route
 			entry(ct.Item).Unsure = "its Swarm service may publish ports through the routing mesh, which this node cannot list"
 		case ct.OwnAddress:
 			entry(ct.Item).Unsure = "it is on a macvlan or ipvlan network, with an address of its own on the LAN"
+		}
+	}
+
+	// A container that uses another container's network answers on that one's ports and is reached
+	// wherever that one is; when that one is not known, its reach is in doubt.
+	for _, it := range c.inv.Items {
+		id, shared := strings.CutPrefix(it.NetworkMode, "container:")
+		if it.Kind != inventory.KindContainer || !shared {
+			continue
+		}
+		owner := slices.IndexFunc(c.inv.Items, func(o inventory.Item) bool {
+			return o.Kind == inventory.KindContainer && o.ID != it.ID && (o.ContainerID == id || o.Name == id)
+		})
+		if owner < 0 {
+			entry(it.ID).Unsure = "it uses the network of a container that Tripcoil does not know"
+			continue
+		}
+		if from := byItem[c.inv.Items[owner].ID]; from != nil {
+			own := *from
+			own.Item = it.ID
+			own.Sockets, own.Through = slices.Clone(from.Sockets), slices.Clone(from.Through)
+			byItem[it.ID] = &own
 		}
 	}
 
