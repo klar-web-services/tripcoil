@@ -178,3 +178,56 @@ func TestNetworksAndServices(t *testing.T) {
 		t.Errorf("a container's networks: %+v %v", d.NetworkSettings, err)
 	}
 }
+
+// Which image a tag points to in its registry, and under which digests the daemon got an image:
+// together they say whether the tag has moved since.
+func TestTagDigestAndRepoDigests(t *testing.T) {
+	dir, err := os.MkdirTemp("", "tc-docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "docker.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		switch r.URL.Path {
+		case "/distribution/ghcr.io/acme/shop:latest/json":
+			w.Write([]byte(`{"Descriptor":{"mediaType":"application/vnd.oci.image.index.v1+json","digest":"sha256:aaa","size":1609},"Platforms":[{"architecture":"amd64","os":"linux"}]}`))
+		case "/distribution/local/built:latest/json":
+			http.Error(w, `{"message":"pull access denied"}`, http.StatusUnauthorized)
+		case "/images/sha256:111/json":
+			w.Write([]byte(`{"Id":"sha256:111","RepoDigests":["ghcr.io/acme/shop@sha256:bbb","mirror.example/shop@sha256:ccc"]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	go srv.Serve(l)
+	t.Cleanup(func() { srv.Close() })
+
+	c := New(sock)
+	ctx := context.Background()
+	if d, err := c.TagDigest(ctx, "ghcr.io/acme/shop:latest"); err != nil || d != "sha256:aaa" {
+		t.Errorf("the tag's digest: %q %v", d, err)
+	}
+	if _, err := c.TagDigest(ctx, "local/built:latest"); err == nil {
+		t.Error("an image that is in no registry")
+	}
+	// A reference is put into the request's path: nothing that could change the request is sent.
+	before := len(asked)
+	for _, ref := range []string{"", "shop:latest?x=1", "shop:latest#frag", "shop latest", "../images/x", "shop:latest/../../x"} {
+		if _, err := c.TagDigest(ctx, ref); err == nil {
+			t.Errorf("%q was asked for", ref)
+		}
+	}
+	if len(asked) != before {
+		t.Errorf("a bad reference reached the daemon: %v", asked[before:])
+	}
+	if got, err := c.RepoDigests(ctx, "sha256:111"); err != nil || len(got) != 2 || got[0] != "sha256:bbb" || got[1] != "sha256:ccc" {
+		t.Errorf("the image's digests: %v %v", got, err)
+	}
+}

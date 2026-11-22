@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -95,6 +96,44 @@ func (c *Client) InspectImage(ctx context.Context, id string) (Image, error) {
 	var img Image
 	err := c.get(ctx, "/images/"+url.PathEscape(id)+"/json", &img)
 	return img, err
+}
+
+// plainRef is an image reference that is safe to put into a request's path.
+var plainRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]+)+$`)
+
+// TagDigest asks the registry, through the daemon and with its credentials, which image a tagged
+// reference points to now. Nothing is pulled.
+func (c *Client) TagDigest(ctx context.Context, ref string) (string, error) {
+	if !plainRef.MatchString(ref) || strings.Contains(ref, "..") {
+		return "", fmt.Errorf("%q is not a tagged image reference", ref)
+	}
+	var out struct {
+		Descriptor struct {
+			Digest string `json:"digest"`
+		} `json:"Descriptor"`
+	}
+	if err := c.get(ctx, "/distribution/"+ref+"/json", &out); err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(out.Descriptor.Digest, "sha256:") {
+		return "", errors.New("the registry named no digest")
+	}
+	return out.Descriptor.Digest, nil
+}
+
+// RepoDigests are the digests an image was pulled under, without their repositories.
+func (c *Client) RepoDigests(ctx context.Context, id string) ([]string, error) {
+	img, err := c.InspectImage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, d := range img.RepoDigests {
+		if _, digest, ok := strings.Cut(d, "@"); ok {
+			out = append(out, digest)
+		}
+	}
+	return out, nil
 }
 
 func (c *Client) ImageExists(ctx context.Context, id string) (bool, error) {

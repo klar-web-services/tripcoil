@@ -70,6 +70,9 @@ type ServicePort struct {
 type Image struct {
 	ID     string `json:"Id"`
 	Config Config `json:"Config"`
+	// RepoDigests are the digests the image was pulled under, as "repository@sha256:…"; none for an
+	// image that was built here.
+	RepoDigests []string `json:"RepoDigests"`
 }
 
 type State struct {
