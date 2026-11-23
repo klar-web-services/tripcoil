@@ -326,3 +326,12 @@ func TestPromptExplainsRouteLimitsAndTheSummary(t *testing.T) {
 		}
 	}
 }
+
+// Whether data from a source the owner chose is an attack is settled once, not anew by every review.
+func TestPromptSettlesContentFromChosenSources(t *testing.T) {
+	for _, want := range []string{"takes data from anyone in normal use", "only from sources the owner chose", "needs one of those sources to turn hostile", "that is `conditional`"} {
+		if !strings.Contains(Prompt, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+}
