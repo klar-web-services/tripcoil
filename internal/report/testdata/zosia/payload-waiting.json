@@ -1,0 +1,210 @@
+{
+  "run": {
+    "schemaVersion": "1",
+    "runId": "20261114T061500Z-3fa2",
+    "startedAt": "2026-11-14T06:15:00Z",
+    "endedAt": "2026-11-14T06:18:00Z",
+    "trigger": "manual",
+    "versions": {
+      "tripcoil": "dev"
+    },
+    "stages": {
+      "audit": "ok",
+      "facts": "ok",
+      "inventory": "ok",
+      "review": "ok"
+    },
+    "status": "complete",
+    "counts": {},
+    "reviewed": true,
+    "reviewedAt": "2026-11-14T06:25:00Z",
+    "verdict": {
+      "code": "clean",
+      "line": "🟢 Nothing to do, 1 waiting for a fix (3 coverage gaps)",
+      "counts": {
+        "actionsNow": 0,
+        "actionsRoutine": 0,
+        "actionsSoon": 0,
+        "actionsUnassessed": 0,
+        "actionsWaiting": 1,
+        "conditional": 1,
+        "conditionalLower": 0,
+        "critical": 1,
+        "errors": 0,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "gaps": 3,
+        "high": 0,
+        "low": 0,
+        "medium": 0,
+        "notExploitable": 0,
+        "unassessed": 0
+      }
+    },
+    "errors": [],
+    "warnings": [],
+    "notices": [],
+    "exitCode": 0
+  },
+  "summary": "s",
+  "findings": [
+    {
+      "id": "f:0000000000000001",
+      "vulnerability": {
+        "id": "",
+        "aliases": null,
+        "severity": "",
+        "cvss": null,
+        "epss": 0,
+        "knownExploited": false,
+        "urls": null
+      },
+      "origin": "",
+      "package": {
+        "name": "chromium",
+        "version": "152",
+        "type": ""
+      },
+      "fix": {
+        "state": "not-fixed",
+        "versions": null
+      },
+      "source": "",
+      "items": null,
+      "risk": "critical",
+      "remediation": "",
+      "action": "a:aaaaaaaaaaaa",
+      "review": {
+        "findingId": "f:0000000000000001",
+        "verdict": "confirmed",
+        "exploitability": "conditional",
+        "priority": "soon",
+        "reasoning": "r"
+      }
+    }
+  ],
+  "added": [],
+  "coverage": [
+    {
+      "code": "ORIGIN_UNRESOLVED",
+      "subject": "lxd: /snap/lxd/123/bin/lxd",
+      "detail": "it runs from a snap, and snaps are not audited in v1"
+    },
+    {
+      "code": "APPDIR_NOT_FOUND",
+      "subject": "python3.11 (/usr/bin/python3.11)",
+      "detail": "no app directory was found, so only the interpreter is audited"
+    },
+    {
+      "code": "IMAGE_ONLY",
+      "subject": "container shop-web-1",
+      "detail": "only the image is audited, not bind-mounted code or changes made in the running container"
+    }
+  ],
+  "errors": [],
+  "verdict": {
+    "code": "clean",
+    "line": "🟢 Nothing to do, 1 waiting for a fix (3 coverage gaps)",
+    "counts": {
+      "actionsNow": 0,
+      "actionsRoutine": 0,
+      "actionsSoon": 0,
+      "actionsUnassessed": 0,
+      "actionsWaiting": 1,
+      "conditional": 1,
+      "conditionalLower": 0,
+      "critical": 1,
+      "errors": 0,
+      "exploitable": 0,
+      "falsePositive": 0,
+      "gaps": 3,
+      "high": 0,
+      "low": 0,
+      "medium": 0,
+      "notExploitable": 0,
+      "unassessed": 0
+    }
+  },
+  "host": {
+    "hostname": "web-1",
+    "distro": "debian 12",
+    "kernel": "6.1.0-28-amd64"
+  },
+  "names": {
+    "items": {},
+    "origins": {}
+  },
+  "restarts": [
+    {
+      "item": "kernel",
+      "name": "kernel",
+      "rebootPending": true,
+      "rebootReasons": [
+        "a newer kernel package is installed: linux-image-6.1.0-31-amd64 6.1.128-1"
+      ]
+    },
+    {
+      "item": "proc:nginx",
+      "name": "nginx",
+      "units": [
+        "nginx.service"
+      ],
+      "restartNeeded": [
+        "/usr/lib/x86_64-linux-gnu/libssl.so.3"
+      ]
+    }
+  ],
+  "upgrades": [],
+  "freshness": {
+    "grype": ""
+  },
+  "actions": [
+    {
+      "id": "a:aaaaaaaaaaaa",
+      "kind": "image",
+      "name": "flaresolverr",
+      "target": "ghcr.io/flaresolverr/flaresolverr:latest",
+      "items": [],
+      "urgency": "waiting",
+      "reviewed": true,
+      "title": "Keep flaresolverr on localhost",
+      "changes": [
+        {
+          "name": "chromium",
+          "from": "152"
+        }
+      ],
+      "also": [
+        "Keep port 8891 bound to 127.0.0.1"
+      ],
+      "steps": null,
+      "upstream": {
+        "state": "none",
+        "note": "No image ships a newer Chromium"
+      },
+      "counts": {
+        "conditional": 1,
+        "conditionalLower": 0,
+        "exploitable": 0,
+        "falsePositive": 0,
+        "findings": 1,
+        "knownExploited": 0,
+        "notExploitable": 0,
+        "open": 1,
+        "unassessed": 0
+      },
+      "update": {
+        "state": "current",
+        "clears": 0,
+        "remains": 0,
+        "remainsExploited": 0
+      },
+      "waiting": {
+        "key": "w:07a9c2188fae",
+        "since": "2026-11-14T06:15:00Z",
+        "overdue": false
+      }
+    }
+  ],
+  "reach": []
+}
