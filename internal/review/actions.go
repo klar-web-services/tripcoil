@@ -183,11 +183,12 @@ func (e *ActionEntry) tidy(packages map[string]bool) string {
 			steps = append(steps, s)
 		}
 	}
-	if e.Steps = steps; len(steps) == 0 {
-		return "it has no steps"
-	}
 	if !slices.Contains([]string{UpstreamAvailable, UpstreamNone, UpstreamUnknown}, e.Upstream.State) {
 		e.Upstream.State = UpstreamUnknown
+	}
+	// Without steps an action waits for a fix, which only one with no fixed release can.
+	if e.Steps = steps; len(steps) == 0 && e.Upstream.State != UpstreamNone {
+		return "it has no steps"
 	}
 	e.Upstream.Note = oneLine(e.Upstream.Note, audit.MaxNote)
 	if s := e.Upstream.Source; !strings.HasPrefix(s, "https://") || len(s) > audit.MaxSource || hasUnprintable(s) || strings.Contains(s, " ") {

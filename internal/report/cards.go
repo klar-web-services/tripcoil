@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/review"
+	"github.com/klar-web-services/tripcoil/internal/waiting"
 )
 
 const (
@@ -15,13 +17,16 @@ const (
 	UrgencySoon       = "soon"
 	UrgencyRoutine    = "routine"
 	UrgencyUnassessed = "unassessed"
-	UrgencyNone       = "none"
+	// UrgencyWaiting: no fixed release exists and nothing is left to do on the machine. Such a card
+	// is no to-do, and a report with only such cards is clean.
+	UrgencyWaiting = "waiting"
+	UrgencyNone    = "none"
 
 	// CardFinding is the kind of a card for a finding the review added.
 	CardFinding = "finding"
 )
 
-var urgencies = []string{UrgencyNow, UrgencySoon, UrgencyRoutine, UrgencyUnassessed, UrgencyNone}
+var urgencies = []string{UrgencyNow, UrgencySoon, UrgencyRoutine, UrgencyUnassessed, UrgencyWaiting, UrgencyNone}
 
 // Card is one action as the report shows it: what to do, what changes, how, and how urgent it is.
 type Card struct {
@@ -47,8 +52,69 @@ type Card struct {
 	Counts map[string]int `json:"counts"`
 	// Update says, for an image, what pulling its tag brings; nil when that was not looked at.
 	Update *CardUpdate `json:"update,omitempty"`
+	// Waiting is the card's clock while no fixed release exists; nil for a card that never waited.
+	Waiting *CardWaiting `json:"waiting,omitempty"`
 
 	tier int
+	// waited is for how many days no fixed release has existed, as of the run.
+	waited int
+}
+
+// CardWaiting says since when a card has had no fixed release. Overdue: its 30 days have passed.
+// Until: Zosia's settings keep it waiting past them.
+type CardWaiting struct {
+	Key     string     `json:"key"`
+	Since   time.Time  `json:"since"`
+	Overdue bool       `json:"overdue"`
+	Until   *time.Time `json:"until,omitempty"`
+}
+
+// settle decides whether an action's card waits. It waits when the review found no fixed release,
+// none of its findings is exploitable as things stand or unassessed, no newer image clears
+// findings, and either the review left it without steps or, once its 30 days have passed, Zosia's
+// settings keep it waiting. The settings can keep such a card quiet and never hide a to-do.
+func (c *Card) settle(a audit.Action, start time.Time) {
+	mark := a.Waiting
+	noFix := c.Reviewed && c.Upstream.State == review.UpstreamNone
+	clears := a.Update != nil && a.Update.State == audit.UpdateScanned && a.Update.Clears > 0
+	quiet := noFix && !clears && c.Urgency != UrgencyNone && c.Counts["exploitable"] == 0 && c.Counts["unassessed"] == 0
+	overdue := mark != nil && mark.Overdue
+	kept := overdue && mark.Until != nil && mark.Until.After(start)
+	if quiet && (kept || !overdue && len(c.Steps) == 0) {
+		c.Urgency, c.Waiting = UrgencyWaiting, &CardWaiting{Key: audit.WaitingKey(a), Since: start.UTC()}
+		if mark != nil {
+			c.Waiting.Since, c.Waiting.Overdue = mark.Since, mark.Overdue
+		}
+		if kept {
+			c.Waiting.Until = mark.Until
+		}
+		return
+	}
+	if len(c.Steps) == 0 {
+		c.Steps = a.Steps
+	}
+	if mark != nil && noFix {
+		c.Waiting, c.waited = &CardWaiting{Key: mark.Key, Since: mark.Since, Overdue: mark.Overdue}, mark.Days
+	}
+}
+
+// WaitingCards is what a reviewed report says of each action that has a card, for the waiting
+// clock: whether it waits, and whether no fixed release exists.
+func WaitingCards(in Input) []waiting.Card {
+	out := []waiting.Card{}
+	if !reviewedReport(in) {
+		return out
+	}
+	byID := map[string]Card{}
+	for _, c := range Cards(in) {
+		byID[c.ID] = c
+	}
+	for _, a := range in.Audit.Actions {
+		if c, ok := byID[a.ID]; ok {
+			out = append(out, waiting.Card{Key: audit.WaitingKey(a), Waits: c.Urgency == UrgencyWaiting, NoFix: c.Reviewed && c.Upstream.State == review.UpstreamNone})
+		}
+	}
+	return out
 }
 
 // CardUpdate is an image action's audit.Update as a card carries it: the state, and for a scanned
@@ -154,7 +220,7 @@ func urgencyOf(e review.Entry, reviewed bool) int {
 	case "unassessed":
 		return 3
 	}
-	return 4
+	return len(urgencies) - 1
 }
 
 func newCounts() map[string]int {
@@ -240,6 +306,9 @@ func Cards(in Input) []Card {
 	}
 	for _, a := range in.Audit.Actions {
 		if c := byID[a.ID]; c.Urgency != UrgencyNone {
+			if reviewed {
+				c.settle(a, in.Run.StartedAt)
+			}
 			if withReach && a.Kind != audit.ActionKernel {
 				c.Reach, c.Via = cardReach(itemsOf[a.ID], established, in.Reach, asked)
 			}
@@ -300,7 +369,7 @@ func defaultTitle(a audit.Action) string {
 
 // cardCounts is how many cards each urgency has, under the keys of the verdict's counts.
 func cardCounts(cards []Card) map[string]int {
-	c := map[string]int{"actionsNow": 0, "actionsSoon": 0, "actionsRoutine": 0, "actionsUnassessed": 0}
+	c := map[string]int{"actionsNow": 0, "actionsSoon": 0, "actionsRoutine": 0, "actionsUnassessed": 0, "actionsWaiting": 0}
 	for _, card := range cards {
 		switch card.Urgency {
 		case UrgencyNow:
@@ -311,6 +380,8 @@ func cardCounts(cards []Card) map[string]int {
 			c["actionsRoutine"]++
 		case UrgencyUnassessed:
 			c["actionsUnassessed"]++
+		case UrgencyWaiting:
+			c["actionsWaiting"]++
 		}
 	}
 	return c
@@ -337,10 +408,25 @@ func actionsVerdict(code string, c map[string]int) string {
 	if len(parts) == 0 {
 		parts = []string{"Nothing to do"}
 	}
+	if n := c["actionsWaiting"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d waiting for a fix", n))
+	}
 	return verdictMarks[code] + " " + strings.Join(parts, ", ")
 }
 
-var urgencyTitles = map[string]string{UrgencyNow: "Do now", UrgencySoon: "Do this week", UrgencyRoutine: "Routine updates", UrgencyUnassessed: "Not assessed"}
+var urgencyTitles = map[string]string{UrgencyNow: "Do now", UrgencySoon: "Do this week", UrgencyRoutine: "Routine updates", UrgencyUnassessed: "Not assessed", UrgencyWaiting: "Waiting for a fix"}
+
+// waitingLine says since when a card has had no fixed release, and what happens next.
+func waitingLine(c Card) string {
+	w, day := c.Waiting, "2006-01-02"
+	switch {
+	case c.Urgency != UrgencyWaiting:
+		return fmt.Sprintf("No fixed release for %d days, since %s.", c.waited, w.Since.UTC().Format(day))
+	case w.Until != nil:
+		return fmt.Sprintf("No fixed release since %s. Kept waiting until %s.", w.Since.UTC().Format(day), w.Until.UTC().Format(day))
+	}
+	return fmt.Sprintf("No fixed release since %s. Without one, this comes back on %s.", w.Since.UTC().Format(day), w.Since.UTC().AddDate(0, 0, audit.WaitingDays).Format(day))
+}
 
 // codeSpan is a command as Markdown code, so that it prints as it is typed: fenced by more
 // backticks than any run of them in it.
@@ -421,11 +507,18 @@ func writeActions(b *strings.Builder, cards []Card) {
 			if c.Kind == audit.ActionImage {
 				b.WriteString("  - " + md(updateLine(c.Update)) + "\n")
 			}
+			if c.Waiting != nil && (c.Urgency == UrgencyWaiting || c.Waiting.Overdue) {
+				b.WriteString("  - " + waitingLine(c) + "\n")
+			}
+			also, step := "Also", "Step"
+			if c.Urgency == UrgencyWaiting {
+				also, step = "Meanwhile", "If no fix comes, step"
+			}
 			for _, a := range c.Also {
-				b.WriteString("  - Also: " + escapeBlockStart(md(a)) + "\n")
+				b.WriteString("  - " + also + ": " + escapeBlockStart(md(a)) + "\n")
 			}
 			for n, s := range c.Steps {
-				fmt.Fprintf(b, "  - Step %d: %s", n+1, md(s.Text))
+				fmt.Fprintf(b, "  - %s %d: %s", step, n+1, md(s.Text))
 				if s.Command != "" {
 					b.WriteString(": " + codeSpan(s.Command))
 				}

@@ -28,8 +28,16 @@ func Summarize(in Input) run.Verdict {
 		c[t] = 0
 	}
 	c["gaps"] = len(Gaps(in.Inventory, in.Audit, in.Facts))
-	for k, n := range cardCounts(Cards(in)) {
+	cards := Cards(in)
+	for k, n := range cardCounts(cards) {
 		c[k] = n
+	}
+	// held: conditional findings of cards that wait for a fix. They are open and ask for nothing now.
+	held := 0
+	for _, card := range cards {
+		if card.Urgency == UrgencyWaiting {
+			held += card.Counts["conditional"]
+		}
 	}
 	c["errors"] = len(in.Run.Errors)
 	if in.Audit != nil {
@@ -61,7 +69,7 @@ func Summarize(in Input) run.Verdict {
 	switch {
 	case c["exploitable"] > 0:
 		v.Code = VerdictExploitable
-	case c["conditional"] > 0:
+	case c["conditional"] > held:
 		v.Code = VerdictConditional
 	case c["unassessed"] > 0:
 		v.Code = VerdictUnassessed

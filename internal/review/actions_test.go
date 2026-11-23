@@ -245,3 +245,28 @@ func TestPromptNamesTheActionLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestAnActionWithNoFixedReleaseMayHaveNoSteps(t *testing.T) {
+	aud, inv := actionsAudit()
+	none := map[string]any{"state": "none", "note": "No image ships a newer Chromium", "source": "https://github.com/FlareSolverr/FlareSolverr/releases"}
+	r, warns, err := Validate(withActions(action(map[string]any{"steps": []any{}, "upstream": none})), nil, aud, inv)
+	if err != nil || len(warns) != 0 || len(r.Actions) != 1 || len(r.Actions[0].Steps) != 0 || r.Actions[0].Steps == nil || r.Actions[0].Upstream.State != UpstreamNone {
+		t.Fatalf("no fixed release, no steps: %v %+v %+v", err, warns, r.Actions)
+	}
+	// With a fixed release, or when the reviewer did not find out, an action without steps is none.
+	for _, state := range []string{"available", "unknown", "soon"} {
+		up := map[string]any{"state": state, "note": "n", "source": "https://example.org"}
+		r, warns, err := Validate(withActions(action(map[string]any{"steps": []any{}, "upstream": up})), nil, aud, inv)
+		if err != nil || len(r.Actions) != 0 || len(warns) != 1 || !strings.Contains(warns[0].Message, "it has no steps") {
+			t.Errorf("%s: %v %+v %+v", state, err, warns, r.Actions)
+		}
+	}
+}
+
+func TestPromptExplainsWaiting(t *testing.T) {
+	for _, want := range []string{"give the action no steps", "Never invent a step", "`waiting`", "`overdue`", "what to do instead", "a source for every alternative"} {
+		if !strings.Contains(Prompt, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+}
