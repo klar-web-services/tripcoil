@@ -45,6 +45,10 @@ const MaxEntriesFile = 64 << 20
 
 const maxBadLines = 10000
 
+// maxLost: a review whose dropped entries leave more than one in maxLost of the findings without
+// a review is not kept. Kept, it would be carried forward until the findings change.
+const maxLost = 10
+
 const (
 	maxEntryLine = 64 << 10
 	maxListItems = 100
@@ -100,6 +104,9 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 			dropped = append(dropped, msg)
 		}
 	}
+	ids, items := findingIDs(aud), itemIDs(inv)
+	// lost: the findings an entry was written for and dropped.
+	lost := map[string]bool{}
 	n := 0
 	for line := range bytes.Lines(entries) {
 		if n++; len(bytes.TrimSpace(line)) == 0 {
@@ -113,8 +120,13 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 		var err error
 		if len(line) > maxEntryLine {
 			err = fmt.Errorf("it is longer than %d KiB", maxEntryLine>>10)
-		} else {
-			e, err = decodeEntry(line)
+		} else if e, err = decodeEntry(line); err != nil {
+			var named struct {
+				FindingID string `json:"findingId"`
+			}
+			if json.Unmarshal(line, &named) == nil && ids[named.FindingID] {
+				lost[named.FindingID] = true
+			}
 		}
 		if err != nil {
 			bad++
@@ -124,7 +136,6 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 		}
 		all = append(all, e)
 	}
-	ids, items := findingIDs(aud), itemIDs(inv)
 	seen := map[string]bool{}
 	for _, e := range all {
 		why := ""
@@ -143,6 +154,9 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 			why = e.broken()
 		}
 		if why != "" {
+			if ids[e.FindingID] {
+				lost[e.FindingID] = true
+			}
 			drop(fmt.Sprintf("%s (%s)", shorten(e.FindingID), why))
 			continue
 		}
@@ -202,6 +216,15 @@ func Validate(data, entries []byte, aud *audit.Audit, inv *inventory.Inventory) 
 	out.NotReviewed = notReviewed(aud, out.Findings)
 	if len(ids) > 0 && len(out.NotReviewed) == len(ids) {
 		return nil, nil, fmt.Errorf("%w: it addresses none of the %d findings in audit.json (%d entries dropped%s%s)", ErrInvalid, len(ids), ndropped, firstReasons(dropped), rest)
+	}
+	nlost := 0
+	for _, id := range out.NotReviewed {
+		if lost[id] {
+			nlost++
+		}
+	}
+	if nlost*maxLost > len(ids) {
+		return nil, nil, fmt.Errorf("%w: it lost the entries of %d of the %d findings in audit.json (%d entries dropped%s%s)", ErrInvalid, nlost, len(ids), ndropped, firstReasons(dropped), rest)
 	}
 	var warns []problem.Problem
 	if ndropped > 0 {

@@ -159,7 +159,7 @@ func TestValidateInvalid(t *testing.T) {
 }
 
 func TestValidateDropsEntries(t *testing.T) {
-	aud, inv := fixtureAudit()
+	aud, inv := wideAudit()
 	data := output(
 		entry(nil),
 		entry(map[string]any{"reasoning": "again"}),
@@ -182,7 +182,7 @@ func TestValidateDropsEntries(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"f:0000000000000001", "added:3"}) || r.Findings[0].Reasoning != "nginx listens on 0.0.0.0:443" {
 		t.Errorf("kept %v", got)
 	}
-	if !reflect.DeepEqual(r.NotReviewed, []string{"f:0000000000000002", "f:0000000000000003"}) {
+	if !reflect.DeepEqual(r.NotReviewed[:2], []string{"f:0000000000000002", "f:0000000000000003"}) {
 		t.Errorf("not reviewed %v", r.NotReviewed)
 	}
 	if len(warns) != 1 || !strings.HasPrefix(warns[0].Message, "7 review entries were dropped") || warns[0].Code != "REVIEW_ENTRIES_DROPPED" {
@@ -261,7 +261,7 @@ func lines(entries ...map[string]any) []byte {
 }
 
 func TestValidateMergesTheEntriesFile(t *testing.T) {
-	aud, inv := fixtureAudit()
+	aud, inv := wideAudit()
 	file := append(lines(
 		entry(map[string]any{"reasoning": "from the file"}),
 		entry(map[string]any{"findingId": "f:0000000000000002", "reasoning": "from the file"}),
@@ -279,7 +279,7 @@ func TestValidateMergesTheEntriesFile(t *testing.T) {
 	if len(r.Findings) != 2 || idx["f:0000000000000001"].Reasoning != "nginx listens on 0.0.0.0:443" || idx["f:0000000000000002"].Reasoning != "from the file" {
 		t.Errorf("findings %+v", r.Findings)
 	}
-	if !reflect.DeepEqual(r.NotReviewed, []string{"f:0000000000000003"}) {
+	if r.NotReviewed[0] != "f:0000000000000003" {
 		t.Errorf("not reviewed %v", r.NotReviewed)
 	}
 	if len(warns) != 1 || !strings.HasPrefix(warns[0].Message, "5 review entries were dropped") {
@@ -345,7 +345,7 @@ func TestPromptNamesTheEntriesLimit(t *testing.T) {
 }
 
 func TestValidateEntryLimits(t *testing.T) {
-	aud, inv := fixtureAudit()
+	aud, inv := wideAudit()
 	many := make([]string, 101)
 	for i := range many {
 		many[i] = "x"
@@ -390,7 +390,7 @@ func TestValidateEntryLimits(t *testing.T) {
 }
 
 func TestValidateHugeEntryIsCheap(t *testing.T) {
-	aud, inv := fixtureAudit()
+	aud, inv := wideAudit()
 	huge := []byte(`{"findingId":"f:0000000000000002","verdict":"confirmed","exploitability":"unknown","priority":"none","reasoning":"r","evidence":[` +
 		strings.TrimSuffix(strings.Repeat(`"",`, (MaxEntriesFile-300)/3), ",") + `],"fix":["x"],"sources":[],"corrections":[],"item":null,"vulnerability":null}` + "\n")
 	small := []byte(`{"findingId":"f:0000000000000003","verdict":"confirmed","exploitability":"unknown","priority":"none","reasoning":"r","evidence":[` +
@@ -408,5 +408,69 @@ func TestValidateHugeEntryIsCheap(t *testing.T) {
 	}
 	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 50<<20 || took > 5*time.Second {
 		t.Errorf("a huge entry cost %d MiB and %v", alloc>>20, took)
+	}
+}
+
+// wideAudit is fixtureAudit with so many more findings that a dropped entry or two loses no review.
+func wideAudit() (*audit.Audit, *inventory.Inventory) {
+	aud, inv := fixtureAudit()
+	aud.Findings = append(aud.Findings, bigAudit(40).Findings[10:]...)
+	return aud, inv
+}
+
+// bigAudit has n findings, f:0000000000000001 on.
+func bigAudit(n int) *audit.Audit {
+	aud := &audit.Audit{}
+	for i := 1; i <= n; i++ {
+		aud.Findings = append(aud.Findings, audit.Finding{ID: fmt.Sprintf("f:%016d", i)})
+	}
+	return aud
+}
+
+func TestValidateRejectsAReviewThatLostManyEntries(t *testing.T) {
+	_, inv := fixtureAudit()
+	aud := bigAudit(20)
+	file := func(bad int) []byte {
+		var es []map[string]any
+		for i := 1; i <= 20; i++ {
+			over := map[string]any{"findingId": fmt.Sprintf("f:%016d", i)}
+			if i <= bad {
+				// What a reviewer's script wrote on a real machine: the exploitability as the verdict.
+				over["verdict"], over["exploitability"] = "not_exploitable", "not_exploitable"
+			}
+			es = append(es, entry(over))
+		}
+		return lines(es...)
+	}
+	_, _, err := Validate(output(), file(3), aud, inv)
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "lost the entries of 3 of the 20 findings") || !strings.Contains(err.Error(), `verdict "not_exploitable" is not one of`) {
+		t.Errorf("three of twenty lost: %v", err)
+	}
+	r, warns, err := Validate(output(), file(2), aud, inv)
+	if err != nil || len(warns) != 1 || len(r.NotReviewed) != 2 {
+		t.Errorf("two of twenty lost: %v %v", err, warns)
+	}
+	// A finding that was left out, or that has a second entry, lost none.
+	var es []map[string]any
+	for i := 1; i <= 10; i++ {
+		es = append(es, entry(map[string]any{"findingId": fmt.Sprintf("f:%016d", i)}), entry(map[string]any{"findingId": fmt.Sprintf("f:%016d", i), "verdict": "not_exploitable"}))
+	}
+	if r, _, err := Validate(output(), lines(es...), aud, inv); err != nil || len(r.NotReviewed) != 10 {
+		t.Errorf("left out and written twice: %v", err)
+	}
+}
+
+func TestPromptNamesTheEntryValues(t *testing.T) {
+	for _, list := range [][]string{verdicts, exploitability, priorities} {
+		for _, v := range list {
+			if !strings.Contains(Prompt, "`"+v+"`") {
+				t.Errorf("the prompt lacks `%s`", v)
+			}
+		}
+	}
+	for _, want := range []string{"`verdict` is `confirmed`, `corrected`, `false_positive` or `added`", "never the exploitability", "more than a tenth"} {
+		if !strings.Contains(Prompt, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
 	}
 }
