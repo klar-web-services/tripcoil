@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/klar-web-services/tripcoil/internal/problem"
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,6 +47,52 @@ func readZosiaSecret(path string, stat config.StatFunc, read func(string) ([]byt
 
 func defaultZosiaSecret(path string) (string, bool, error) {
 	return readZosiaSecret(path, config.Stat, os.ReadFile)
+}
+
+// settingsTimeout is how long fetching Zosia's settings may take. It never holds up a run for longer.
+const settingsTimeout = 15 * time.Second
+
+// settingsCopy is the copy of the last settings fetched, in the state folder.
+const settingsCopy = "zosia-settings.json"
+
+// zosiaSettings fetches what Zosia tells this machine, once, before a run. Without a Zosia secret
+// there are none. When the fetch fails or its answer is no settings document, the copy of the last
+// fetch counts, and the run says so; it never fails a run.
+func zosiaSettings(ctx context.Context, d deps, cfg config.Config, rec *run.Record) zosia.Settings {
+	secret, connected, err := d.zosiaSecret(cfg.Zosia.SecretFile)
+	if !connected || err != nil || d.zosiaSettings == nil {
+		return zosia.Settings{}
+	}
+	now, copyPath := d.now(), filepath.Join(d.stateDir, settingsCopy)
+	why := ""
+	url, _, err := zosia.Target(cfg.Zosia.URL, cfg.Zosia.Key)
+	machine := ""
+	if err == nil {
+		machine, err = d.machineKey()
+	}
+	if err == nil {
+		ctx, cancel := context.WithTimeout(ctx, settingsTimeout)
+		defer cancel()
+		var data []byte
+		if data, err = d.zosiaSettings(ctx, url, secret, machine); err == nil {
+			var s zosia.Settings
+			if s, err = zosia.ParseSettings(data, now); err == nil {
+				if err := run.WriteFile(copyPath, data, 0o600); err != nil {
+					rec.Add(problem.New(problem.Notice, problem.ZosiaSettingsUnreachable, "", "Zosia's settings could not be kept for a run without Zosia: %v", err))
+				}
+				return s
+			}
+		}
+	}
+	why = oneLine(err.Error())
+	if data, err := os.ReadFile(copyPath); err == nil {
+		if s, err := zosia.ParseSettings(data, now); err == nil {
+			rec.Add(problem.New(problem.Notice, problem.ZosiaSettingsUnreachable, "", "Zosia's settings could not be fetched (%s); the copy of the last fetch is used", why))
+			return s
+		}
+	}
+	rec.Add(problem.New(problem.Notice, problem.ZosiaSettingsUnreachable, "", "Zosia's settings could not be fetched (%s), and there is no copy of an earlier fetch", why))
+	return zosia.Settings{}
 }
 
 // reportToZosia sends a finished run's report when the secret file exists. It never changes the
@@ -93,7 +141,7 @@ func reportToZosia(ctx context.Context, d deps, cfg config.Config, in report.Inp
 		fail("PAYLOAD", err.Error())
 		return
 	}
-	src := map[string]any{"machineKey": machine, "intervalSeconds": int(cfg.Interval.Std() / time.Second)}
+	src := map[string]any{"machineKey": machine, "intervalSeconds": int(cfg.Interval.Std() / time.Second), "settingsVersion": in.SettingsVersion}
 	if h := payload.Host; h != nil {
 		src["hostname"], src["os"], src["kernel"] = h.Hostname, h.Distro, h.Kernel
 	}

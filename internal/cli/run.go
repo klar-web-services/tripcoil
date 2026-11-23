@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/klar-web-services/tripcoil/internal/waiting"
 	"io"
 	"os"
 	"path/filepath"
@@ -140,6 +141,12 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 		return err
 	}
 
+	settings := zosiaSettings(ctx, d, cfg, rec)
+	clock, err := waiting.Read(d.stateDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "tripcoil: %s is damaged and starts over: %v\n", filepath.Join(d.stateDir, waiting.File), err)
+	}
+
 	inv, err := d.collect(ctx, cacheDir)
 	switch {
 	case ctx.Err() != nil:
@@ -187,6 +194,7 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 			rec.Add(aud.Warnings...)
 		}
 		countFindings(rec, aud)
+		waiting.Mark(aud, clock, settings.KeepWaiting, start)
 		if write("audit.json", aud) != nil && rec.Status != run.Interrupted {
 			rec.Stages["audit"] = run.StageFailed
 		}
@@ -219,7 +227,13 @@ func execute(ctx context.Context, d deps, cfg config.Config, trigger string, noR
 			rec.Status, rec.ExitCode = run.Failed, 2
 		}
 	}
-	in := report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, Reach: rv.reach, NoReview: why, Agent: rv.agentName()}
+	in := report.Input{Run: rec, Inventory: inv, Audit: aud, Facts: idx, Review: rev, Reach: rv.reach, NoReview: why, Agent: rv.agentName(), SettingsVersion: settings.Version}
+	if rev != nil && rec.Status != run.Interrupted {
+		waiting.Update(clock, report.WaitingCards(in), start)
+		if err := waiting.Write(d.stateDir, clock); err != nil {
+			fmt.Fprintf(stderr, "tripcoil: cannot write %s: %v\n", waiting.File, err)
+		}
+	}
 	md := report.Render(in)
 	verdict := report.VerdictOf(in, md)
 	rec.Verdict = &verdict

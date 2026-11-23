@@ -40,9 +40,12 @@ type canonical struct {
 	ContainerSec  []string `json:"containerSecurity"`
 	Sysctls       []string `json:"sysctls"`
 	Reach         []string `json:"reach"`
-	Prompt        string   `json:"prompt"`
-	Agent         string   `json:"agent"`
-	Model         string   `json:"model"`
+	// Overdue: the actions that have waited their 30 days for a fix. Becoming overdue asks for a
+	// fresh review, once.
+	Overdue []string `json:"overdue,omitempty"`
+	Prompt  string   `json:"prompt"`
+	Agent   string   `json:"agent"`
+	Model   string   `json:"model"`
 }
 
 func Compute(in Input) string {
@@ -52,6 +55,12 @@ func Compute(in Input) string {
 		for _, f := range in.Audit.Findings {
 			c.Findings = append(c.Findings, f.ID+" "+f.Risk+" "+f.Fix.State)
 		}
+		for _, a := range in.Audit.Actions {
+			if a.Waiting != nil && a.Waiting.Overdue {
+				c.Overdue = append(c.Overdue, a.Waiting.Key)
+			}
+		}
+		slices.Sort(c.Overdue)
 	}
 	if in.Inventory != nil {
 		for _, it := range in.Inventory.Items {

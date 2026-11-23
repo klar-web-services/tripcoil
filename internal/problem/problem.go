@@ -49,6 +49,8 @@ const (
 	ReviewReachApplied   = "REVIEW_REACH_APPLIED"
 	AgentNetworkRestored = "AGENT_NETWORK_RESTORED"
 	AgentUnitLeft        = "AGENT_UNIT_LEFT"
+	// ZosiaSettingsUnreachable: the settings Zosia keeps for this machine could not be fetched or were none.
+	ZosiaSettingsUnreachable = "ZOSIA_SETTINGS_UNREACHABLE"
 )
 
 type Problem struct {

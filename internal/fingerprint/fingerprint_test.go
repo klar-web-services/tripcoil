@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/audit"
 	"github.com/klar-web-services/tripcoil/internal/facts"
@@ -238,5 +239,20 @@ func TestComputeWithRoutersNames(t *testing.T) {
 	b.Reach.Routers[len(b.Reach.Routers)-1].NamesPointTo = "global"
 	if Compute(a) == Compute(b) {
 		t.Error("names that now point to a public address did not change the fingerprint")
+	}
+}
+
+func TestAnActionThatBecomesOverdueChangesTheFingerprint(t *testing.T) {
+	since := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	with := func(w *audit.Waiting) string {
+		return Compute(Input{Audit: &audit.Audit{Actions: []audit.Action{{ID: "a:aaaaaaaaaaaa", Waiting: w}}}})
+	}
+	never, waits := with(nil), with(&audit.Waiting{Key: "w:2ffdd1b1d089", Since: since, Days: 3})
+	overdue := with(&audit.Waiting{Key: "w:2ffdd1b1d089", Since: since, Days: 30, Overdue: true})
+	until := since.AddDate(0, 3, 0)
+	kept := with(&audit.Waiting{Key: "w:2ffdd1b1d089", Since: since, Days: 45, Overdue: true, Until: &until})
+	// Waiting on, another day, or being kept waiting asks for no new review; becoming overdue does, once.
+	if never != waits || waits == overdue || overdue != kept {
+		t.Errorf("never %s, waits %s, overdue %s, kept %s", never[:8], waits[:8], overdue[:8], kept[:8])
 	}
 }

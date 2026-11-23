@@ -27,6 +27,8 @@ type Input struct {
 	Reach    *facts.Reach
 	NoReview string
 	Agent    string
+	// SettingsVersion is the version of Zosia's settings the run was made with; 0 without any.
+	SettingsVersion int
 }
 
 // maxItems is how many items a finding names; the C library belongs to nearly every process.
