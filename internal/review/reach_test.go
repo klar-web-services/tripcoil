@@ -320,7 +320,7 @@ func TestPromptExplainsReach(t *testing.T) {
 func TestPromptExplainsRouteLimitsAndTheSummary(t *testing.T) {
 	for _, want := range []string{"a target also has `routes`", "`allow`", "none means every caller", "`redirect`", "100.64.0.0/10 and fd7a:115c:a1e0::/48",
 		"A target without `routes` says nothing about callers",
-		"7. Write the `summary`", "is not public", "Leave out false positives"} {
+		"7. Write the `summary`", "is not public", "Never mention a false positive, not even a critical or known-exploited one"} {
 		if !strings.Contains(Prompt, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}

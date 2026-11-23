@@ -12,7 +12,7 @@ func TestVersion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
-	if out.String() != "tripcoil dev\ngrype 0.121.2\nprompt 9\n" {
+	if out.String() != "tripcoil dev\ngrype 0.121.2\nprompt 10\n" {
 		t.Fatalf("stdout %q", out.String())
 	}
 }
