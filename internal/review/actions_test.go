@@ -239,7 +239,7 @@ func TestPromptNamesTheActionLimits(t *testing.T) {
 	}
 	for _, want := range []string{"six at most", "four at most", "twelve at most", "Never write a version in `to` that you did not see published", "at most three sentences",
 		"Give the command for everything a person can type", "A step does one thing", "names the file and what to change",
-		"start from the action's `update`", "never promise more than `afterUpdate` shows", "ignores your `to`"} {
+		"start from the action's `update`", "Never write a pull of the same tag", "never promise more than `afterUpdate` shows", "ignores your `to`"} {
 		if !strings.Contains(Prompt, want) {
 			t.Errorf("the prompt lacks %q", want)
 		}
