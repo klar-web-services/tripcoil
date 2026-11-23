@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/klar-web-services/tripcoil/internal/inventory"
 	"github.com/klar-web-services/tripcoil/internal/osrel"
@@ -60,6 +61,35 @@ type Action struct {
 	Counts      ActionCounts `json:"counts"`
 	// Update is, for an image, what pulling its tag would bring; nil when that was not looked at.
 	Update *Update `json:"update,omitempty"`
+	// Waiting is set while the action has had no fixed release and nothing left to do: since when,
+	// and whether its 30 days have passed. Nil for an action that never waited.
+	Waiting *Waiting `json:"waiting,omitempty"`
+}
+
+// WaitingDays is how long an action with no fixed release waits before it comes back.
+const WaitingDays = 30
+
+// Waiting is the clock of an action that waits for a fix.
+type Waiting struct {
+	Key   string    `json:"key"`
+	Since time.Time `json:"since"`
+	Days  int       `json:"days"`
+	// Overdue: it has waited WaitingDays and its steps now say what to do instead of waiting.
+	Overdue bool `json:"overdue"`
+	// Until is set while Zosia's settings keep an overdue action waiting.
+	Until *time.Time `json:"until,omitempty"`
+}
+
+// WaitingKey names an action across runs for its waiting clock. An image's key is made from its
+// reference, not from its image ID as the action's ID is: pulling a rebuilt image that still has
+// no fix must not start the clock again.
+func WaitingKey(a Action) string {
+	about := a.ID
+	if a.Kind == ActionImage && a.Target != "" {
+		about = a.Target
+	}
+	sum := sha256.Sum256([]byte(a.Kind + "\x00" + about))
+	return "w:" + hex.EncodeToString(sum[:6])
 }
 
 // Change is one package inside the thing: the installed version and the lowest version that

@@ -56,6 +56,15 @@ func WriteState(stateDir string, s State) error {
 	return writeAtomic(statePath(stateDir), append(data, '\n'), 0o600, false)
 }
 
+// WritePrivate writes a file of the state folder that only root reads, as state.json is written.
+func WritePrivate(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, append(data, '\n'), 0o600, false)
+}
+
 func (s *State) Record(r *Record) {
 	if r.Status == Interrupted {
 		return
