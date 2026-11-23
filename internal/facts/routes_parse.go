@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -28,6 +29,27 @@ type parsed struct {
 	gaps []string
 	// hosts are the names the program's hosts file gives an address.
 	hosts map[string]string
+	// routers, services and middlewares are what Traefik's routing files say about who may call a
+	// target, each by protocol and name (routesTo); loose says that they do not settle it.
+	routers     map[string]traefikRouter
+	services    map[string][]string
+	middlewares map[string]traefikMiddleware
+	loose       bool
+}
+
+type traefikRouter struct {
+	service     string
+	middlewares []string
+	tls         bool
+	route       Route
+}
+
+// traefikMiddleware is what a middleware does to callers: an allow-list of source ranges, a
+// redirect to a scheme, or further middlewares it stands for.
+type traefikMiddleware struct {
+	allow    []string
+	redirect string
+	chain    []string
 }
 
 const (
@@ -35,6 +57,10 @@ const (
 	maxGapLen = 200
 	// maxRouteValues bounds the targets, and the hostnames, kept of one program.
 	maxRouteValues = 500
+	// What is kept of the routes to one target, and of one route: more says nothing, or less.
+	maxTargetRoutes = 50
+	maxRouteList    = 20
+	maxRouteText    = 200
 )
 
 // gap notes why the routing is not fully known. Parts of the sentence come from a command line or a
@@ -87,6 +113,22 @@ func (p *parsed) add(o parsed) {
 	if p.hosts == nil {
 		p.hosts = o.hosts
 	}
+	// A name that two files define is one Traefik may drop or take from either.
+	p.loose = p.loose || o.loose || merge(&p.routers, o.routers) || merge(&p.services, o.services) || merge(&p.middlewares, o.middlewares)
+}
+
+// merge adds src to dst and reports whether a key was in both.
+func merge[V any](dst *map[string]V, src map[string]V) (twice bool) {
+	for k, v := range src {
+		if *dst == nil {
+			*dst = map[string]V{}
+		}
+		if _, ok := (*dst)[k]; ok {
+			twice = true
+		}
+		(*dst)[k] = v
+	}
+	return twice
 }
 
 // hostsFile reads the names of a hosts file: "address name name".
@@ -519,6 +561,103 @@ func ruleHosts(rule string) []string {
 	return out
 }
 
+var pathRule = regexp.MustCompile("Path(?:Prefix)?\\(([^)]*)\\)")
+
+// rulePaths are the paths and path prefixes a Traefik rule is limited to. It names none for a rule
+// that is more than conditions joined by "and": such a rule may let other paths through.
+func rulePaths(rule string) []string {
+	if strings.Contains(rule, "||") || strings.Contains(rule, "!") {
+		return nil
+	}
+	var out []string
+	for _, m := range pathRule.FindAllStringSubmatch(rule, -1) {
+		for _, q := range quoted.FindAllStringSubmatch(m[1], -1) {
+			if !strings.HasPrefix(q[1], "/") || !plain(q[1]) || len(out) == maxRouteList {
+				return nil
+			}
+			out = append(out, q[1])
+		}
+	}
+	return out
+}
+
+// plain reports that a value from a file is short and printable.
+func plain(s string) bool {
+	return len(s) <= maxRouteText && !strings.ContainsFunc(s, func(r rune) bool { return !unicode.IsPrint(r) })
+}
+
+// words are the strings of a YAML list; ok is false when it is none or holds something else.
+func words(v any) (out []string, ok bool) {
+	list, ok := v.([]any)
+	for _, e := range list {
+		s, isString := e.(string)
+		if !isString {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, ok
+}
+
+// routesTo are, for each target, the routers of Traefik's files that forward to it. It is nil where
+// the files do not settle that: a router whose service they do not hold, a service that spreads
+// over other services, a name defined twice, an allow-list Tripcoil cannot read.
+func (p parsed) routesTo() map[string][]Route {
+	if p.loose {
+		return nil
+	}
+	out := map[string][]Route{}
+	for key, r := range p.routers {
+		proto, _, _ := strings.Cut(key, "\x00")
+		service := strings.TrimSuffix(r.service, "@file")
+		if strings.HasSuffix(service, "@internal") { // Traefik's own dashboard and API
+			continue
+		}
+		targets, ok := p.services[proto+"\x00"+service]
+		if !ok {
+			return nil
+		}
+		route := r.route
+		for _, m := range p.inFront(proto, r.middlewares, 0) {
+			// Of several allow-lists the first is named: what passes all of them passes that one.
+			if route.Allow == nil {
+				route.Allow = m.allow
+			}
+			// A router without TLS takes plain requests only, and the redirect sends each of them away.
+			if m.redirect == "https" && !r.tls {
+				route.Redirect = m.redirect
+			}
+		}
+		for _, t := range targets {
+			out[t] = append(out[t], route)
+		}
+	}
+	for t, routes := range out {
+		if len(routes) > maxTargetRoutes {
+			delete(out, t)
+			continue
+		}
+		slices.SortFunc(routes, func(x, y Route) int {
+			a, _ := json.Marshal(x)
+			b, _ := json.Marshal(y)
+			return strings.Compare(string(a), string(b))
+		})
+	}
+	return out
+}
+
+// inFront are the middlewares of the given names that the files define, with those a chain stands for.
+func (p parsed) inFront(proto string, names []string, deep int) (out []traefikMiddleware) {
+	for _, n := range names {
+		m, ok := p.middlewares[proto+"\x00"+strings.TrimSuffix(n, "@file")]
+		if !ok || deep > maxIncludeDeep {
+			continue
+		}
+		out = append(append(out, m), p.inFront(proto, m.chain, deep+1)...)
+	}
+	return out
+}
+
 // lookup walks nested YAML maps; keys compare without case, as Traefik reads them.
 func lookup(v any, keys ...string) any {
 	for _, k := range keys {
@@ -567,10 +706,10 @@ func traefikStatic(text string) parsed {
 	return p
 }
 
-// traefikDynamic reads a file of Traefik's file provider: the routers' host rules and the
-// services' servers.
+// traefikDynamic reads a file of Traefik's file provider: the routers' rules, the services'
+// servers, and of the middlewares the allow-lists and redirects.
 func traefikDynamic(text string) parsed {
-	var p parsed
+	p := parsed{routers: map[string]traefikRouter{}, services: map[string][]string{}, middlewares: map[string]traefikMiddleware{}}
 	var doc map[string]any
 	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
 		p.gap("a routing file is not YAML that Tripcoil can read")
@@ -578,14 +717,22 @@ func traefikDynamic(text string) parsed {
 	}
 	for _, proto := range []string{"http", "tcp", "udp"} {
 		routers, _ := lookup(doc, proto, "routers").(map[string]any)
-		for _, r := range routers {
-			if rule, ok := lookup(r, "rule").(string); ok {
-				p.hostnames = append(p.hostnames, ruleHosts(rule)...)
+		for name, r := range routers {
+			rule, _ := lookup(r, "rule").(string)
+			hosts := ruleHosts(rule)
+			p.hostnames = append(p.hostnames, hosts...)
+			tr := traefikRouter{tls: lookup(r, "tls") != nil, route: Route{Hostnames: slices.Compact(slices.Sorted(slices.Values(hosts))), Paths: rulePaths(rule)}}
+			tr.service, _ = lookup(r, "service").(string)
+			tr.middlewares, _ = words(lookup(r, "middlewares"))
+			if entries, _ := words(lookup(r, "entryPoints")); len(entries) <= maxRouteList && !slices.ContainsFunc(entries, func(e string) bool { return !plain(e) }) {
+				tr.route.EntryPoints = entries
 			}
+			p.routers[proto+"\x00"+name] = tr
 		}
 		services, _ := lookup(doc, proto, "services").(map[string]any)
-		for _, s := range services {
+		for name, s := range services {
 			servers, _ := lookup(s, "loadBalancer", "servers").([]any)
+			targets := []string{}
 			for _, srv := range servers {
 				addr, _ := lookup(srv, "url").(string)
 				if addr == "" {
@@ -593,13 +740,49 @@ func traefikDynamic(text string) parsed {
 				}
 				if t, ok := target(addr); ok {
 					p.targets = append(p.targets, t)
+					targets = append(targets, t)
 				} else {
 					p.gap("a service's server is not an address Tripcoil can read")
 				}
 			}
+			// A service of another kind (weighted, mirroring, failover) passes on to services, not servers.
+			if lookup(s, "loadBalancer") == nil {
+				p.loose = true
+				continue
+			}
+			p.services[proto+"\x00"+name] = targets
+		}
+		middlewares, _ := lookup(doc, proto, "middlewares").(map[string]any)
+		for name, m := range middlewares {
+			var tm traefikMiddleware
+			for _, kind := range []string{"ipAllowList", "ipWhiteList"} {
+				list := lookup(m, kind)
+				if list == nil {
+					continue
+				}
+				// With an ipStrategy the list is held against a header, not against the caller's address.
+				ranges, ok := words(lookup(list, "sourceRange"))
+				if !ok || len(ranges) == 0 || len(ranges) > maxRouteList || lookup(list, "ipStrategy") != nil || slices.ContainsFunc(ranges, func(r string) bool { return !sourceRange(r) }) {
+					p.loose = true
+					continue
+				}
+				tm.allow = ranges
+			}
+			if scheme, _ := lookup(m, "redirectScheme", "scheme").(string); strings.EqualFold(scheme, "https") {
+				tm.redirect = "https"
+			}
+			tm.chain, _ = words(lookup(m, "chain", "middlewares"))
+			p.middlewares[proto+"\x00"+name] = tm
 		}
 	}
 	return p
+}
+
+// sourceRange reports that s is an address or a range of addresses.
+func sourceRange(s string) bool {
+	_, errRange := netip.ParsePrefix(s)
+	_, errAddr := netip.ParseAddr(s)
+	return errRange == nil || errAddr == nil
 }
 
 // cloudflaredConf reads cloudflared's configuration: the ingress rules of a tunnel that is

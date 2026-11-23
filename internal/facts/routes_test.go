@@ -216,7 +216,8 @@ func TestRoutesServer(t *testing.T) {
 	root, guest := t.TempDir(), t.TempDir()
 	write(t, guest, "etc/traefik/traefik.yml", traefikMain)
 	write(t, guest, "etc/dokploy/traefik/dynamic/dokploy.yml", traefikPanel)
-	write(t, guest, "etc/dokploy/traefik/dynamic/site.yml", "http:\n  routers:\n    s:\n      rule: Host(`shop.example.org`)\n  services:\n    s:\n      loadBalancer:\n        servers:\n          - url: http://shop:3000\n")
+	write(t, guest, "etc/dokploy/traefik/dynamic/middlewares.yml", traefikShared)
+	write(t, guest, "etc/dokploy/traefik/dynamic/site.yml", "http:\n  routers:\n    s:\n      rule: Host(`shop.example.org`)\n      service: s\n  services:\n    s:\n      loadBalancer:\n        servers:\n          - url: http://shop:3000\n")
 	write(t, guest, "etc/dokploy/traefik/dynamic/acme.json", `{"letsencrypt":{"Account":{"PrivateKey":"planted"}}}`)
 	write(t, guest, "etc/dokploy/traefik/dynamic/access.log", "GET /\n")
 	proc(t, root, 900, "traefik", guest, []string{"traefik"})
@@ -282,6 +283,27 @@ func TestRoutesServer(t *testing.T) {
 		if strings.Contains(fmt.Sprint(p), "planted") || strings.Contains(fmt.Sprint(p), "PLANTED") {
 			t.Errorf("a secret left a configuration: %+v", p)
 		}
+	}
+
+	// The panel's target says who may call it: the allow-list of one router, the public path of
+	// another, and the redirect that a middleware of another file gives the third.
+	panel := func() []Route {
+		for _, p := range c.routes(n, conts, Addresses{}).Programs {
+			for _, tg := range p.Targets {
+				if tg.Target == "dokploy:3000" {
+					return tg.Routes
+				}
+			}
+		}
+		return nil
+	}
+	if got := panel(); len(got) != 3 || !reflect.DeepEqual(got[0].Paths, []string{"/api/deploy/"}) || got[1].Redirect != "https" || !reflect.DeepEqual(got[2].Allow, []string{"100.64.0.0/10"}) {
+		t.Errorf("the panel's routes: %+v", got)
+	}
+	// A routing file that could not be read may hold another router to the panel: nothing is said.
+	write(t, guest, "etc/dokploy/traefik/dynamic/broken.yml", "http: [")
+	if got := panel(); got != nil {
+		t.Errorf("the panel's routes beside a file that was not read: %+v", got)
 	}
 
 	// Without its command-line tool Tailscale cannot be asked: it may publish anything.

@@ -247,14 +247,30 @@ const traefikPanel = `http:
         users:
           - "admin:$apr1$PLANTED$hash"
   routers:
+    dokploy-router-app:
+      rule: Host(` + "`fkws.example`" + `)
+      service: dokploy-service-app
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
     dokploy-router-app-secure:
       rule: Host(` + "`fkws.example`" + `)
       service: dokploy-service-app
+      entryPoints:
+        - websecure
       middlewares:
         - tailnet-only
+        - auth
+      tls:
+        certResolver: letsencrypt
     dokploy-router-webhooks-secure:
       rule: Host(` + "`fkws.example`, `www.fkws.example`" + `) && PathPrefix(` + "`/api/deploy/`" + `)
       service: dokploy-service-app
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
   services:
     dokploy-service-app:
       loadBalancer:
@@ -265,11 +281,21 @@ tcp:
   routers:
     db:
       rule: HostSNI(` + "`db.fkws.example`" + `)
+      service: db
   services:
     db:
       loadBalancer:
         servers:
           - address: 10.0.1.5:5432
+`
+
+// The file beside it that holds the middlewares every routing file may use.
+const traefikShared = `http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
 `
 
 func TestTraefik(t *testing.T) {
@@ -298,6 +324,76 @@ func TestTraefik(t *testing.T) {
 	}
 	if p := traefikDynamic("[http.routers]\n"); len(p.gaps) != 1 {
 		t.Errorf("a file that is not YAML: %+v", p)
+	}
+}
+
+// Who may call a target: each router of Traefik's files that forwards to it, with the allow-list,
+// the path rule and the redirect in front of it.
+func TestTraefikRoutes(t *testing.T) {
+	p := traefikDynamic(traefikPanel)
+	p.add(traefikDynamic(traefikShared))
+	want := map[string][]Route{
+		"dokploy:3000": {
+			{Hostnames: []string{"fkws.example", "www.fkws.example"}, Paths: []string{"/api/deploy/"}, EntryPoints: []string{"websecure"}},
+			{Hostnames: []string{"fkws.example"}, EntryPoints: []string{"web"}, Redirect: "https"},
+			{Hostnames: []string{"fkws.example"}, EntryPoints: []string{"websecure"}, Allow: []string{"100.64.0.0/10"}},
+		},
+		"10.0.1.5:5432": {{Hostnames: []string{"db.fkws.example"}}},
+	}
+	if got := p.routesTo(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the panel's routes:\n got %+v\nwant %+v", got, want)
+	}
+	if s := fmt.Sprint(p.routesTo()); strings.Contains(s, "PLANTED") || strings.Contains(s, "admin") {
+		t.Errorf("a secret left the file: %s", s)
+	}
+
+	const service = "  services:\n    s:\n      loadBalancer:\n        servers:\n          - url: http://app:3000\n"
+	router := func(rule, more string) string {
+		return "http:\n  routers:\n    r:\n      rule: " + rule + "\n      service: s\n" + more + service
+	}
+	// A rule that is more than conditions joined by "and" may let other paths through as well.
+	for name, rule := range map[string]string{
+		"or":      "Host(`a.example`) || PathPrefix(`/api/`)",
+		"not":     "Host(`a.example`) && !PathPrefix(`/admin/`)",
+		"regexp":  "Host(`a.example`) && PathRegexp(`^/api/`)",
+		"no path": "Host(`a.example`)",
+	} {
+		got := traefikDynamic(router(rule, "")).routesTo()["app:3000"]
+		if len(got) != 1 || len(got[0].Paths) != 0 || !reflect.DeepEqual(got[0].Hostnames, []string{"a.example"}) {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+	if got := traefikDynamic(router("Host(`a.example`) && (Path(`/x`, `/y`))", "")).routesTo()["app:3000"]; len(got) != 1 || !reflect.DeepEqual(got[0].Paths, []string{"/x", "/y"}) {
+		t.Errorf("two paths: %+v", got)
+	}
+	// A router with TLS that carries the redirect forwards what it gets: no redirect is claimed.
+	if got := traefikDynamic(router("Host(`a.example`)", "      tls: {}\n      middlewares: [to-https]\n  middlewares:\n    to-https:\n      redirectScheme:\n        scheme: https\n")).routesTo()["app:3000"]; len(got) != 1 || got[0].Redirect != "" {
+		t.Errorf("a redirect on a TLS router: %+v", got)
+	}
+	// An allow-list inside a chain counts; a middleware that no file defines limits nothing.
+	if got := traefikDynamic(router("Host(`a.example`)", "      middlewares: [both@file, other@docker]\n  middlewares:\n    both:\n      chain:\n        middlewares: [lan]\n    lan:\n      ipWhiteList:\n        sourceRange: [192.168.0.0/16, 127.0.0.1]\n")).routesTo()["app:3000"]; len(got) != 1 || !reflect.DeepEqual(got[0].Allow, []string{"192.168.0.0/16", "127.0.0.1"}) {
+		t.Errorf("an allow-list in a chain: %+v", got)
+	}
+
+	// Where the files do not settle who calls what, nothing is said of any target.
+	for name, text := range map[string]string{
+		"a router to a service no file has":   "http:\n  routers:\n    r:\n      rule: Host(`a.example`)\n      service: gone\n" + service,
+		"a service that spreads over others":  router("Host(`a.example`)", "") + "    w:\n      weighted:\n        services:\n          - name: s\n",
+		"an allow-list by a forwarded header": router("Host(`a.example`)", "      middlewares: [m]\n  middlewares:\n    m:\n      ipAllowList:\n        sourceRange: [10.0.0.0/8]\n        ipStrategy:\n          depth: 1\n"),
+		"a source range that is none":         router("Host(`a.example`)", "      middlewares: [m]\n  middlewares:\n    m:\n      ipAllowList:\n        sourceRange: ['{{ env \"RANGE\" }}']\n"),
+	} {
+		if got := traefikDynamic(text).routesTo(); got != nil {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+	twice := traefikDynamic(router("Host(`a.example`)", ""))
+	twice.add(traefikDynamic(router("Host(`b.example`)", "")))
+	if got := twice.routesTo(); got != nil {
+		t.Errorf("a router two files define: %+v", got)
+	}
+	// Traefik's own services (its dashboard) are no target.
+	if got := traefikDynamic("http:\n  routers:\n    api:\n      rule: Host(`t.example`)\n      service: api@internal\n").routesTo(); got == nil || len(got) != 0 {
+		t.Errorf("a router to Traefik itself: %+v", got)
 	}
 }
 

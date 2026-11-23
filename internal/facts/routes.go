@@ -112,6 +112,22 @@ type RouteTarget struct {
 	Target string `json:"target"`
 	// Item is the item that answers there, when it is one of this machine's.
 	Item string `json:"item,omitempty"`
+	// Routes are the routers of the program's routing files that forward to the target, where
+	// Tripcoil reads them (Traefik's file provider) and they settle it. A router that a container's
+	// labels define is not among them. A target without routes says nothing about its callers.
+	Routes []Route `json:"routes,omitempty"`
+}
+
+// Route is what one router says about who may call a target, as its file writes it.
+type Route struct {
+	Hostnames []string `json:"hostnames,omitempty"`
+	// Paths are the paths and path prefixes the router is limited to; none means every path.
+	Paths       []string `json:"paths,omitempty"`
+	EntryPoints []string `json:"entryPoints,omitempty"`
+	// Allow are the source ranges of an IP allow-list in front of the router; none means every caller.
+	Allow []string `json:"allow,omitempty"`
+	// Redirect: the router takes plain requests only and answers them with a redirect to this scheme.
+	Redirect string `json:"redirect,omitempty"`
 }
 
 // The programs whose routing Tripcoil reads, and those it only knows by name.
@@ -616,6 +632,12 @@ func (c collector) routes(n Network, conts []Container, a Addresses) Routes {
 		slices.Sort(p.gaps)
 		rp.Gaps = slices.Compact(p.gaps)
 		rp.Complete = len(rp.Gaps) == 0
+		// A file that was not read may hold another router to the same target.
+		if routes := p.routesTo(); rp.Complete {
+			for i, t := range rp.Targets {
+				rp.Targets[i].Routes = routes[t.Target]
+			}
+		}
 		if lookups.IsZero() && len(rp.Hostnames) > 0 {
 			lookups = time.Now().Add(maxResolveTime)
 		}
