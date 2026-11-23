@@ -315,3 +315,14 @@ func TestPromptExplainsReach(t *testing.T) {
 		}
 	}
 }
+
+// The route facts name who may call a target, and the summary says of a service what they show.
+func TestPromptExplainsRouteLimitsAndTheSummary(t *testing.T) {
+	for _, want := range []string{"a target also has `routes`", "`allow`", "none means every caller", "`redirect`", "100.64.0.0/10 and fd7a:115c:a1e0::/48",
+		"A target without `routes` says nothing about callers",
+		"7. Write the `summary`", "is not public", "Leave out false positives"} {
+		if !strings.Contains(Prompt, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
+	}
+}
