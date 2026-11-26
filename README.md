@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/tripcoil_logo_icon_dark_mode.svg">
+  <img src="assets/tripcoil_logo_icon_light_mode.svg" alt="Tripcoil logo" height="72">
+</picture>
+
 # Tripcoil
 
 Tripcoil watches a running Linux server: it finds what is running, audits the running versions for
